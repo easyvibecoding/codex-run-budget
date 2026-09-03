@@ -3,10 +3,9 @@ from __future__ import annotations
 
 import json
 import py_compile
+import re
 import sys
 from pathlib import Path
-
-import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "plugins" / "codex-run-budget"
@@ -35,12 +34,21 @@ def main() -> int:
         (ROOT / ".agents" / "plugins" / "marketplace.json").read_text(encoding="utf-8")
     )
     hooks = json.loads((PLUGIN / "hooks" / "hooks.json").read_text(encoding="utf-8"))
-    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    project_text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    project_version = re.search(
+        r'^\[project\]\s*$.*?^version\s*=\s*"([^"]+)"\s*$',
+        project_text,
+        re.MULTILINE | re.DOTALL,
+    )
+    package_text = (PLUGIN / "lib" / "codex_run_budget" / "__init__.py").read_text(encoding="utf-8")
+    package_version = re.search(r'^__version__\s*=\s*"([^"]+)"\s*$', package_text, re.MULTILINE)
 
     if manifest["name"] != "codex-run-budget":
         fail("plugin name mismatch")
-    if manifest["version"] != project["project"]["version"]:
+    if not project_version or manifest["version"] != project_version.group(1):
         fail("plugin and project versions differ")
+    if not package_version or manifest["version"] != package_version.group(1):
+        fail("plugin and package versions differ")
     entries = [item for item in marketplace["plugins"] if item["name"] == manifest["name"]]
     if len(entries) != 1:
         fail("marketplace must contain exactly one codex-run-budget entry")

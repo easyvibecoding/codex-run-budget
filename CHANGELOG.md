@@ -2,6 +2,10 @@
 
 All notable changes to this project are documented here.
 
+## 0.1.1 - 2026-09-03
+
+- Make the repository validator compatible with the declared Python 3.10 minimum.
+
 ## 0.1.0 - 2026-09-03
 
 - Add a dependency-free Codex Plugin with lifecycle hooks and a run-budget skill.
