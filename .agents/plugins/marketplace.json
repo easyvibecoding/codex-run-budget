@@ -1,0 +1,20 @@
+{
+  "name": "codex-run-budget",
+  "interface": {
+    "displayName": "Codex Run Budget"
+  },
+  "plugins": [
+    {
+      "name": "codex-run-budget",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codex-run-budget"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

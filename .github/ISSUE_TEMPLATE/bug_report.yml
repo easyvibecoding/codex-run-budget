@@ -1,0 +1,30 @@
+name: Bug report
+description: Report a reproducible Codex Run Budget problem
+body:
+  - type: markdown
+    attributes:
+      value: Do not paste prompts, transcripts, secrets, or private filesystem paths.
+  - type: input
+    id: version
+    attributes:
+      label: Plugin version
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true

@@ -1,0 +1,38 @@
+{
+  "name": "codex-run-budget",
+  "version": "0.1.0",
+  "description": "Observed run-scoped token governance, lineage, STEER, and next-boundary HALT for Codex sessions and subagents.",
+  "author": {
+    "name": "EasyVibeCoding",
+    "url": "https://github.com/easyvibecoding"
+  },
+  "homepage": "https://github.com/easyvibecoding/codex-run-budget",
+  "repository": "https://github.com/easyvibecoding/codex-run-budget",
+  "license": "MIT",
+  "keywords": [
+    "codex",
+    "budget",
+    "tokens",
+    "governance",
+    "multi-agent",
+    "hooks"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Codex Run Budget",
+    "shortDescription": "Shared token budgets for Codex and subagents.",
+    "longDescription": "Adds a local shared ledger, token lineage, deterministic STEER guidance, and next-supported-boundary HALT controls through Codex lifecycle hooks.",
+    "developerName": "EasyVibeCoding",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Hooks"
+    ],
+    "websiteURL": "https://github.com/easyvibecoding/codex-run-budget",
+    "defaultPrompt": [
+      "Start a 100k shared run budget for this task.",
+      "Show the current run-budget status.",
+      "Explain this run's token lineage."
+    ]
+  }
+}
