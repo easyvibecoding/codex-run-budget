@@ -37,6 +37,26 @@ codex plugin add codex-run-budget@codex-run-budget
 Start a new Codex task after installation. Review and trust the bundled hooks
 when Codex prompts you; untrusted hooks are skipped by design.
 
+### Updating an installed version
+
+With other Codex tasks idle, run from this checkout:
+
+```sh
+python3 scripts/update_plugin.py
+```
+
+The helper calls the official installer, snapshots existing version directories,
+and restores versions removed by installation even when the installer fails.
+Older tasks can still invoke their original hook code; new tasks load the new
+version. Recovery copies remain in the sibling `run-budget-retained` directory.
+The helper does not alter trust, enabled states, or budget policy.
+
+Direct `codex plugin add` can delete the cache referenced by an active task and
+cause repeated PreToolUse/Stop errors. There is still a brief removal/restore
+interval during installation, so keep other tasks idle. This helper cannot fix
+Codex cache lifecycle internally or recover versions already deleted before its
+first use. Retained versions should only be removed after their tasks have ended.
+
 For local development:
 
 ```sh

@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here.
 
+## 0.2.1 - 2026-09-06
+
+- Add an update helper that snapshots installed plugin versions and restores
+  removed versions after both successful and failed installs, preserving hook
+  paths still used by older tasks.
+- Document idle-task updates and persistent recovery copies; do not alter hook
+  trust, enabled states, or governance policy during installation.
+- Validate retained old/new hooks and a real Codex exec lifecycle after recovery.
+
 ## 0.2.0 - 2026-09-06
 
 - Add a read-only `audit` command for existing Codex task/tool transcripts.

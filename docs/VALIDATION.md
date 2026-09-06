@@ -1,5 +1,35 @@
 # Validation evidence
 
+## Upgrade recovery and restart — 2026-09-06, v0.2.1
+
+Incident: directly installing v0.2.0 removed the v0.1.1 cache while an existing
+task still referenced its absolute hook path. PreToolUse and Stop then failed
+before the Python hook could run. The operator disabled this plugin's hooks.
+
+Recovery and observed validation:
+
+- Restored the original v0.1.1 plugin tree from commit `c4b9a89`, comparing all
+  11 tracked files against Git. No stub or alternate policy replaced old hooks.
+- Re-enabled only this plugin's 11 previously disabled hook entries; preserved
+  their trust hashes and verified all other configuration was unchanged.
+- Ran `python3 scripts/update_plugin.py` to install v0.2.1. The actual installer
+  removed old caches; the helper restored v0.1.1 and v0.2.0 before returning.
+- Invoked PreToolUse and Stop through each of the three installed versions with
+  isolated ungoverned state. All six invocations exited 0.
+- Ran a fresh `codex exec --skip-git-repo-check --json` with read-only sandbox,
+  the normal saved hook settings, and a `run-budget:status` prompt asking for one
+  `pwd` call followed by `HOOK_RESTART_OK`. No hook trust bypass was used.
+- The shell call succeeded, the expected final text arrived, and the process
+  exited 0. Reported usage: 51,911 input, 25,728 cached input, 71 output tokens.
+  No missing-hook error recurred. Unrelated existing feature/icon warnings were
+  present. No budget was started, so this is a lifecycle recovery smoke test,
+  not a new token-HALT measurement.
+
+The helper mitigates the observed cache deletion; it does not change Codex's
+cache manager or eliminate the install/restore interval. Other tasks should be
+idle during updates. Backups remain available if installation is interrupted.
+Hooks are enabled; this test did not restart the desktop app or other tasks.
+
 ## Automated suite
 
 The dependency-free test suite covers transcript reconciliation, shared parent
