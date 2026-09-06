@@ -1,6 +1,6 @@
 {
   "name": "codex-run-budget",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Observed run-scoped token governance, lineage, STEER, and next-boundary HALT for Codex sessions and subagents.",
   "author": {
     "name": "EasyVibeCoding",

@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from .audit import audit_transcript
 from .governor import Governor
 from .ledger import Ledger
 from .util import data_dir, parse_count, stable_hash
@@ -46,8 +47,11 @@ def build_parser() -> argparse.ArgumentParser:
         prog="run-budget",
         description="Inspect and operate the local Codex Run Budget ledger.",
     )
-    parser.add_argument("--data-dir", type=Path, default=data_dir())
+    parser.add_argument("--data-dir", type=Path)
     sub = parser.add_subparsers(dest="command", required=True)
+
+    audit = sub.add_parser("audit", help="read-only, privacy-preserving transcript diagnostics")
+    audit.add_argument("transcript", type=Path)
 
     listing = sub.add_parser("list", help="list recent governed runs")
     listing.add_argument("--limit", type=int, default=20)
@@ -75,7 +79,17 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    governor = Governor(args.data_dir)
+    if args.command == "audit":
+        try:
+            print(json.dumps(audit_transcript(args.transcript), indent=2, sort_keys=True))
+            return 0
+        except (OSError, ValueError):
+            print(
+                "run-budget: cannot audit transcript (unreadable or unsupported file)",
+                file=sys.stderr,
+            )
+            return 2
+    governor = Governor(args.data_dir or data_dir())
     ledger = governor.ledger
     try:
         if args.command == "list":

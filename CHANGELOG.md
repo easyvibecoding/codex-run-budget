@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here.
 
+## 0.2.0 - 2026-09-06
+
+- Add a read-only `audit` command for existing Codex task/tool transcripts.
+- Separate deduplicated request usage from cumulative snapshots; expose cache
+  usage, cumulative decreases, accounting differences, and largest requests.
+- Report tool output sizes, observed spans, repeated calls and post-compaction
+  repetitions without exporting raw tool data or opening the governance ledger.
+- Validate against recent real task records; retain existing enforcement limits.
+
 ## 0.1.1 - 2026-09-03
 
 - Make the repository validator compatible with the declared Python 3.10 minimum.

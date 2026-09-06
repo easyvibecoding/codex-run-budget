@@ -173,6 +173,39 @@ python3 plugins/codex-run-budget/scripts/run_budget.py events latest
 
 ## Development
 
+### Audit recent task and tool records
+
+Analyze an existing local Codex JSONL transcript, including tasks that never
+enabled a budget:
+
+```sh
+python3 plugins/codex-run-budget/scripts/run_budget.py audit /path/to/rollout.jsonl
+```
+
+The JSON report is read-only and does not open the governance ledger. It reports:
+
+- Request usage deduplicated by response ID, with cached and uncached input
+  separated, plus the largest observed request for budget planning.
+- The latest cumulative snapshot, cumulative decreases, and its difference from
+  request totals. These accounting views are never added together.
+- Tool call counts, UTF-8 output sizes, call/output elapsed spans, repeated inputs,
+  and repetitions after compaction. Tool identities and source paths are hashed.
+- Missing, partial, duplicate, conflicting, and unmatched records as diagnostics.
+
+Repeated calls are investigation candidates: polling, changed external state,
+and required verification can justify them. Timings may overlap and include
+waiting. Nested calls inside `exec` are opaque. A single transcript is not a full
+session-tree accounting report; do not sum parent/child reports without verifying
+their accounting scopes. No request records means unknown usage, not zero. A
+nonzero accounting difference or invalid records requires investigation before
+using totals for comparisons. No prices or savings are inferred.
+
+Only the initial file-size snapshot is read (maximum 256 MiB); a trailing partial
+line is reported and skipped. Raw prompts, names, arguments, outputs, response
+IDs, and paths are not emitted. See [audit validation](docs/AUDIT_VALIDATION.md).
+
+### Checks
+
 ```sh
 python3 -m unittest discover -s tests -v
 python3 scripts/validate_repo.py
