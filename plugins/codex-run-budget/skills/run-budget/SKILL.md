@@ -24,7 +24,7 @@ Supported start options:
 - `warn`: STEER threshold, default `80%`.
 - `block_agents`: stop admitting new subagents, default `90%`.
 - `tools`: tool-call ceiling, default `200`.
-- `agents`: concurrently active subagent ceiling, default `4`.
+- `agents`: combined pending and active subagent ceiling, default `4`.
 - `inflight`: in-flight local tool-call ceiling, default `8`.
 - `output`: maximum serialized tool-result characters, default `50k`.
 - `repeat_steer`: identical-call warning, default `3`.
@@ -47,6 +47,15 @@ run-budget:off
 `resume tokens=` is an absolute ceiling and must exceed observed spend.
 `start` creates a new epoch with a fresh counter baseline while preserving old
 lineage events.
+
+Put controls and their options on the first line; examples elsewhere in a
+message are not commands. Status reports `usage_status`: `pending` means no
+usage has been reported yet; `unavailable` preserves previous counters and
+pauses supported admissions under `fail=closed`. Valid observations recover
+automatically. Do not reset the epoch merely to bypass missing data.
+
+Changed output hashes reset repeat streaks; explicit wait/poll tools are exempt
+from the repeat guard, but not token, tool-call, or in-flight ceilings.
 
 ## Explain enforcement accurately
 

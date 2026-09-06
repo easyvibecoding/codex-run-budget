@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 MAX_TRANSCRIPT_BYTES = 256 * 1024 * 1024
+MAX_USAGE_SCAN_BYTES = 8 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -26,12 +27,11 @@ class Usage:
         )
 
 
-def _as_nonnegative_int(value: Any) -> int:
-    if isinstance(value, bool):
-        return 0
-    if isinstance(value, (int, float)) and value >= 0:
-        return int(value)
-    return 0
+@dataclass(frozen=True)
+class Observation:
+    usage: Usage | None
+    state: str
+    reason: str | None = None
 
 
 def _usage_from_line(record: Any) -> Usage | None:
@@ -42,40 +42,89 @@ def _usage_from_line(record: Any) -> Usage | None:
         return None
     info = payload.get("info")
     totals = info.get("total_token_usage") if isinstance(info, dict) else None
-    if not isinstance(totals, dict):
+    if not isinstance(totals, dict) or "total_tokens" not in totals:
+        return None
+    keys = (
+        "total_tokens",
+        "input_tokens",
+        "cached_input_tokens",
+        "output_tokens",
+        "reasoning_output_tokens",
+    )
+    values = {key: totals.get(key, 0) for key in keys}
+    if any(type(value) is not int or not 0 <= value <= 2**63 - 1 for value in values.values()):
+        return None
+    if values["cached_input_tokens"] > values["input_tokens"]:
+        return None
+    if values["reasoning_output_tokens"] > values["output_tokens"]:
+        return None
+    if ("input_tokens" in totals or "output_tokens" in totals) and (
+        values["total_tokens"] != values["input_tokens"] + values["output_tokens"]
+    ):
         return None
     return Usage(
-        total=_as_nonnegative_int(totals.get("total_tokens")),
-        input=_as_nonnegative_int(totals.get("input_tokens")),
-        cached_input=_as_nonnegative_int(totals.get("cached_input_tokens")),
-        output=_as_nonnegative_int(totals.get("output_tokens")),
-        reasoning_output=_as_nonnegative_int(totals.get("reasoning_output_tokens")),
+        total=values["total_tokens"],
+        input=values["input_tokens"],
+        cached_input=values["cached_input_tokens"],
+        output=values["output_tokens"],
+        reasoning_output=values["reasoning_output_tokens"],
     )
 
 
-def latest_usage(transcript_path: str | None) -> Usage:
+def observe_usage(transcript_path: str | None) -> Observation:
+    """Inspect a bounded tail, newest first; missing evidence never means zero usage."""
     if not transcript_path:
-        return Usage()
+        return Observation(None, "unavailable", "missing_path")
     path = Path(transcript_path)
     try:
         stat = path.stat()
     except OSError:
-        return Usage()
-    if not path.is_file() or stat.st_size > MAX_TRANSCRIPT_BYTES:
-        return Usage()
-
-    latest = Usage()
+        return Observation(None, "unavailable", "unreadable")
+    if not path.is_file():
+        return Observation(None, "unavailable", "not_regular_file")
     try:
-        with path.open("r", encoding="utf-8", errors="replace") as handle:
-            for line in handle:
-                if "token_count" not in line:
-                    continue
-                try:
-                    usage = _usage_from_line(json.loads(line))
-                except (json.JSONDecodeError, TypeError, ValueError):
-                    continue
-                if usage is not None:
-                    latest = usage
+        with path.open("rb") as handle:
+            offset = max(0, stat.st_size - MAX_USAGE_SCAN_BYTES)
+            handle.seek(offset)
+            raw = handle.read(stat.st_size - offset)
+            if len(raw) != stat.st_size - offset:
+                return Observation(None, "unavailable", "snapshot_changed")
     except OSError:
-        return Usage()
-    return latest
+        return Observation(None, "unavailable", "unreadable")
+    lines = raw.split(b"\n")
+    partial = lines.pop()
+    if partial:
+        try:
+            json.loads(partial)
+        except (ValueError, UnicodeError, RecursionError):
+            pass  # A writer may not have finished the trailing record yet.
+        else:
+            lines.append(partial)
+            partial = b""
+    if offset:
+        lines = lines[1:]  # The first record may start outside the bounded tail.
+    completed = False
+    for line in reversed(lines):
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except (ValueError, UnicodeError):
+            return Observation(None, "unavailable", "invalid_record")
+        usage = _usage_from_line(record)
+        if usage is not None:
+            return Observation(usage, "ok")
+        payload = record.get("payload") if isinstance(record, dict) else None
+        if isinstance(payload, dict) and record.get("type") == "event_msg":
+            if payload.get("type") == "token_count" and payload.get("info") is not None:
+                return Observation(None, "unavailable", "invalid_usage")
+            completed = completed or payload.get("type") == "task_complete"
+    if offset:
+        return Observation(None, "unavailable", "scan_limit")
+    if partial or completed:
+        return Observation(None, "unavailable", "missing_usage")
+    return Observation(None, "pending")
+
+
+def latest_usage(transcript_path: str | None) -> Usage | None:
+    return observe_usage(transcript_path).usage

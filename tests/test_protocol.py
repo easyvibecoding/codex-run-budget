@@ -14,9 +14,11 @@ PLUGIN = ROOT / "plugins" / "codex-run-budget"
 class ProtocolTest(unittest.TestCase):
     def test_hook_runner_emits_valid_json(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
+            transcript = Path(temporary) / "transcript.jsonl"
+            transcript.write_text('{"type":"session_meta","payload":{}}\n')
             payload = {
                 "session_id": "protocol-run",
-                "transcript_path": None,
+                "transcript_path": str(transcript),
                 "cwd": temporary,
                 "hook_event_name": "UserPromptSubmit",
                 "turn_id": "turn-1",

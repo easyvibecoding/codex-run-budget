@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -14,23 +15,55 @@ MAX_INPUT_BYTES = 2 * 1024 * 1024
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--event",
+        choices=(
+            "SessionStart",
+            "UserPromptSubmit",
+            "PreToolUse",
+            "PostToolUse",
+            "SubagentStart",
+            "SubagentStop",
+            "PreCompact",
+            "PostCompact",
+            "Stop",
+            "SessionEnd",
+            "Interrupt",
+        ),
+    )
+    event = parser.parse_args().event
+
+    def reject(reason: str) -> int:
+        message = "Run Budget rejected hook input: " + reason + ". Private input omitted."
+        if event:
+            print(json.dumps(Governor.failure_output(event, message)))
+            return 0
+        # Legacy direct invocations lack the event needed for structured output.
+        print(message, file=sys.stderr)
+        return 2
+
     raw = sys.stdin.buffer.read(MAX_INPUT_BYTES + 1)
     if len(raw) > MAX_INPUT_BYTES:
-        print(json.dumps({"systemMessage": "Run Budget hook input exceeded 2 MiB."}))
-        return 0
+        return reject("input exceeded 2 MiB")
     try:
         payload = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        print(json.dumps({"systemMessage": "Run Budget received invalid hook JSON."}))
-        return 0
-    if not isinstance(payload, dict):
-        return 0
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        return reject("invalid JSON")
+    if (
+        not isinstance(payload, dict)
+        or not isinstance(payload.get("session_id"), str)
+        or not payload.get("session_id")
+    ):
+        return reject("missing session identity")
+    if event and payload.get("hook_event_name") != event:
+        return reject("event mismatch")
+    if not event:
+        event = payload.get("hook_event_name")
+        if not isinstance(event, str) or not event:
+            return reject("missing event identity")
 
-    governor = Governor()
-    try:
-        result = governor.handle(payload)
-    finally:
-        governor.close()
+    result = Governor.dispatch(payload)
     if result is not None:
         print(json.dumps(result, separators=(",", ":"), ensure_ascii=True))
     return 0

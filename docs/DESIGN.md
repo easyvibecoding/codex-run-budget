@@ -11,7 +11,7 @@ seam that supports interception.
 All lifecycle events enter one deep module:
 
 ```python
-Governor.handle(hook_payload) -> dict | None
+Governor.dispatch(hook_payload) -> dict | None
 ```
 
 Callers do not coordinate SQLite transactions, transcript reconciliation,
@@ -25,7 +25,7 @@ for explicit operator halt, resume, and disable commands.
 Codex hook event
       |
       v
- Governor.handle
+ Governor.dispatch (bootstrap failures included)
       |
       +--> reconcile transcript token_count totals
       |
@@ -63,6 +63,9 @@ makes hook retries idempotent. In-flight calls use leases so a missing
 
 Starting a new budget increments the run epoch. Old audit events remain
 available, while new counters and transcript baselines start at zero.
+
+See [reliability hardening](HARDENING.md) for observation health, atomic pending
+agent reservations, output-aware repeat handling, and schema-v2 migration.
 
 ## Enforcement boundary
 

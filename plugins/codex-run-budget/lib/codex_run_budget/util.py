@@ -43,9 +43,13 @@ def stable_hash(value: Any) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def data_dir() -> Path:
+def data_path() -> Path:
     configured = os.environ.get("CODEX_RUN_BUDGET_HOME")
-    root = Path(configured).expanduser() if configured else Path.home() / ".codex" / "run-budget"
+    return Path(configured).expanduser() if configured else Path.home() / ".codex" / "run-budget"
+
+
+def data_dir() -> Path:
+    root = data_path()
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     try:
         root.chmod(0o700)

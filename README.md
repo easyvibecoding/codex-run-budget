@@ -27,6 +27,20 @@ built against the public [Codex hooks interface](https://learn.chatgpt.com/docs/
   input, tool output, or transcript content.
 - Has no runtime package dependencies beyond Python 3.10+ and SQLite.
 
+### Reliability defaults (v0.3)
+
+No new configuration is required. Unknown or regressed usage preserves the last
+known counter and pauses supported admissions under the existing `fail=closed`
+policy; readable data recovers automatically. Status distinguishes pending,
+available, and unavailable observations. A counter reset needs an explicit new
+epoch, not an automatic accounting reset.
+
+Agent admission reserves pending capacity atomically; pending plus active agents
+share `agents`. Changed result hashes reset repeat streaks, and explicit wait/poll
+tools do not trigger the repeat guard (all other ceilings still apply). Ledger
+upgrades automatically back up v1 data before the additive migration. See
+[hardening design and evidence](docs/HARDENING.md).
+
 ## Install from GitHub
 
 ```sh
@@ -112,8 +126,10 @@ run-budget:start \
   fail=closed
 ```
 
-Options can appear on one line. Counts support `k` and `m`; ratios accept a
-decimal or percentage.
+Put all options on the first control line (the line wrapping above is for
+readability). Counts support `k` and `m`; ratios accept a decimal or percentage.
+Quoted examples later in a message do not activate controls. Unknown or duplicate
+options are rejected to catch typos.
 
 ## Enforcement model
 
@@ -178,7 +194,8 @@ Set `CODEX_RUN_BUDGET_HOME` to override it. The SQLite database records:
 - session id and epoch;
 - numeric token/tool/agent counters;
 - timestamps and policy decisions;
-- SHA-256 hashes of transcript paths and tool inputs.
+- SHA-256 hashes of transcript paths, tool inputs, and tool results;
+- observation health and pending-agent reservations.
 
 It does not intentionally record prompts, command text, tool arguments, tool
 responses, or transcript content. Nothing is sent over the network.

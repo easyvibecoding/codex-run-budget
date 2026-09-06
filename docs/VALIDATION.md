@@ -1,5 +1,14 @@
 # Validation evidence
 
+## Reliability hardening — 2026-09-07, v0.3.0
+
+The 44-test suite, validators, existing-ledger migration, installed hook review,
+and real two-turn HALT validation are recorded in
+[HARDENING.md](HARDENING.md#local-installed-evidence--2026-09-07).
+The first turn recorded 52,072 observed tokens against 10k; the next turn used
+zero model tokens and executed no tool. This preserves the next-boundary
+guarantee, not a same-turn cap.
+
 ## Upgrade recovery and restart — 2026-09-06, v0.2.1
 
 Incident: directly installing v0.2.0 removed the v0.1.1 cache while an existing

@@ -61,7 +61,7 @@ def main() -> int:
         for group in groups:
             for hook in group["hooks"]:
                 command = hook.get("command", "")
-                if command != 'python3 "${PLUGIN_ROOT}/scripts/hook.py"':
+                if command != f'python3 "${{PLUGIN_ROOT}}/scripts/hook.py" --event {event}':
                     fail(f"unexpected hook command for {event}: {command}")
                 if hook.get("async"):
                     fail(f"governance hook cannot be asynchronous: {event}")

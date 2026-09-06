@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT}/scripts/hook.py\"",
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/hook.py\" --event SessionStart",
             "timeout": 3,
             "statusMessage": "Loading run budget"
           }
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT}/scripts/hook.py\"",
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/hook.py\" --event UserPromptSubmit",
             "timeout": 3,
             "statusMessage": "Checking run budget"
           }
@@ -31,7 +31,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT}/scripts/hook.py\"",
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/hook.py\" --event PreToolUse",
             "timeout": 3,
             "statusMessage": "Checking shared run budget"
           }
@@ -44,7 +44,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT}/scripts/hook.py\"",
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/hook.py\" --event PostToolUse",
             "timeout": 3,
             "statusMessage": "Reconciling run usage"
           }
@@ -56,7 +56,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT}/scripts/hook.py\"",
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/hook.py\" --event SubagentStart",
             "timeout": 3
           }
         ]
@@ -67,7 +67,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT}/scripts/hook.py\"",
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/hook.py\" --event SubagentStop",
             "timeout": 3
           }
         ]
@@ -78,7 +78,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT}/scripts/hook.py\"",
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/hook.py\" --event PreCompact",
             "timeout": 3
           }
         ]
@@ -89,7 +89,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT}/scripts/hook.py\"",
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/hook.py\" --event PostCompact",
             "timeout": 3
           }
         ]
@@ -100,7 +100,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT}/scripts/hook.py\"",
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/hook.py\" --event Stop",
             "timeout": 3
           }
         ]
@@ -111,7 +111,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT}/scripts/hook.py\"",
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/hook.py\" --event SessionEnd",
             "timeout": 3
           }
         ]
@@ -122,7 +122,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT}/scripts/hook.py\"",
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/hook.py\" --event Interrupt",
             "timeout": 1
           }
         ]

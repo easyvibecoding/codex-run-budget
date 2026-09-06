@@ -9,12 +9,12 @@ from pathlib import Path
 from typing import Any
 
 from .ledger import Ledger, RunConfig
-from .transcript import latest_usage
-from .util import data_dir, parse_count, parse_ratio, safe_json, stable_hash
+from .transcript import observe_usage
+from .util import data_dir, data_path, parse_count, parse_ratio, safe_json, stable_hash
 
 CONTROL_RE = re.compile(
-    r"^\s*run-budget\s*:\s*(start|status|halt|resume|off)\b(.*)$",
-    re.IGNORECASE | re.MULTILINE,
+    r"\A\s*run-budget\s*:\s*(start|status|halt|resume|off)\b([^\r\n]*)(?:\r?\n|$)",
+    re.IGNORECASE,
 )
 
 
@@ -28,6 +28,82 @@ class Governor:
 
     def close(self) -> None:
         self.ledger.close()
+
+    @classmethod
+    def dispatch(cls, payload: dict[str, Any], root: Path | None = None) -> dict[str, Any] | None:
+        """Bootstrap the same policy interface, including unavailable-ledger failures."""
+        target = root or data_path()
+        governor = None
+        try:
+            governor = cls(target)
+            return governor.handle(payload)
+        except Exception as exc:
+            return cls.failure_at(
+                target,
+                cls._text(payload, "hook_event_name", 100),
+                cls._text(payload, "session_id", 256),
+                exc,
+            )
+        finally:
+            if governor is not None:
+                governor.close()
+
+    @staticmethod
+    def failure_output(event: str, message: str) -> dict[str, Any]:
+        if event == "PreToolUse":
+            return {
+                "systemMessage": message,
+                "hookSpecificOutput": {
+                    "hookEventName": event,
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": message,
+                },
+            }
+        if event == "UserPromptSubmit":
+            return {"decision": "block", "reason": message, "systemMessage": message}
+        if event == "SubagentStart":
+            return Governor._context(event, message + " Return without calling tools.", system=True)
+        if event in {
+            "SessionStart",
+            "Stop",
+            "SubagentStop",
+            "PreCompact",
+            "PostCompact",
+            "PostToolUse",
+        }:
+            return {"continue": False, "stopReason": message, "systemMessage": message}
+        return {"systemMessage": message}
+
+    @staticmethod
+    def failure_at(root: Path, event: str, run_id: str, exc: Exception) -> dict[str, Any]:
+        message = f"Run Budget internal error ({type(exc).__name__}); private data omitted."
+        closed = True
+        try:
+            marker = json.loads((root / "active" / f"{stable_hash(run_id)}.json").read_text())
+            if isinstance(marker, dict):
+                closed = marker.get("status") == "halted" or (
+                    marker.get("status") != "off" and marker.get("fail_closed") is not False
+                )
+        except (OSError, ValueError, TypeError):
+            pass
+        if closed:
+            return Governor.failure_output(
+                event, message + " Failing closed; retry after recovery."
+            )
+        return {"systemMessage": message + " Saved policy permits fail-open operation."}
+
+    @staticmethod
+    def _availability(event: str, run: dict[str, Any]) -> dict[str, Any] | None:
+        if run.get("usage_status") != "unavailable":
+            return None
+        message = (
+            "Run Budget usage is unavailable (" + ", ".join(run.get("usage_issues", [])) + "). "
+            "Previous accounting is preserved. Retry when the transcript recovers, or start "
+            "a new epoch only if the source counter was intentionally reset."
+        )
+        if run["fail_closed"]:
+            return Governor.failure_output(event, message + " Failing closed.")
+        return {"systemMessage": message + " Continuing under fail=open."}
 
     def handle(self, payload: dict[str, Any]) -> dict[str, Any] | None:
         event = self._text(payload, "hook_event_name", 100)
@@ -71,13 +147,34 @@ class Governor:
     def _sync(
         self, payload: dict[str, Any], run_id: str, key: str = "transcript_path"
     ) -> dict[str, Any] | None:
+        run = self.ledger.get_run(run_id)
+        if not run or run["status"] == "off":
+            return run
         source_id, path = self._source(payload, key)
-        return self.ledger.sync_usage(run_id, source_id, latest_usage(path))
+        observation = observe_usage(path)
+        unresolved = (
+            stable_hash(["missing_agent_source", payload.get("agent_id")])
+            if key == "agent_transcript_path"
+            else "unknown"
+        )
+        run = self.ledger.sync_usage(
+            run_id,
+            source_id or unresolved,
+            observation.usage,
+            observation.reason or observation.state,
+            recovered_source=unresolved if source_id else None,
+        )
+        if run and run["status"] == "halted":
+            self._write_marker(run_id, run)
+        return run
 
     def _session_start(self, payload: dict[str, Any], run_id: str) -> dict[str, Any] | None:
         run = self._sync(payload, run_id)
         if not run or run["status"] == "off":
             return None
+        availability = self._availability("SessionStart", run)
+        if availability is not None and run["fail_closed"]:
+            return availability
         context = (
             "Codex Run Budget is active for this session tree. "
             + self.status_text(run)
@@ -102,6 +199,9 @@ class Governor:
         run = self._sync(payload, run_id)
         if not run or run["status"] == "off":
             return None
+        availability = self._availability("UserPromptSubmit", run)
+        if availability is not None and run["fail_closed"]:
+            return availability
         if run["status"] == "halted":
             reason = (
                 f"Run Budget HALT: {run.get('halt_reason') or 'policy stopped the run'}. "
@@ -112,7 +212,7 @@ class Governor:
         ratio = int(run["spent_tokens"]) / max(1, int(run["max_tokens"]))
         if ratio >= float(run["warn_ratio"]):
             return self._context("UserPromptSubmit", self.ledger._steer_text(run), system=True)
-        return None
+        return availability
 
     def _control(
         self,
@@ -121,10 +221,35 @@ class Governor:
         action: str,
         options: dict[str, str],
     ) -> dict[str, Any]:
+        allowed_options = {
+            "start": {
+                "tokens",
+                "warn",
+                "block_agents",
+                "tools",
+                "agents",
+                "inflight",
+                "output",
+                "repeat_steer",
+                "repeat_halt",
+                "fail",
+            },
+            "status": set(),
+            "halt": {"reason"},
+            "resume": {"tokens"},
+            "off": set(),
+        }
+        if options.keys() - allowed_options[action]:
+            raise ValueError("unrecognized option for this control command")
         if action == "start":
             config = self._config(options)
             source_id, path = self._source(payload)
-            run = self.ledger.start_run(run_id, config, source_id, latest_usage(path))
+            observation = observe_usage(path)
+            if observation.state == "unavailable":
+                raise ValueError(
+                    "cannot establish transcript baseline: " + (observation.reason or "unavailable")
+                )
+            run = self.ledger.start_run(run_id, config, source_id, observation.usage)
             self._write_marker(run_id, run)
             message = (
                 "Run Budget control command consumed. Started a new governed epoch. "
@@ -157,6 +282,10 @@ class Governor:
             )
 
         if action == "resume":
+            current = self._sync(payload, run_id)
+            availability = self._availability("UserPromptSubmit", current) if current else None
+            if availability is not None and current["fail_closed"]:
+                return availability
             ceiling = parse_count(options["tokens"]) if "tokens" in options else None
             run = self.ledger.resume(run_id, ceiling)
             if run:
@@ -180,7 +309,10 @@ class Governor:
         for token in tokens:
             if "=" in token:
                 key, value = token.split("=", 1)
-                options[key.strip().lower().replace("-", "_")] = value.strip()
+                key = key.strip().lower().replace("-", "_")
+                if key in options:
+                    raise ValueError("duplicate control option")
+                options[key] = value.strip()
             elif token and "tokens" not in options:
                 options["tokens"] = token
             else:
@@ -216,15 +348,20 @@ class Governor:
         run = self._sync(payload, run_id)
         if not run or run["status"] == "off":
             return None
+        availability = self._availability("PreToolUse", run)
+        if availability is not None and run["fail_closed"]:
+            return availability
         source_id, _ = self._source(payload)
         tool_name = self._text(payload, "tool_name", 200) or "unknown"
-        tool_use_id = self._text(payload, "tool_use_id", 300) or stable_hash(
-            [payload.get("turn_id"), tool_name, payload.get("tool_input")]
-        )
+        tool_use_id = self._text(payload, "tool_use_id", 300)
+        if not tool_use_id:
+            raise ValueError("missing tool call identity")
         fingerprint = stable_hash([tool_name, payload.get("tool_input")])
         decision = self.ledger.admit_tool(
             run_id, source_id or "unknown", tool_use_id, tool_name, fingerprint
         )
+        if decision.run and decision.run["status"] == "halted":
+            self._write_marker(run_id, decision.run)
         if not decision.allowed:
             return {
                 "systemMessage": "Run Budget blocked a tool call.",
@@ -236,7 +373,7 @@ class Governor:
             }
         if decision.additional_context:
             return self._context("PreToolUse", decision.additional_context, system=True)
-        return None
+        return availability
 
     def _post_tool(self, payload: dict[str, Any], run_id: str) -> dict[str, Any] | None:
         run = self._sync(payload, run_id)
@@ -244,12 +381,18 @@ class Governor:
             return None
         tool_use_id = self._text(payload, "tool_use_id", 300)
         if not tool_use_id:
-            return None
+            raise ValueError("missing tool result identity")
         try:
             output_chars = len(safe_json(payload.get("tool_response")))
         except Exception:
             output_chars = 0
-        decision = self.ledger.complete_tool(run_id, tool_use_id, output_chars)
+        response = payload.get("tool_response")
+        failed = isinstance(response, dict) and (
+            response.get("isError") is True or response.get("is_error") is True
+        )
+        decision = self.ledger.complete_tool(
+            run_id, tool_use_id, output_chars, stable_hash(response), failed
+        )
         if not decision.allowed:
             return {
                 "decision": "block",
@@ -260,6 +403,9 @@ class Governor:
                     "additionalContext": decision.additional_context or decision.reason,
                 },
             }
+        availability = self._availability("PostToolUse", run)
+        if availability is not None:
+            return availability
         if decision.additional_context:
             return self._context("PostToolUse", decision.additional_context, system=True)
         return None
@@ -271,6 +417,11 @@ class Governor:
         agent_id = self._text(payload, "agent_id", 300) or "unknown"
         agent_type = self._text(payload, "agent_type", 200) or "unknown"
         decision = self.ledger.subagent_start(run_id, agent_id, agent_type)
+        if decision.run and decision.run["status"] == "halted":
+            self._write_marker(run_id, decision.run)
+        availability = self._availability("SubagentStart", run)
+        if availability is not None and run["fail_closed"]:
+            return availability
         context = decision.additional_context
         if not decision.allowed:
             context = (
@@ -284,14 +435,16 @@ class Governor:
         )
 
     def _subagent_stop(self, payload: dict[str, Any], run_id: str) -> dict[str, Any] | None:
-        source_id, path = self._source(payload, "agent_transcript_path")
-        if source_id:
-            self.ledger.sync_usage(run_id, source_id, latest_usage(path))
+        source_id, _ = self._source(payload, "agent_transcript_path")
+        self._sync(payload, run_id, "agent_transcript_path")
         agent_id = self._text(payload, "agent_id", 300) or "unknown"
         agent_type = self._text(payload, "agent_type", 200) or "unknown"
         run = self.ledger.subagent_stop(run_id, agent_id, source_id, agent_type)
         if not run or run["status"] == "off":
             return None
+        availability = self._availability("SubagentStop", run)
+        if availability is not None and run["fail_closed"]:
+            return availability
         if run["status"] == "halted":
             return {
                 "continue": False,
@@ -306,7 +459,10 @@ class Governor:
         run = self._sync(payload, run_id)
         if not run or run["status"] == "off":
             return None
-        if event == "PreCompact" and run["status"] == "halted":
+        availability = self._availability(event, run)
+        if availability is not None and run["fail_closed"]:
+            return availability
+        if event in ("PreCompact", "PostCompact", "Stop") and run["status"] == "halted":
             return {
                 "continue": False,
                 "stopReason": run.get("halt_reason") or "Run Budget HALT",
@@ -340,6 +496,12 @@ class Governor:
         )
         if run.get("halt_reason"):
             text += f" Reason: {run['halt_reason']}."
+        if run.get("usage_status"):
+            text += f" Usage evidence: {run['usage_status']}."
+        if run.get("usage_issues"):
+            text += " Issues: " + ", ".join(run["usage_issues"]) + "."
+        if run.get("pending_agents"):
+            text += f" {run['pending_agents']} subagent starts reserved."
         return text
 
     def _marker_path(self, run_id: str) -> Path:
@@ -373,29 +535,5 @@ class Governor:
         except FileNotFoundError:
             pass
 
-    def _fail_closed(self, run_id: str) -> bool:
-        try:
-            data = json.loads(self._marker_path(run_id).read_text(encoding="utf-8"))
-            return bool(data.get("fail_closed")) and data.get("status") != "off"
-        except (OSError, ValueError, TypeError):
-            return False
-
     def _failure(self, event: str, run_id: str, exc: Exception) -> dict[str, Any] | None:
-        message = (
-            f"Run Budget internal error ({type(exc).__name__}); no private hook data was recorded."
-        )
-        if self._fail_closed(run_id):
-            if event == "PreToolUse":
-                return {
-                    "systemMessage": message,
-                    "hookSpecificOutput": {
-                        "hookEventName": "PreToolUse",
-                        "permissionDecision": "deny",
-                        "permissionDecisionReason": message + " Failing closed.",
-                    },
-                }
-            if event == "UserPromptSubmit":
-                return {"decision": "block", "reason": message + " Failing closed."}
-            if event in ("Stop", "SubagentStop", "PreCompact", "PostCompact"):
-                return {"continue": False, "stopReason": message + " Failing closed."}
-        return {"systemMessage": message}
+        return self.failure_at(self.root, event, run_id, exc)
