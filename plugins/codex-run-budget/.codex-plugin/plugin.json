@@ -1,6 +1,6 @@
 {
   "name": "codex-run-budget",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Shared token governance and read-only recent-task telemetry for Codex sessions and subagents.",
   "author": {
     "name": "EasyVibeCoding",

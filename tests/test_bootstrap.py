@@ -5,6 +5,7 @@ import json
 import os
 import shlex
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -81,12 +82,17 @@ class BootstrapTest(unittest.TestCase):
         self.source.rename(self.root / "evicted-cache")
 
     def test_bootstrap_survives_cache_eviction_and_keeps_enforcement(self):
-        self.invoke("UserPromptSubmit", prompt="run-budget:start tokens=100k tools=2")
+        started = self.invoke("UserPromptSubmit", prompt="run-budget:start tokens=100k tools=2")
+        self.assertEqual(started["hookSpecificOutput"]["hookEventName"], "UserPromptSubmit")
+        self.assertNotEqual(started.get("decision"), "block")
         self.assertTrue(self.saved.is_file())
         self.assertEqual(hashlib.sha256(self.saved.read_bytes()).hexdigest(), self.digest)
         self.evict_cache()
-        self.invoke(
+        admitted = self.invoke(
             "PreToolUse", tool_name="Bash", tool_use_id="call-1", tool_input={"command": "pwd"}
+        )
+        self.assertNotEqual(
+            admitted.get("hookSpecificOutput", {}).get("permissionDecision"), "deny"
         )
         self.invoke(
             "PostToolUse", tool_name="Bash", tool_use_id="call-1", tool_input={}, tool_response="ok"
@@ -110,9 +116,9 @@ class BootstrapTest(unittest.TestCase):
         self.assertFalse((self.data / "ledger.sqlite3").exists())
 
     def test_corrupt_saved_runtime_recovers_only_from_the_pinned_source(self):
-        self.invoke("SessionStart")
+        self.assertEqual(self.invoke("SessionStart"), {})
         self.saved.write_bytes(b"corrupted archive")
-        self.invoke("SessionStart")
+        self.assertEqual(self.invoke("SessionStart"), {})
         self.assertEqual(hashlib.sha256(self.saved.read_bytes()).hexdigest(), self.digest)
         self.saved.write_bytes(b"corrupted archive")
         (self.source / "runtime/hook.pyz").write_bytes(b"different release")
@@ -121,12 +127,22 @@ class BootstrapTest(unittest.TestCase):
         self.assertEqual(self.saved.read_bytes(), b"corrupted archive")
 
     def test_saved_version_is_used_even_when_source_changes(self):
-        self.invoke("SessionStart")
+        self.assertEqual(self.invoke("SessionStart"), {})
         (self.source / "runtime/hook.pyz").write_bytes(b"a newer release")
         result = self.invoke("UserPromptSubmit", prompt="run-budget:start tokens=100k")
         self.assertEqual(result["hookSpecificOutput"]["hookEventName"], "UserPromptSubmit")
         self.assertNotEqual(result.get("decision"), "block")
         self.assertEqual(hashlib.sha256(self.saved.read_bytes()).hexdigest(), self.digest)
+
+    def test_fresh_runtime_initializes_schema_before_start(self):
+        self.assertEqual(self.invoke("SessionStart"), {})
+        with sqlite3.connect(self.data / "ledger.sqlite3") as connection:
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 2)
+            self.assertEqual(connection.execute("SELECT count(*) FROM runs").fetchone()[0], 0)
+        self.evict_cache()
+        started = self.invoke("UserPromptSubmit", prompt="run-budget:start tokens=100k")
+        self.assertEqual(started["hookSpecificOutput"]["hookEventName"], "UserPromptSubmit")
+        self.assertNotEqual(started.get("decision"), "block")
 
     def test_runtime_directory_symlink_is_rejected(self):
         self.data.mkdir()

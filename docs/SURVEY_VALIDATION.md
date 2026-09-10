@@ -1,4 +1,4 @@
-# v0.4.1 validation evidence
+# v0.4.2 validation evidence
 
 Observed locally on 2026-09-11 (Asia/Taipei). The task cohort is private; only
 aggregate counts and validation methods are published here. These are observed
@@ -62,8 +62,11 @@ Ledger read-back confirmed `status=halted`, `tool_calls=1`,
 initialized SHA-pinned commands surviving cache eviction while enforcement
 remains active, not arbitrary disk-loss recovery or old-command migration.
 
-All 75 unit/integration tests, Ruff, repository, plugin, and skill validators
-passed locally. Automated tests exercise missing/corrupt runtime handling, pinned
+The initial 75-test suite passed locally on Python 3.12, but Python 3.10 CI
+exposed a nested-resource compatibility failure in the v0.4.1 candidate.
+v0.4.2 replaces that reader with the `pkgutil.get_data` contract and strengthens
+initialization/admission assertions; its 76-test suite also passes on Python
+3.10. Automated tests exercise missing/corrupt runtime handling, pinned
 version isolation, migration resources from verified memory, source limits,
 thread/model attribution, conflict reporting, and updater recovery. CI checks
 the release on Python 3.10–3.13; each release's commit status is authoritative.
@@ -81,3 +84,11 @@ After authorized restoration through Codex's version-checked config interface,
 hooks/list reported all eleven Run Budget hooks enabled/trusted from v0.4.1 and
 the one previously trusted unrelated hook enabled. Warnings and errors were
 empty. The updater itself never writes these trust/enable settings.
+
+The corrected v0.4.2 was then tested with the desktop 0.153.4 cache-eviction
+canary: one successful command, a refused second command, normal completion,
+and the same healthy halted-ledger read-back. Its global installation preserved
+all prior versions and prepared runtime SHA-256
+`8be5bc6cd1abaa4c621a1941aa23e9856973a09bb5e6b0d5a3fcd946b4d145ef`.
+The installed package matched source, and all twelve hooks were again read
+back enabled/trusted, Run Budget now pointing at v0.4.2, with no issues.

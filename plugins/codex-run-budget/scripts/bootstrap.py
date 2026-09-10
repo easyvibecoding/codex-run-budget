@@ -24,29 +24,6 @@ from pathlib import Path
 MAX_RUNTIME_BYTES = 1024 * 1024
 
 
-class RuntimeResources:
-    def __init__(self, archive, prefix):
-        self.archive, self.prefix = archive, prefix
-
-    def open_resource(self, resource):
-        return io.BytesIO(self.archive.read(self.prefix + resource))
-
-    def resource_path(self, resource):
-        raise FileNotFoundError("runtime resources are held in memory")
-
-    def is_resource(self, name):
-        return self.prefix + name in self.archive.namelist()
-
-    def contents(self):
-        return iter(
-            {
-                name[len(self.prefix) :].split("/")[0]
-                for name in self.archive.namelist()
-                if name.startswith(self.prefix)
-            }
-        )
-
-
 class RuntimeLoader(importlib.abc.MetaPathFinder, importlib.abc.Loader):
     """Import only this package from already-verified bytes, never by pathname."""
 
@@ -78,8 +55,14 @@ class RuntimeLoader(importlib.abc.MetaPathFinder, importlib.abc.Loader):
         module.__file__ = "<run-budget-runtime>/" + name
         exec(compile(self.archive.read(name), module.__file__, "exec"), module.__dict__)
 
-    def get_resource_reader(self, fullname):
-        return RuntimeResources(self.archive, fullname.replace(".", "/") + "/")
+    def get_data(self, path):
+        # pkgutil.get_data supports nested resources on Python 3.10 as well as
+        # newer versions. The pathname is only a key into verified memory.
+        normalized = path.replace("\\", "/")
+        prefix = "<run-budget-runtime>/"
+        if not normalized.startswith(prefix):
+            raise OSError("resource is outside the pinned runtime")
+        return self.archive.read(normalized[len(prefix) :])
 
     def run(self, event):
         sys.meta_path.insert(0, self)

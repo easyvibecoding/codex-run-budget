@@ -1,4 +1,4 @@
-# Cache-independent hooks (v0.4.1)
+# Cache-independent hooks (v0.4.2)
 
 ## Failure and scope
 
@@ -44,7 +44,7 @@ runtimes without executing plugin code. `--retain-only` creates a recovery copy
 without installation. Neither mode changes trust or enabled state.
 
 After reviewing the new hook commands, enable/trust them through Codex and start
-a new task. Existing pre-v0.4.1 tasks must finish or restart because they still
+a new task. Existing legacy-pathname tasks must finish or restart because they still
 hold the old pathname command. Do not remove retained caches while such tasks
 remain active. Durable runtimes and backups are intentionally retained; manual
 cleanup requires knowing that no active task references them.
@@ -58,3 +58,9 @@ Updater tests cover installation failure and hostile replacement targets.
 A separate real-Codex canary verifies one admitted command, cache eviction,
 a refused second command under the tool ceiling, and normal turn completion.
 See [the release evidence](SURVEY_VALIDATION.md) for the observed run.
+
+During the v0.4.1 release candidate, Python 3.10 CI exposed a nested-resource
+failure in importlib's compatibility reader. v0.4.2 uses the stable
+`pkgutil.get_data` loader contract to read SQL from verified archive memory.
+Tests explicitly require successful schema initialization and admission before
+testing denial, so fail-closed errors cannot masquerade as working enforcement.

@@ -111,7 +111,7 @@ do not claim token savings from elapsed waits or before/after cohorts alone.
 
 From a source checkout, use `python3 scripts/update_plugin.py` to retain old
 cache versions and prepare SHA-pinned runtimes outside the replaceable cache.
-The helper does not enable or trust hooks. New v0.4.1 commands load verified
+The helper does not enable or trust hooks. New v0.4.2 commands load verified
 runtime bytes even after cache eviction; missing code blocks admission with a
 structured failure rather than requesting a Stop retry loop.
 

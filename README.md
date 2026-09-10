@@ -65,14 +65,14 @@ SHA-pinned runtime outside the plugin cache. Recovery copies remain under
 `~/.codex/run-budget/cache-backups` (or `CODEX_RUN_BUDGET_HOME`). The helper does
 not alter hook trust, enabled states, or budget policy.
 
-Starting in v0.4.1, trusted hook commands contain a small bootstrap and the exact
+Starting in v0.4.2, trusted hook commands contain a small bootstrap and the exact
 runtime hash. They load verified bytes from the durable `runtimes` directory,
 so deleting/replacing the plugin cache does not remove an initialized task's
 hook code. Older tasks keep their pinned code, not an unreviewed newer version.
 Missing or corrupt runtime code blocks admission with structured hook output;
 Stop does not request a retry loop. See [upgrade safety](docs/UPGRADE_SAFETY.md).
 
-One-time migration: tasks created with pre-v0.4.1 commands still reference the
+One-time migration: tasks created with legacy pathname commands still reference the
 old cache path. Finish/restart those tasks, retain their cache until then, and
 review/trust the new commands. The new bootstrap cannot retroactively replace
 a command already captured by an old task. Keep tasks idle for this migration.

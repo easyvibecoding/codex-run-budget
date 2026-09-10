@@ -8,8 +8,8 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
-from importlib.resources import files
 from pathlib import Path
+from pkgutil import get_data
 from typing import Any
 
 from .transcript import Usage
@@ -102,7 +102,10 @@ class Ledger:
                     raise ValueError("ledger backup validation failed")
             finally:
                 target.close()
-        migration = files("codex_run_budget").joinpath("migrations/002_hardening.sql").read_text()
+        migration_bytes = get_data("codex_run_budget", "migrations/002_hardening.sql")
+        if migration_bytes is None:
+            raise ValueError("ledger migration resource is unavailable")
+        migration = migration_bytes.decode("utf-8")
         self.conn.executescript(
             """
             BEGIN IMMEDIATE;
