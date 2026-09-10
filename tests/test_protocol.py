@@ -44,7 +44,8 @@ class ProtocolTest(unittest.TestCase):
                 for hook in group["hooks"]:
                     commands.append(hook["command"])
         self.assertTrue(commands)
-        self.assertTrue(all("${PLUGIN_ROOT}" in command for command in commands))
+        self.assertTrue(all("PLUGIN_ROOT" in command for command in commands))
+        self.assertTrue(all(command.startswith("python3 -I -c ") for command in commands))
         self.assertTrue(all("http" not in command for command in commands))
 
 

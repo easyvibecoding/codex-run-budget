@@ -1,17 +1,29 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from update_plugin import preserve_install  # noqa: E402
+from update_plugin import main, preserve_install, prewarm_runtime  # noqa: E402
 
 
 class UpdateTest(unittest.TestCase):
+    @staticmethod
+    def make_version(cache: Path, version: str = "0.1.1") -> Path:
+        plugin = cache / version
+        (plugin / ".codex-plugin").mkdir(parents=True)
+        (plugin / ".codex-plugin/plugin.json").write_text(
+            json.dumps({"name": "codex-run-budget"})
+        )
+        (plugin / "hook.py").write_text("original policy")
+        return plugin
+
     def test_retains_old_version_after_success_or_failure(self):
         for code in (0, 1):
             with self.subTest(code=code), tempfile.TemporaryDirectory() as directory:
@@ -55,3 +67,94 @@ class UpdateTest(unittest.TestCase):
             with self.assertRaises(OSError):
                 preserve_install(cache, install)
             self.assertTrue((old / ".codex-plugin/plugin.json").is_file())
+
+    def test_quarantines_replaced_version_symlink_and_restores_original(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cache = root / "cache"
+            old = self.make_version(cache)
+            outside = root / "outside"
+            outside.mkdir()
+            marker = outside / "marker"
+            marker.write_text("MALICIOUS")
+
+            def install():
+                shutil.rmtree(old)
+                old.symlink_to(outside, target_is_directory=True)
+                return 0
+
+            with self.assertRaises(ValueError):
+                preserve_install(cache, install, backup_root=root / "backups")
+            self.assertTrue(old.is_dir())
+            self.assertFalse(old.is_symlink())
+            self.assertEqual((old / "hook.py").read_text(), "original policy")
+            self.assertEqual(marker.read_text(), "MALICIOUS")
+            self.assertTrue(
+                any(path.is_symlink() for path in (root / "backups").rglob("*"))
+            )
+
+    def test_quarantines_replaced_cache_symlink_without_touching_outside(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cache = root / "cache"
+            old = self.make_version(cache)
+            outside = root / "outside"
+            outside.mkdir()
+            marker = outside / "marker"
+            marker.write_text("MALICIOUS")
+
+            def install():
+                shutil.rmtree(cache)
+                cache.symlink_to(outside, target_is_directory=True)
+                return 0
+
+            with self.assertRaises(ValueError):
+                preserve_install(cache, install, backup_root=root / "backups")
+            self.assertTrue(cache.is_dir())
+            self.assertFalse(cache.is_symlink())
+            self.assertEqual((cache / old.name / "hook.py").read_text(), "original policy")
+            self.assertEqual(marker.read_text(), "MALICIOUS")
+
+    def test_changed_same_version_is_not_reported_as_success(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cache = root / "cache"
+            old = self.make_version(cache)
+
+            def install():
+                (old / "hook.py").write_text("MALICIOUS")
+                return 0
+
+            with self.assertRaises(ValueError):
+                preserve_install(cache, install, backup_root=root / "backups")
+            self.assertEqual((old / "hook.py").read_text(), "original policy")
+
+    def test_data_root_symlink_is_rejected_before_installer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            codex_home = root / "codex-home"
+            data_root = root / "data-link"
+            outside = root / "outside"
+            outside.mkdir()
+            data_root.symlink_to(outside, target_is_directory=True)
+            with mock.patch.dict(
+                os.environ,
+                {"CODEX_RUN_BUDGET_HOME": str(data_root)},
+                clear=False,
+            ), mock.patch.object(
+                sys, "argv", ["update_plugin.py", "--codex-home", str(codex_home)]
+            ), mock.patch("update_plugin.subprocess.run") as run:
+                with self.assertRaises(ValueError):
+                    main()
+            run.assert_not_called()
+            self.assertEqual(list(outside.iterdir()), [])
+
+    def test_dangling_runtime_archive_is_not_treated_as_legacy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plugin = root / "plugin"
+            (plugin / "runtime").mkdir(parents=True)
+            missing = root / "missing-runtime.pyz"
+            (plugin / "runtime/hook.pyz").symlink_to(missing)
+            with self.assertRaises(ValueError):
+                prewarm_runtime(plugin, root / "data")

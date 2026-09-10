@@ -8,6 +8,7 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
+from importlib.resources import files
 from pathlib import Path
 from typing import Any
 
@@ -101,7 +102,7 @@ class Ledger:
                     raise ValueError("ledger backup validation failed")
             finally:
                 target.close()
-        migration = (Path(__file__).parent / "migrations/002_hardening.sql").read_text()
+        migration = files("codex_run_budget").joinpath("migrations/002_hardening.sql").read_text()
         self.conn.executescript(
             """
             BEGIN IMMEDIATE;

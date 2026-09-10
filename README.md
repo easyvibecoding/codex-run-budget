@@ -60,16 +60,22 @@ python3 scripts/update_plugin.py
 ```
 
 The helper calls the official installer, snapshots existing version directories,
-and restores versions removed by installation even when the installer fails.
-Older tasks can still invoke their original hook code; new tasks load the new
-version. Recovery copies remain in the sibling `run-budget-retained` directory.
-The helper does not alter trust, enabled states, or budget policy.
+restores removed versions even if installation fails, and prepares the new
+SHA-pinned runtime outside the plugin cache. Recovery copies remain under
+`~/.codex/run-budget/cache-backups` (or `CODEX_RUN_BUDGET_HOME`). The helper does
+not alter hook trust, enabled states, or budget policy.
 
-Direct `codex plugin add` can delete the cache referenced by an active task and
-cause repeated PreToolUse/Stop errors. There is still a brief removal/restore
-interval during installation, so keep other tasks idle. This helper cannot fix
-Codex cache lifecycle internally or recover versions already deleted before its
-first use. Retained versions should only be removed after their tasks have ended.
+Starting in v0.4.1, trusted hook commands contain a small bootstrap and the exact
+runtime hash. They load verified bytes from the durable `runtimes` directory,
+so deleting/replacing the plugin cache does not remove an initialized task's
+hook code. Older tasks keep their pinned code, not an unreviewed newer version.
+Missing or corrupt runtime code blocks admission with structured hook output;
+Stop does not request a retry loop. See [upgrade safety](docs/UPGRADE_SAFETY.md).
+
+One-time migration: tasks created with pre-v0.4.1 commands still reference the
+old cache path. Finish/restart those tasks, retain their cache until then, and
+review/trust the new commands. The new bootstrap cannot retroactively replace
+a command already captured by an old task. Keep tasks idle for this migration.
 
 For local development:
 
@@ -212,12 +218,36 @@ python3 plugins/codex-run-budget/scripts/run_budget.py events latest
 
 ### Audit recent task and tool records
 
+Get a compact, read-only overview of recent local tasks, even if they never
+enabled a budget:
+
+```sh
+python3 plugins/codex-run-budget/scripts/run_budget.py survey
+```
+
+Defaults are seven days and up to 200 recently modified transcript pages from
+Codex's local sessions directory. No setup or new budget policy is required.
+Use `survey --json` for per-thread evidence, or optional `--days` / `--limit`
+to adjust the cohort. Discovery uses file modification time; analysis filters
+by record timestamps. The report explicitly identifies limited coverage.
+
+The survey distinguishes actual thread identity from the shared session key,
+attributes usage and waiting to explicit turn/model metadata, and merges
+paginated files without summing cumulative snapshots. It reports actual
+`wait_agent` timeouts separately from event returns and unknown outcomes.
+Changed versus unchanged result hashes help review repeated tool work; neither
+is a semantic judgment about progress or waste.
+
 Analyze an existing local Codex JSONL transcript, including tasks that never
 enabled a budget:
 
 ```sh
 python3 plugins/codex-run-budget/scripts/run_budget.py audit /path/to/rollout.jsonl
 ```
+
+Pass several paths to audit an exact multi-page cohort. Custom identifiers and
+model names are hashed; only a fixed allowlist of standard model names appears
+as labels. Request data remains distinct from subscription/billing accounting.
 
 The JSON report is read-only and does not open the governance ledger. It reports:
 
@@ -237,9 +267,12 @@ their accounting scopes. No request records means unknown usage, not zero. A
 nonzero accounting difference or invalid records requires investigation before
 using totals for comparisons. No prices or savings are inferred.
 
-Only the initial file-size snapshot is read (maximum 256 MiB); a trailing partial
-line is reported and skipped. Raw prompts, names, arguments, outputs, response
-IDs, and paths are not emitted. See [audit validation](docs/AUDIT_VALIDATION.md).
+Only initial file-size snapshots are read (maximum 256 MiB per page and 4 GiB
+per audit); oversized records and unfinished trailing lines are reported and
+skipped. A complete final JSON record needs no trailing newline. Raw prompts,
+custom names, arguments, outputs, response IDs, and paths are not emitted.
+See [audit validation](docs/AUDIT_VALIDATION.md) and
+[recent-task survey](docs/SURVEY.md).
 
 ### Checks
 

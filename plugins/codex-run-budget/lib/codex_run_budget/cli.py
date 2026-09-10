@@ -6,9 +6,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .audit import audit_transcript
+from .audit import audit_transcript, audit_transcripts
 from .governor import Governor
 from .ledger import Ledger
+from .survey import survey_summary, survey_transcripts
 from .util import data_dir, parse_count, stable_hash
 
 
@@ -54,7 +55,13 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     audit = sub.add_parser("audit", help="read-only, privacy-preserving transcript diagnostics")
-    audit.add_argument("transcript", type=Path)
+    audit.add_argument("transcript", type=Path, nargs="+")
+
+    survey = sub.add_parser("survey", help="read-only overview of recent local tasks")
+    survey.add_argument("directory", type=Path, nargs="?")
+    survey.add_argument("--days", type=float, default=7)
+    survey.add_argument("--limit", type=int, default=200)
+    survey.add_argument("--json", action="store_true", help="include complete per-thread evidence")
 
     listing = sub.add_parser("list", help="list recent governed runs")
     listing.add_argument("--limit", type=int, default=20)
@@ -82,13 +89,23 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if args.command == "audit":
+    if args.command in ("audit", "survey"):
         try:
-            print(json.dumps(audit_transcript(args.transcript), indent=2, sort_keys=True))
+            if args.command == "survey":
+                report = survey_transcripts(args.directory, days=args.days, limit=args.limit)
+            elif len(args.transcript) == 1:
+                report = audit_transcript(args.transcript[0])
+            else:
+                report = audit_transcripts(args.transcript)
+            print(
+                survey_summary(report)
+                if args.command == "survey" and not args.json
+                else json.dumps(report, indent=2, sort_keys=True)
+            )
             return 0
         except (OSError, ValueError):
             print(
-                "run-budget: cannot audit transcript (unreadable or unsupported file)",
+                "run-budget: cannot audit transcripts (unreadable files or invalid selection)",
                 file=sys.stderr,
             )
             return 2

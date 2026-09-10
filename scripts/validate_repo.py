@@ -7,6 +7,8 @@ import re
 import sys
 from pathlib import Path
 
+from build_hook_runtime import artifacts
+
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "plugins" / "codex-run-budget"
 REQUIRED_EVENTS = {
@@ -61,10 +63,14 @@ def main() -> int:
         for group in groups:
             for hook in group["hooks"]:
                 command = hook.get("command", "")
-                if command != f'python3 "${{PLUGIN_ROOT}}/scripts/hook.py" --event {event}':
-                    fail(f"unexpected hook command for {event}: {command}")
+                if not command.startswith("python3 -I -c "):
+                    fail(f"hook must start independently of the plugin cache: {event}")
                 if hook.get("async"):
                     fail(f"governance hook cannot be asynchronous: {event}")
+
+    for path, expected in artifacts(PLUGIN).items():
+        if not path.is_file() or path.read_bytes() != expected:
+            fail("hook runtime artifacts are stale; run scripts/build_hook_runtime.py")
 
     skill = (PLUGIN / "skills" / "run-budget" / "SKILL.md").read_text(encoding="utf-8")
     if not skill.startswith("---\nname: run-budget\n"):

@@ -1,6 +1,6 @@
 ---
 name: run-budget
-description: Set, inspect, halt, resume, or explain a shared token budget for the current Codex session and its subagents. Use when the user asks for a run budget, token cap, cost guard, STEER/HALT governance, token lineage, or bounded multi-agent work.
+description: Set, inspect, halt, resume, or explain a shared token budget, or audit local Codex tasks for model usage, waiting, and repeated tool work. Use for run budgets, token lineage, STEER/HALT governance, or retrospective task-efficiency analysis.
 ---
 
 # Run Budget
@@ -84,3 +84,39 @@ python3 "$PLUGIN_ROOT/scripts/run_budget.py" events latest
 
 The ledger intentionally contains no prompt, command, input, output, or
 transcript content. Never bypass that privacy rule when troubleshooting.
+
+## Audit recent tasks
+
+For retrospective task-efficiency questions, start with the read-only survey;
+it also covers tasks that never enabled a budget:
+
+```sh
+python3 "$PLUGIN_ROOT/scripts/run_budget.py" survey
+```
+
+By default this inspects up to 200 recent local transcript pages over seven
+days and prints a compact summary. Use `--json` for per-thread evidence.
+Optional `--days` and `--limit` narrow or expand the cohort; `audit <path>
+<other-page>` inspects exact files. These commands do not start a budget or
+change hooks, waiting settings, or task state.
+
+Check coverage and conflicts before quoting totals. Use thread identity and
+explicit turn/model metadata, not a shared `session_id`, to distinguish parents
+and subagents. For waits, `timed_out=false` means an event return, not necessarily
+agent completion. Separate old and new task trees when evaluating a settings
+change. Repeated unchanged results are review candidates, not proof of waste;
+do not claim token savings from elapsed waits or before/after cohorts alone.
+
+## Update safely
+
+From a source checkout, use `python3 scripts/update_plugin.py` to retain old
+cache versions and prepare SHA-pinned runtimes outside the replaceable cache.
+The helper does not enable or trust hooks. New v0.4.1 commands load verified
+runtime bytes even after cache eviction; missing code blocks admission with a
+structured failure rather than requesting a Stop retry loop.
+
+Tasks with older pathname commands need a one-time finish/restart and retained
+cache. Do not claim that installing new code updates an already captured old
+command. Preserve hook settings unless enabling them is authorized, and review
+new command hashes before trusting them. Never clear HALT or silently turn
+enforcement off to recover from a missing runtime.
