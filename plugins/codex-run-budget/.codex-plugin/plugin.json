@@ -1,6 +1,6 @@
 {
   "name": "codex-run-budget",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "description": "Shared token governance and read-only recent-task telemetry for Codex sessions and subagents.",
   "author": {
     "name": "EasyVibeCoding",
@@ -20,8 +20,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Codex Run Budget",
-    "shortDescription": "Shared token budgets for Codex and subagents.",
-    "longDescription": "Adds a local shared ledger, token lineage, deterministic STEER guidance, and next-supported-boundary HALT controls through Codex lifecycle hooks. Read-only surveys inspect recent unbudgeted tasks, models, wait outcomes, and repeated results without changing governance.",
+    "shortDescription": "Budgets and lifecycle diagnostics for Codex.",
+    "longDescription": "Adds a local shared ledger, token lineage, deterministic STEER guidance, and next-supported-boundary HALT controls through Codex lifecycle hooks. Read-only surveys inspect recent unbudgeted tasks, turn endings, interruptions, compactions, models, wait outcomes, and repeated results without changing governance.",
     "developerName": "EasyVibeCoding",
     "category": "Productivity",
     "capabilities": [
@@ -33,7 +33,8 @@
       "Start a 100k shared run budget for this task.",
       "Show the current run-budget status.",
       "Explain this run's token lineage.",
-      "Survey recent tasks for model usage, wait outcomes, and repeated results."
+      "Survey recent tasks for model usage, wait outcomes, and repeated results.",
+      "Inspect recent turn endings, interruptions, and compactions."
     ]
   }
 }

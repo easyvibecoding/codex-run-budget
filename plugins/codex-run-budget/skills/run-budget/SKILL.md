@@ -1,6 +1,6 @@
 ---
 name: run-budget
-description: Set, inspect, halt, resume, or explain a shared token budget, or audit local Codex tasks for model usage, waiting, and repeated tool work. Use for run budgets, token lineage, STEER/HALT governance, or retrospective task-efficiency analysis.
+description: Set, inspect, halt, resume, or explain a shared token budget, or audit local Codex tasks for lifecycle, model usage, waiting, and repeated tool work. Use for run budgets, token lineage, STEER/HALT governance, or retrospective task-efficiency analysis.
 ---
 
 # Run Budget
@@ -99,6 +99,14 @@ days and prints a compact summary. Use `--json` for per-thread evidence.
 Optional `--days` and `--limit` narrow or expand the cohort; `audit <path>
 <other-page>` inspects exact files. These commands do not start a budget or
 change hooks, waiting settings, or task state.
+
+For turn endings, interruptions, and context compaction, use `survey --lifecycle`.
+It shows at most 20 hashed evidence rows; `--json` includes all observed turns.
+`no_terminal_observed` means the selected snapshot lacks an ending, not that a
+task is running or stuck. `later_turn_observed` means a different turn started
+in the same thread, not that the interrupted work was completed. Check window
+boundaries, missing starts, conflicts, and compaction attribution before drawing
+conclusions. These diagnostics never authorize automatic restart, resume, or HALT.
 
 Check coverage and conflicts before quoting totals. Use thread identity and
 explicit turn/model metadata, not a shared `session_id`, to distinguish parents

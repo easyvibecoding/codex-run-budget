@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -152,6 +153,98 @@ class SurveyTest(unittest.TestCase):
         )
         self.assertEqual(failure.returncode, 2)
         self.assertNotIn("private-missing", failure.stderr)
+        self.assertFalse(ledger.exists())
+
+    def test_lifecycle_only_evidence_and_bounded_detail_output(self):
+        turns = [
+            {
+                "thread_hash": f"{index:064x}",
+                "turn_hash": f"{index + 100:064x}",
+                "state": "completed",
+                "started_at": index,
+                "start_observed": True,
+                "duration_ms": 2500,
+                "duration_source": "explicit",
+                "compactions": index,
+            }
+            for index in range(22)
+        ]
+        turns[-1].update(state="no_terminal_observed", duration_ms=None, start_observed=False)
+        audit = {
+            "lifecycle": {
+                "summary": {"turns": 22, "completed": 21, "no_terminal_observed": 1},
+                "turns": turns,
+            }
+        }
+        with patch("codex_run_budget.survey.audit_transcripts", return_value=audit):
+            report = survey_transcripts(self.root)
+        self.assertTrue(report["coverage"]["evidence_available"])
+        self.assertFalse(report["coverage"]["evidence_limited"])
+        text = survey_summary(report, lifecycle_details=True)
+        self.assertIn("Turn lifecycle: observed 22, completed 21", text)
+        self.assertIn("Lifecycle evidence rows: 20 of 22", text)
+        rows = [line for line in text.splitlines() if " | " in line][1:]
+        self.assertEqual(len(rows), 20)
+        self.assertIn("no_terminal_observed | unknown", rows[0])
+        self.assertIn("not proof of same-work recovery", text)
+        self.assertNotIn("Lifecycle evidence rows", survey_summary(report))
+
+    def test_unattributed_compaction_evidence_and_nested_issues_remain_visible(self):
+        audit = {
+            "diagnostics": {"lifecycle_conflicting_terminals": 1},
+            "lifecycle": {
+                "summary": {"turns": 0, "compactions": 2, "unattributed_compactions": 2},
+                "turns": [],
+                "diagnostics": {"conflicting_terminals": 1, "unattributed_compactions": 2},
+            },
+        }
+        with patch("codex_run_budget.survey.audit_transcripts", return_value=audit):
+            report = survey_transcripts(self.root)
+        self.assertTrue(report["coverage"]["evidence_available"])
+        self.assertTrue(report["coverage"]["evidence_limited"])
+        self.assertEqual(
+            report["coverage"]["evidence_issues"]["lifecycle_conflicting_terminals"], 1
+        )
+        text = survey_summary(report, lifecycle_details=True)
+        self.assertIn("Compactions: 2; unattributed 2", text)
+        self.assertIn("lifecycle_unattributed_compactions=2", text)
+
+    def test_lifecycle_cli_is_read_only_and_json_remains_full(self):
+        sessions = self.root / "sessions"
+        sessions.mkdir()
+        stamp = datetime.now(timezone.utc).isoformat()
+        records = [
+            {"type": "session_meta", "payload": {"id": "private-thread"}},
+            {"type": "event_msg", "payload": {"type": "task_started", "turn_id": "private-turn"}},
+            {
+                "type": "event_msg",
+                "payload": {
+                    "type": "task_complete",
+                    "turn_id": "private-turn",
+                    "duration_ms": 50,
+                    "last_agent_message": "private completion text",
+                },
+            },
+        ]
+        (sessions / "private-page.jsonl").write_text(
+            "\n".join(json.dumps({"timestamp": stamp, **record}) for record in records) + "\n"
+        )
+        ledger = self.root / "no-ledger"
+        env = {**os.environ, "CODEX_HOME": str(self.root), "CODEX_RUN_BUDGET_HOME": str(ledger)}
+        command = [sys.executable, str(PLUGIN / "scripts/run_budget.py"), "survey"]
+        result = subprocess.run([*command, "--lifecycle"], env=env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Turn lifecycle: observed 1, completed 1", result.stdout)
+        self.assertIn("Lifecycle evidence rows: 1 of 1", result.stdout)
+        self.assertNotIn("private-", result.stdout)
+        self.assertNotIn("private completion text", result.stdout)
+        self.assertFalse(ledger.exists())
+        result = subprocess.run([*command, "--json"], env=env, capture_output=True, text=True)
+        self.assertEqual(json.loads(result.stdout)["audit"]["lifecycle"]["summary"]["turns"], 1)
+        failure = subprocess.run(
+            [*command, "--json", "--lifecycle"], env=env, capture_output=True, text=True
+        )
+        self.assertEqual(failure.returncode, 2)
         self.assertFalse(ledger.exists())
 
 

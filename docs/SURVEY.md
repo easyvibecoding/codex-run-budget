@@ -13,6 +13,10 @@ compact summary; `--json` exposes the source, thread, model, timing, and coverag
 evidence. It never opens the ledger, changes configuration, trusts hooks,
 starts a task, or calls a model or network service.
 
+The lifecycle extension adds per-turn ending and compaction evidence to the
+same reader. `survey --lifecycle` exposes a bounded detail view without a
+second scan or separate state store. See [lifecycle semantics](LIFECYCLE.md).
+
 ## Interface and evidence
 
 `audit_transcript(path)` remains the single-file interface.

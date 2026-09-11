@@ -1,5 +1,50 @@
 # Validation evidence
 
+## Turn lifecycle telemetry — 2026-09-12, v0.5.0
+
+The dependency-free suite passed 92 tests, plus Ruff, repository, plugin, and
+skill validators. Fresh read-back review covered identity isolation, replay,
+window clipping, contradictory timing/model evidence, privacy, and CLI bounds.
+The later-turn index was additionally exercised with 16,000 synthetic turns
+(32,000 events): 0.21 seconds on the validation machine. This is a local
+scaling check, not a performance guarantee.
+
+Fixed real-task cohort: 101 local pages, from 2026-09-10 20:26:01 UTC through
+2026-09-11 22:40:59 UTC. Hashed source identities fixed membership before
+implementation; a separate shape/count probe agreed with the new report.
+
+- 143 observed turns: 119 completed, 21 aborted, 3 without a terminal record.
+- 12 aborted turns had a subsequent different turn start in the same thread.
+  This does not prove same-work recovery; the 9 others are not labelled failures.
+- 2 starts were before the lower bound and remained observed context.
+- 121 compaction records represented 97 distinct window IDs; 24 were replays.
+  3 compactions lacked a usable turn association and stayed unattributed.
+- Request usage, model usage, tool aggregates, wait aggregates, raw compaction
+  counts, and largest-request totals exactly matched the v0.4.2 baseline.
+
+The cohort remained partial evidence: 3 oversized records were skipped, and
+missing terminal/compaction attribution was reported. It is not an account-wide
+inventory, a live task-state check, billing usage, or measured token savings.
+
+Native canary: installed v0.5.0 into an isolated Codex home, reviewed/trusted
+its hooks, and used the desktop-bundled Codex 0.153.4 app-server. One thread
+completed a turn, began a bounded `sleep 20` test command, was explicitly
+interrupted by the controller, then completed a new turn. The controller waited
+for command execution before interruption: an immediate interrupt after the
+`turn/start` response had correctly returned "no active turn to interrupt".
+
+The native terminal statuses were `completed`, `interrupted`, `completed`.
+The transcript audit reported `completed`, `aborted`, `completed`, with the
+aborted row linked to the later turn. Three starts and three terminal events
+were observed. No budget was selected, resumed, or disabled. The successful
+canary thread's SHA-256 prefix is `107234b3f3ea`; failed controller attempts
+were retained separately and were not counted as successful canaries.
+
+The hook runtime differs from v0.4.2 only in the package version member;
+governor, ledger, bootstrap, and admission semantics are unchanged. The pinned
+runtime SHA-256 is
+`119919542c1d37a14358afe4f0ff7b85823f5b5ba4d4b7b498e463a667a746a4`.
+
 ## Reliability hardening — 2026-09-07, v0.3.0
 
 The 44-test suite, validators, existing-ledger migration, installed hook review,

@@ -19,6 +19,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from .lifecycle import aggregate_lifecycle
 from .transcript import MAX_TRANSCRIPT_BYTES, _usage_from_line
 from .util import stable_hash
 
@@ -92,7 +93,11 @@ def _timestamp_value(value: Any) -> float | None:
     """Parse an ISO/numeric timestamp without retaining its source text."""
 
     if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return float(value) if math.isfinite(float(value)) else None
+        try:
+            numeric = float(value)
+        except (OverflowError, ValueError):
+            return None
+        return numeric if math.isfinite(numeric) else None
     if not isinstance(value, str):
         return None
     try:
@@ -145,6 +150,92 @@ def _event_context(
     else:
         turn_hash = None
     return thread_hash, turn_hash
+
+
+def _lifecycle_context(
+    payload: dict[str, Any], page: dict[str, Any]
+) -> tuple[str | None, str | None, bool, bool]:
+    """Resolve lifecycle IDs while preserving explicit-invalid boundaries.
+
+    The older request/call parser treats ``null`` and an empty identifier as a
+    missing field for backwards compatibility.  Native lifecycle records need
+    a stricter boundary: a present-but-invalid ID must never silently inherit
+    the preceding context and become a different turn.
+    """
+
+    active_thread = page.get("active_thread_hash")
+    active_turn = page.get("active_turn_hash")
+
+    thread_present = "thread_id" in payload
+    thread_raw = payload.get("thread_id")
+    thread_invalid = thread_present and not (isinstance(thread_raw, str) and thread_raw)
+    thread_hash = stable_hash(thread_raw) if not thread_invalid and thread_present else None
+    if not thread_present:
+        thread_hash = active_thread
+
+    turn_present = "turn_id" in payload
+    turn_raw = payload.get("turn_id")
+    turn_invalid = turn_present and not (isinstance(turn_raw, str) and turn_raw)
+    turn_hash = stable_hash(turn_raw) if not turn_invalid and turn_present else None
+    if not turn_present:
+        # An explicit thread can inherit a turn only when it is the currently
+        # active thread.  An invalid explicit thread never reaches this path.
+        if thread_hash is not None and thread_hash == active_thread:
+            turn_hash = active_turn
+        else:
+            turn_hash = None
+    return thread_hash, turn_hash, thread_invalid, turn_invalid
+
+
+def _new_lifecycle_event(
+    state: dict[str, Any],
+    page: dict[str, Any],
+    payload: dict[str, Any],
+    kind: str,
+    stamp: float | None,
+    in_scope: bool,
+    sequence: int,
+) -> dict[str, Any]:
+    """Create a bounded lifecycle event without retaining native payloads."""
+
+    thread_hash, turn_hash, thread_invalid, turn_invalid = _lifecycle_context(payload, page)
+    duration_present = "duration_ms" in payload
+    duration = _number_ms(payload.get("duration_ms")) if duration_present else None
+    ttf_present = "time_to_first_token_ms" in payload
+    time_to_first_token_ms = (
+        _number_ms(payload.get("time_to_first_token_ms")) if ttf_present else None
+    )
+    window_present = "window_id" in payload
+    window_raw = payload.get("window_id")
+    window_invalid = window_present and not (isinstance(window_raw, str) and window_raw)
+    window_hash = stable_hash(window_raw) if window_present and not window_invalid else None
+    model = _model_label(payload.get("model")) if "model" in payload else None
+    event_hash = stable_hash(
+        [kind, thread_hash, turn_hash, stamp, duration, time_to_first_token_ms, window_hash]
+    )
+    return {
+        "kind": kind,
+        "stamp": stamp,
+        "in_scope": in_scope,
+        "before_window": (
+            state["since"] is not None and stamp is not None and stamp < state["since"]
+        ),
+        "sequence": sequence,
+        "source_hash": page["source_hash"],
+        "event_hash": event_hash,
+        "thread_hash": thread_hash,
+        "turn_hash": turn_hash,
+        "thread_invalid": thread_invalid,
+        "turn_invalid": turn_invalid,
+        "context_bound": thread_hash is not None,
+        "model": model,
+        "duration_ms": duration,
+        "duration_invalid": duration_present and duration is None,
+        "time_to_first_token_ms": time_to_first_token_ms,
+        "time_to_first_token_invalid": ttf_present and time_to_first_token_ms is None,
+        "window_hash": window_hash,
+        "window_invalid": window_invalid,
+    }
 
 
 def _model_label(value: Any) -> str:
@@ -227,7 +318,10 @@ def _tool_hashes(namespace: Any, name: Any) -> tuple[str, str, str]:
 def _number_ms(value: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    value = float(value)
+    try:
+        value = float(value)
+    except (OverflowError, ValueError):
+        return None
     if not math.isfinite(value) or value < 0:
         return None
     return value
@@ -430,6 +524,9 @@ def _parse_line(state: dict[str, Any], page: dict[str, Any], record: Any, sequen
         return
 
     if record_type == "compacted":
+        page["events"].append(
+            _new_lifecycle_event(state, page, payload, "compacted", stamp, in_scope, sequence)
+        )
         if in_scope:
             state["compactions"] += 1
             page["generation"] = page.get("generation", 0) + 1
@@ -477,6 +574,11 @@ def _parse_line(state: dict[str, Any], page: dict[str, Any], record: Any, sequen
                 }
             )
         return
+
+    if record_type == "event_msg" and kind in ("task_started", "task_complete", "turn_aborted"):
+        page["events"].append(
+            _new_lifecycle_event(state, page, payload, kind, stamp, in_scope, sequence)
+        )
 
     if kind in ("task_started", "task_complete", "turn_aborted"):
         if in_scope:
@@ -1314,6 +1416,35 @@ def _finalize(state: dict[str, Any]) -> dict[str, Any]:
         else None
     )
     metadata = _thread_metadata(state)
+    thread_roles: dict[str, str] = {}
+    for ref, row in metadata.items():
+        parents = row.get("parents", set())
+        parent_hash = next(iter(parents)) if len(parents) == 1 else None
+        thread_roles[ref] = _role_for(
+            parent_hash, known=row.get("known", False) and len(parents) <= 1
+        )
+    lifecycle_events: list[dict[str, Any]] = []
+    for page in state["pages"]:
+        for event in page["events"]:
+            if event.get("kind") not in (
+                "task_started",
+                "task_complete",
+                "turn_aborted",
+                "compacted",
+            ):
+                continue
+            item = dict(event)
+            item["ref"] = _event_ref(
+                page,
+                event.get("thread_hash"),
+                event.get("context_bound"),
+            )
+            lifecycle_events.append(item)
+    lifecycle = aggregate_lifecycle(
+        lifecycle_events,
+        contexts=contexts,
+        thread_roles=thread_roles,
+    )
     threads_by_public: dict[tuple[str, str], dict[str, Any]] = {}
     for ref, row in metadata.items():
         thread_hash = _public_thread_hash(ref)
@@ -1373,6 +1504,7 @@ def _finalize(state: dict[str, Any]) -> dict[str, Any]:
         "threads": threads,
         "model_usage": model_usage,
         "waits": wait_rows,
+        "lifecycle": lifecycle,
         "limitations": [
             "Request usage is deduplicated by response ID across pages.",
             "Thread identity uses session_meta.id or explicit thread_id; "

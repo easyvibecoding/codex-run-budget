@@ -126,7 +126,7 @@ def survey_transcripts(
     )
     audit = audit_transcripts(selected, since=since, until=until)
     evidence_issues = _evidence_issues(audit)
-    evidence_available = bool(audit.get("request_usage") or audit.get("tools"))
+    evidence_available = _has_evidence(audit)
     return {
         "schema_version": 1,
         "coverage": {
@@ -175,15 +175,104 @@ def _evidence_issues(audit: dict[str, Any]) -> dict[str, int]:
         "ambiguous",
         "not_regular",
         "snapshot_cap",
+        "unattributed",
     )
+    diagnostics = dict(audit.get("diagnostics", {}))
+    for key, value in audit.get("lifecycle", {}).get("diagnostics", {}).items():
+        name = key if key.startswith("lifecycle_") else "lifecycle_" + key
+        diagnostics[name] = max(diagnostics.get(name, 0), value)
     return {
         key: value
-        for key, value in audit.get("diagnostics", {}).items()
+        for key, value in diagnostics.items()
         if value and any(word in key for word in words)
     }
 
 
-def survey_summary(report: dict[str, Any]) -> str:
+def _has_evidence(audit: dict[str, Any]) -> bool:
+    lifecycle = audit.get("lifecycle", {}).get("summary", {})
+    return bool(
+        audit.get("request_usage")
+        or audit.get("tools")
+        or lifecycle.get("turns")
+        or lifecycle.get("compactions")
+        or lifecycle.get("unattributed_compactions")
+    )
+
+
+def _lifecycle_lines(lifecycle: dict[str, Any], *, details: bool) -> list[str]:
+    summary = lifecycle.get("summary", {})
+    if not summary.get("turns"):
+        lines = ["Turn lifecycle: no matching turn records; state coverage unknown"]
+        if summary.get("compactions") or summary.get("unattributed_compactions"):
+            lines.append(
+                f"Compactions: {summary.get('compactions', 0):,}; "
+                f"unattributed {summary.get('unattributed_compactions', 0):,}"
+            )
+        return lines
+    lines = [
+        "Turn lifecycle: "
+        + ", ".join(
+            f"{label} {summary.get(key, 0):,}"
+            for key, label in (
+                ("turns", "observed"),
+                ("completed", "completed"),
+                ("aborted", "aborted"),
+                ("no_terminal_observed", "no terminal observed"),
+                ("conflicted", "conflicted"),
+            )
+        ),
+        f"Later turn starts: after aborted {summary.get('aborted_with_later_turn', 0):,}, "
+        f"after no terminal {summary.get('no_terminal_with_later_turn', 0):,}; "
+        f"compactions {summary.get('compactions', 0):,} "
+        f"(unattributed {summary.get('unattributed_compactions', 0):,})",
+        "Missing terminal evidence does not mean running/stuck; a later turn is not proof "
+        "of same-work recovery.",
+    ]
+    if not details:
+        return lines
+    rows = lifecycle.get("turns", [])
+    priority = {"conflicted": 0, "no_terminal_observed": 1, "aborted": 2, "completed": 3}
+    ranked = sorted(
+        rows,
+        key=lambda row: (
+            priority.get(row.get("state"), 4),
+            -row.get("compactions", 0),
+            -(row.get("started_at") or row.get("ended_at") or 0),
+            row["thread_hash"],
+            row["turn_hash"],
+        ),
+    )[:20]
+    lines.extend(
+        [
+            f"Lifecycle evidence rows: {len(ranked)} of {len(rows)}; "
+            "conflicts/missing endings, aborted, then compaction count (not an alarm ranking).",
+            "thread/turn | state | duration | compactions | start evidence | later turn",
+        ]
+    )
+    for row in ranked:
+        duration = row.get("duration_ms")
+        duration_text = (
+            f"{duration / 1000:.1f}s ({row.get('duration_source') or 'unknown'})"
+            if duration is not None
+            else "unknown"
+        )
+        start = (
+            "before window"
+            if row.get("started_before_window")
+            else "observed"
+            if row.get("start_observed")
+            else "missing"
+        )
+        later = "observed" if row.get("later_turn_observed") else "not observed"
+        lines.append(
+            f"{row['thread_hash'][:12]}/{row['turn_hash'][:12]} | {row['state']} | "
+            f"{duration_text} | {row.get('compactions', 0)} | {start} | {later}"
+        )
+    lines.append("Durations are reported wall-clock spans, not CPU time or token savings.")
+    return lines
+
+
+def survey_summary(report: dict[str, Any], *, lifecycle_details: bool = False) -> str:
     """Compact default output; full per-thread evidence remains available as JSON."""
     selection, audit = report["selection"], report["audit"]
     threads = audit.get("threads", [])
@@ -208,8 +297,8 @@ def survey_summary(report: dict[str, Any]) -> str:
             if _evidence_issues(audit)
             else (
                 "observed records only"
-                if usage or tools
-                else "unknown; no matching usage or tool records"
+                if _has_evidence(audit)
+                else "unknown; no matching usage, tool, or lifecycle records"
             )
         ),
         (
@@ -252,6 +341,7 @@ def survey_summary(report: dict[str, Any]) -> str:
         if tools
         else "Repeated-result candidates: no matching tool records"
     )
+    lines.extend(_lifecycle_lines(audit.get("lifecycle", {}), details=lifecycle_details))
     diagnostics = _evidence_issues(audit)
     if diagnostics:
         lines.append(
@@ -260,7 +350,7 @@ def survey_summary(report: dict[str, Any]) -> str:
     lines.extend(
         [
             "Event returns do not prove agent completion; repeated results do not prove waste.",
-            "Use --json for per-thread/model evidence and all coverage diagnostics.",
+            "Use --lifecycle for bounded turn details; --json for all evidence and diagnostics.",
         ]
     )
     return "\n".join(lines)

@@ -61,7 +61,11 @@ def build_parser() -> argparse.ArgumentParser:
     survey.add_argument("directory", type=Path, nargs="?")
     survey.add_argument("--days", type=float, default=7)
     survey.add_argument("--limit", type=int, default=200)
-    survey.add_argument("--json", action="store_true", help="include complete per-thread evidence")
+    output = survey.add_mutually_exclusive_group()
+    output.add_argument("--json", action="store_true", help="include complete per-thread evidence")
+    output.add_argument(
+        "--lifecycle", action="store_true", help="include up to 20 turn-lifecycle evidence rows"
+    )
 
     listing = sub.add_parser("list", help="list recent governed runs")
     listing.add_argument("--limit", type=int, default=20)
@@ -98,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 report = audit_transcripts(args.transcript)
             print(
-                survey_summary(report)
+                survey_summary(report, lifecycle_details=args.lifecycle)
                 if args.command == "survey" and not args.json
                 else json.dumps(report, indent=2, sort_keys=True)
             )

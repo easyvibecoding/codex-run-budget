@@ -238,6 +238,13 @@ paginated files without summing cumulative snapshots. It reports actual
 Changed versus unchanged result hashes help review repeated tool work; neither
 is a semantic judgment about progress or waste.
 
+Use `survey --lifecycle` to inspect turn endings, interruptions, later turn
+starts, and compaction counts. The default summary includes lifecycle totals;
+the detail view shows at most 20 hashed turn rows, with full evidence in
+`survey --json`. A missing ending is not proof of a running or stuck task, and
+a later turn is not proof that the same work recovered. See
+[lifecycle interpretation](docs/LIFECYCLE.md).
+
 Analyze an existing local Codex JSONL transcript, including tasks that never
 enabled a budget:
 
@@ -258,6 +265,8 @@ The JSON report is read-only and does not open the governance ledger. It reports
 - Tool call counts, UTF-8 output sizes, call/output elapsed spans, repeated inputs,
   and repetitions after compaction. Tool identities and source paths are hashed.
 - Missing, partial, duplicate, conflicting, and unmatched records as diagnostics.
+- Deduplicated per-turn lifecycle evidence, explicit versus observed duration,
+  compactions, and whether another turn subsequently started in that thread.
 
 Repeated calls are investigation candidates: polling, changed external state,
 and required verification can justify them. Timings may overlap and include
