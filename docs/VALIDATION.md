@@ -1,5 +1,45 @@
 # Validation evidence
 
+## First-request counter visible before the preview returns — 2026-09-13 Asia/Taipei
+
+The next short-turn incident still showed the pending-write state. Scoped native
+event read-back found an earlier `token_usage_record` with explicit request,
+turn and thread counters; the old reader only accepted the later post-tool
+`token_count`. The fix validates attribution and counter consistency and selects
+the newest native cumulative snapshot without summing the two sources.
+
+279 tests passed, plus Ruff, repository/plugin validators and the sensitive-data
+worktree gate. New cases cover first-request availability, duplicate snapshots,
+lagging/event counters, exact scopes, malformed/missing/oversized fields, counter
+resets, bounded tails and immutable pre-final versus separate Stop receipts.
+An independent code read-back and all 38 automatic-report tests also passed.
+
+Installed `0.13.0+codex.20260912233654`; all 11 plugin hooks read back enabled and
+trusted with no warnings/errors. One real fresh Codex CLI turn took 20.238 seconds
+and made exactly one preview command, emitting one inline reference and one Stop
+receipt. The card contained 23,852 observed tokens, matching the first native
+request counter, rather than the pending state. Stop recorded 47,908 tokens:
+47,554 input (30,464 cached) and 354 output (0 reasoning), matching the final native
+counter. The normal answer followed the tool response: two model requests total,
+no report continuation/retry. These totals include startup/task context; they
+are not incremental report cost or billing measurements. The 626-byte injected
+instruction contained no HTML. Border, Traditional Chinese and the report switch
+were preserved; child scope was `none`.
+
+Read-only inspection of the installed desktop renderer found that inline visuals
+use cached HTML snapshots, not a filesystem watcher. A same-path Stop overwrite
+would not refresh an already mounted card, so the experimental file-finalization
+approach was discarded and is not shipped. The result remains a pre-final
+snapshot, not a live final bill. Native desktop UI automation was unavailable;
+the real CLI lifecycle and file contents are verified, not a new desktop paint.
+
+All 24 pre-edit cache versions matched their retained hashes, and source and
+installed plugin trees matched. Configuration outside reviewed hook trust hashes
+and optional test workspace trust, plus the report switch, remained unchanged.
+Runtime SHA-256:
+`51ba3428e6e54b3fb92142b0f24630946feef93360075b749c6594ec278caac4`.
+Existing Tasks keep their pinned runtime and saved cards; new Tasks load the fix.
+
 ## First-turn settlement and bounded inline flow — 2026-09-13 Asia/Taipei
 
 272 tests passed, plus Ruff, repository/plugin validators and the sensitive-data

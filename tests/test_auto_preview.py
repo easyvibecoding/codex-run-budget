@@ -16,7 +16,7 @@ sys.path.insert(0, str(ROOT / "plugins/codex-run-budget/lib"))
 from codex_run_budget.auto_preview import preview  # noqa: E402
 from codex_run_budget.auto_report import configure, handle, observed_total, recent  # noqa: E402
 from codex_run_budget.governor import Governor  # noqa: E402
-from test_auto_report import counter  # noqa: E402
+from test_auto_report import counter, native_counter  # noqa: E402
 
 TASK = "12345678-1234-1234-1234-123456789abc"
 
@@ -135,6 +135,30 @@ class AutoPreviewTest(unittest.TestCase):
         receipt = json.loads(next((self.data / "auto-reports").glob("*.json")).read_text())
         self.assertEqual(receipt["usage"]["total"], 1200)
         self.assertEqual(receipt["usage_status"], "verified_first_turn_counter")
+        self.assertEqual(card_path.read_text(), card)
+
+    def test_first_request_is_visible_inline_before_cumulative_event(self):
+        turn = "fresh-request-turn"
+        self.transcript.write_text("".join(json.dumps(row) + "\n" for row in (
+            self.meta,
+            {"type": "event_msg", "payload": {"type": "task_started", "turn_id": turn}},
+            {"type": "turn_context", "payload": {"turn_id": turn}},
+        )))
+        payload = {**self.payload, "turn_id": turn}
+        handle(payload, self.data)
+        with self.transcript.open("a") as output:
+            output.write(json.dumps(native_counter(TASK, turn, 1200)) + "\n")
+        result = preview(self.data, TASK, turn, output_dir=self.output, home=self.root)
+        self.assertEqual(result["status"], "preview")
+        card_path = next(self.output.glob("*.html"))
+        card = card_path.read_text()
+        self.assertIn('class="viz-stat-value tabular-nums">1,200</div>', card)
+        self.assertNotIn("等待用量寫入", card)
+        with self.transcript.open("a") as output:
+            output.write(json.dumps(counter(1500)) + "\n")
+        handle({**payload, "hook_event_name": "Stop"}, self.data, home=self.root)
+        receipt = json.loads(next((self.data / "auto-reports").glob("*.json")).read_text())
+        self.assertEqual(receipt["usage"]["total"], 1500)
         self.assertEqual(card_path.read_text(), card)
 
     def test_child_stop_and_final_card_merge_without_model_self_report(self):

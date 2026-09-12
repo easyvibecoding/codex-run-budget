@@ -19,7 +19,7 @@ from typing import Any
 
 from .report_i18n import ReportText, resolve_locale
 from .task_catalog import task_description
-from .transcript import _usage_from_line
+from .transcript import _usage_from_line, request_usage
 from .util import stable_hash
 
 SCAN_BYTES = 8 * 1024 * 1024
@@ -152,6 +152,30 @@ def _model(value: Any) -> str | None:
     )
 
 
+def _request_thread_counter(payload: dict, task: str, turn: str) -> dict | None:
+    """Use the native cumulative counter, never add request and event totals.
+
+    A request record can precede the post-tool token_count event. Its own
+    usage is not a thread total; require explicit, consistent native scopes.
+    """
+    if (payload.get("thread_id") != task or payload.get("turn_id") != turn
+            or payload.get("session_id", task) != task
+            or payload.get("root_turn_id", turn) != turn):
+        return None
+    response = payload.get("response_id")
+    if not isinstance(response, str) or not 0 < len(response) <= 512:
+        return None
+    values = [request_usage(payload.get(key)) for key in
+              ("usage", "turn_token_usage", "thread_token_usage")]
+    if any(value is None or any(n > 2**63 - 1 for n in value.values()) for value in values):
+        return None
+    if any(any(left[key] > right[key] for key in left)
+           for left, right in zip(values, values[1:])):
+        return None
+    return {key: values[-1][key + "_tokens"] for key in
+            ("total", "input", "cached_input", "output", "reasoning_output")}
+
+
 def _first_turn_proof(records, turn: str) -> tuple[bool, bool]:
     """Prove a full, original first-turn prefix; absence alone is never zero."""
     if not records or records[0].get("type") != "session_meta":
@@ -183,6 +207,7 @@ def _first_turn_proof(records, turn: str) -> tuple[bool, bool]:
             model_seen |= event != "message" or payload.get("role") not in (
                 "user", "developer", "system"
             )
+        values = None
         if kind == "event_msg":
             model_seen |= event in ("agent_message", "agent_reasoning")
             if event == "token_count":
@@ -191,11 +216,18 @@ def _first_turn_proof(records, turn: str) -> tuple[bool, bool]:
                 if usage is None:
                     return False, False
                 values = asdict(usage)
-                if previous and any(values[key] < previous[key] for key in values):
-                    return False, False
-                previous = values
         if kind == "token_usage_record":
             model_seen = True
+            values = _request_thread_counter(payload, metadata.get("id"), turn)
+            # Older clients may only have per-request usage. They establish
+            # model activity, but cannot supply a cumulative counter.
+            if "thread_token_usage" in payload and values is None:
+                return False, False
+        if values is not None:
+            usage_seen = True
+            if previous and any(values[key] < previous[key] for key in values):
+                return False, False
+            previous = values
     return began, began and not model_seen and not usage_seen
 
 
@@ -273,6 +305,11 @@ def snapshot(path_value: Any, turn_id: str) -> dict[str, Any]:
                     usage_seen = True
                     usage = _usage_from_line(record)
                     result["usage"] = asdict(usage) if usage is not None else None
+            if (not usage_seen and record.get("type") == "token_usage_record"
+                    and payload.get("turn_id") == turn_id
+                    and "thread_token_usage" in payload):
+                usage_seen = True
+                result["usage"] = _request_thread_counter(payload, identity, turn_id)
             if (
                 record.get("type") == "turn_context"
                 and payload.get("turn_id") == turn_id

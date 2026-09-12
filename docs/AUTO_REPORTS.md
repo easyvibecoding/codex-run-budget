@@ -19,6 +19,13 @@ usage records in this turn's observation window, and renders a bundled HTML
 fragment into a task-owned writable visualization directory selected by the caller.
 Its output is only status/reference, not the report body. The numeric card is a
 pre-final snapshot, excluding subsequent work; it is not overwritten by Stop.
+The bounded snapshot also accepts the native `thread_token_usage` counter in a
+`token_usage_record`, which may be written before the post-tool `token_count`
+event. It validates explicit Task/turn attribution, response identity, and
+consistent request/turn/thread totals, then selects the newest cumulative
+observation. It never adds the request amount to an event counter or treats a
+request-only amount as a thread total. Missing or incompatible native fields
+remain unavailable; the rollout schema is not a stable public contract.
 If a verified fresh first turn has not persisted its first usage counter yet,
 the card says it is awaiting the usage write. It does not display zero or request
 another tool call. Stop independently settles whatever counters are then available.
@@ -57,6 +64,10 @@ edit. Its instruction, one tool call/result and output reference have a token co
 model compliance is not a deterministic native-footer guarantee. The visualize
 surface must be available; no renderer, model or network is needed by the fixed
 template itself. CLI validation can prove reference emission but not desktop paint.
+The installed desktop renderer reads inline HTML into a cached snapshot rather
+than watching its source file. Updating that file at Stop does not automatically
+refresh an already displayed card, so this plugin does not promise a live final
+receipt inside the pre-final card or modify the App to force one.
 Markdown is the native-file-viewer entry
 point; HTML is an offline static alternative, not a promised automatic preview.
 

@@ -41,6 +41,16 @@ def counter(total):
     }
 
 
+def native_counter(task, turn, total, *, request=None, turn_total=None):
+    def usage(value):
+        return counter(value)["payload"]["info"]["total_token_usage"]
+    return {"type": "token_usage_record", "payload": {
+        "thread_id": task, "session_id": task, "turn_id": turn, "root_turn_id": turn,
+        "response_id": "example-response", "usage": usage(request or total),
+        "turn_token_usage": usage(turn_total or total), "thread_token_usage": usage(total),
+    }}
+
+
 class AutoReportTest(unittest.TestCase):
     def setUp(self):
         locale = patch("codex_run_budget.auto_report.resolve_locale",
@@ -191,6 +201,73 @@ class AutoReportTest(unittest.TestCase):
         self.event("Stop", 1)
         self.assertEqual(self.report()["usage"]["total"], 1200)
         self.assertEqual(self.report()["usage_status"], "verified_first_turn_counter")
+
+    def test_first_request_counter_available_before_post_tool_event(self):
+        self.fresh_page()
+        self.start()
+        request = native_counter(self.payload["session_id"], self.payload["turn_id"], 1200)
+        self.append(request)
+        self.append(request)  # A repeated cumulative snapshot is never added twice.
+        self.event("Stop", 1)
+        self.assertEqual(self.report()["usage"]["total"], 1200)
+        self.assertEqual(self.report()["usage_status"], "verified_first_turn_counter")
+
+    def test_request_counter_advances_old_event_without_double_counting(self):
+        self.start()
+        self.append(counter(1200))
+        self.append(native_counter("private-task-id", self.payload["turn_id"], 1500,
+                                   request=300, turn_total=500))
+        self.assertEqual(snapshot(str(self.page), self.payload["turn_id"])["usage"]["total"], 1500)
+        self.append(counter(1500))
+        self.event("Stop", 1)
+        self.assertEqual(self.report()["usage"]["total"], 500)
+
+    def test_native_counter_rejects_foreign_scope_missing_fields_and_bad_values(self):
+        base = native_counter("private-task-id", self.payload["turn_id"], 1200)
+        variants = [
+            {"thread_id": "other-task"}, {"session_id": "other-session"},
+            {"root_turn_id": "other-turn"}, {"response_id": ""},
+            {"response_id": "x" * 513}, {"turn_token_usage": None},
+            {"usage": counter(1300)["payload"]["info"]["total_token_usage"]},
+            {"turn_token_usage": counter(1300)["payload"]["info"]["total_token_usage"]},
+        ]
+        for field, value in (("total_tokens", True), ("input_tokens", -1),
+                             ("cached_input_tokens", 1300), ("output_tokens", 2**64)):
+            usage = dict(base["payload"]["thread_token_usage"], **{field: value})
+            variants.append({"thread_token_usage": usage})
+        for changes in variants:
+            with self.subTest(fields=list(changes)):
+                self.page.write_text(json.dumps(self.meta) + "\n")
+                self.append({**base, "payload": {**base["payload"], **changes}})
+                self.assertIsNone(snapshot(str(self.page), self.payload["turn_id"])["usage"])
+
+    def test_request_only_and_foreign_turn_do_not_replace_cumulative_counter(self):
+        self.append(native_counter("private-task-id", "other-turn", 9000))
+        request = native_counter("private-task-id", self.payload["turn_id"], 1200)
+        del request["payload"]["thread_token_usage"]
+        self.append(request)
+        self.assertEqual(snapshot(str(self.page), self.payload["turn_id"])["usage"]["total"], 1000)
+
+    def test_first_request_counter_reset_invalidates_zero_baseline_proof(self):
+        self.fresh_page()
+        self.start()
+        self.append(native_counter(self.payload["session_id"], self.payload["turn_id"], 1200))
+        self.append(native_counter(self.payload["session_id"], self.payload["turn_id"], 1000))
+        self.event("Stop", 1)
+        self.assertIsNone(self.report()["usage"])
+
+    def test_native_counter_uses_bounded_tail_but_never_invents_first_turn_baseline(self):
+        self.fresh_page()
+        self.start()
+        self.append({"type": "response_item", "payload": {"type": "message",
+                     "role": "assistant", "content": "x" * SCAN_BYTES}})
+        self.append(native_counter(self.payload["session_id"], self.payload["turn_id"], 1200))
+        observed = snapshot(str(self.page), self.payload["turn_id"])
+        self.assertEqual(observed["usage"]["total"], 1200)
+        self.assertTrue(observed["tail_limited"])
+        self.assertFalse(observed["first_turn_only"])
+        self.event("Stop", 1)
+        self.assertIsNone(self.report()["usage"])
 
     def test_first_turn_proof_rejects_history_forks_reset_and_incomplete_prefix(self):
         cases = {
