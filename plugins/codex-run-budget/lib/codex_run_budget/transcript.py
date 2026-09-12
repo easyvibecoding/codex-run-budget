@@ -9,6 +9,31 @@ MAX_TRANSCRIPT_BYTES = 256 * 1024 * 1024
 MAX_USAGE_SCAN_BYTES = 8 * 1024 * 1024
 
 
+def request_usage(value: Any) -> dict[str, int] | None:
+    """Validate native per-request usage, shared by offline and inline reports."""
+    if not isinstance(value, dict):
+        return None
+    required_keys = ("input_tokens", "cached_input_tokens", "output_tokens", "total_tokens")
+    optional_keys = ("cache_write_input_tokens", "reasoning_output_tokens")
+    if any(key not in value for key in required_keys):
+        return None
+    values: dict[str, int] = {}
+    for key in required_keys + optional_keys:
+        raw = value.get(key, 0)
+        if type(raw) is not int or raw < 0:
+            return None
+        values[key] = raw
+    if values["cached_input_tokens"] > values["input_tokens"]:
+        return None
+    if values["cache_write_input_tokens"] > values["input_tokens"]:
+        return None
+    if values["reasoning_output_tokens"] > values["output_tokens"]:
+        return None
+    if values["total_tokens"] != values["input_tokens"] + values["output_tokens"]:
+        return None
+    return values
+
+
 @dataclass(frozen=True)
 class Usage:
     total: int = 0

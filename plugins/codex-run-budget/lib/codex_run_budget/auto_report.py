@@ -23,7 +23,7 @@ from .util import stable_hash
 
 SCAN_BYTES = 8 * 1024 * 1024
 MAX_ROWS = 10_000
-EVENTS = {"UserPromptSubmit", "Stop", "Interrupt", "SessionEnd"}
+EVENTS = {"UserPromptSubmit", "Stop", "Interrupt", "SessionEnd", "SubagentStop"}
 
 
 def _pending(key: str) -> str:
@@ -271,15 +271,50 @@ def _delta(before: dict[str, Any], after: dict[str, Any]) -> tuple[dict[str, int
     return delta, "boundary_counter_difference"
 
 
+def observed_total(parent: dict | None, children: dict) -> tuple[dict | None, bool]:
+    """Known subtotal only; missing or partial sources never become complete zeroes."""
+    child = children.get("usage") if children.get("status") != "none" else None
+    available = [value for value in (parent, child) if value is not None]
+    total = (
+        {key: sum(value[key] for value in available) for key in available[0]} if available else None
+    )
+    if parent is None and total is not None and total["total"] == 0:
+        total = None
+    complete = (
+        parent is not None and children.get("status") in ("observed", "none")
+        and not children.get("pending_agents") and not children.get("missing_agents")
+        and not children.get("selection_limited")
+    )
+    return total, complete
+
+
+def child_coverage(children: dict) -> str:
+    if children.get("status") == "none":
+        return "未找到子代理"
+    if children.get("status") == "unavailable":
+        return "子代理資料未完整取得；未知不代表 0"
+    return (
+        f"子代理 {children.get('agents_with_usage', 0)}/{children.get('agents_seen', 0)}"
+        " 位有用量紀錄"
+        + (" · 含未完成或缺漏" if children.get("status") != "observed" else " · 已觀測紀錄")
+    )
+
+
 def _documents(receipt: dict[str, Any]) -> tuple[str, str]:
-    usage = receipt["usage"]
+    children = receipt.get("subagents") or {"status": "unavailable"}
+    usage, complete = observed_total(receipt["usage"], children)
 
     def number(key: str) -> str:
         return f"{usage[key]:,}" if usage is not None else "未觀測"
 
     rows = [
         ("回合經過時間（含等待）", f"{receipt['elapsed_seconds']:.1f} 秒"),
-        ("Token 前後差額", number("total")),
+        ("已觀測 Token 合計" if complete else "已觀測 Token 小計（含缺漏）", number("total")),
+        ("主代理 Token 前後差額",
+         f"{receipt['usage']['total']:,}" if receipt["usage"] else "未觀測"),
+        ("子代理 Token", "不適用" if children.get("status") == "none" else
+         f"{children['usage']['total']:,}" if children.get("usage") else "未觀測"),
+        ("子代理涵蓋", child_coverage(children)),
         ("輸入（含快取）", number("input")),
         ("其中快取輸入", number("cached_input")),
         ("輸出（含思考）", number("output")),
@@ -289,10 +324,11 @@ def _documents(receipt: dict[str, Any]) -> tuple[str, str]:
     ]
     notes = [
         "這是使用者回合的 Stop 邊界快照，不代表整個 Task 的工作已完成；其他 Hook 仍可能續跑。",
-        "Token 是同一紀錄檔的累計計數器前後差額，可能落後；不是逐請求總和、額度百分比或帳單。",
+        "主代理採累計計數器前後差額；子代理採本窗口已保存的逐請求紀錄，可能落後；不是額度百分比或帳單。",
         "計數器重置／切檔時留白。尾端掃描有容量上限，無法證明中間沒有未觀測到的重置。",
         "輸入已含快取、輸出已含思考，不重複加總。觀測為零不代表本回合免費。",
-        "僅目前 Task 紀錄檔；不加總子代理，不回溯其他 Task，不刷新原生額度。",
+        "僅目前 Task 與有親代關係的子代理；按用量紀錄時間歸入窗口，不將子代理歷史總量重複加總。",
+        "子代理未結束、缺少逐請求紀錄或超過讀取上限時保留缺漏；不會等待、強制停止或要求續跑。",
         "使用固定 Python 排版；不呼叫模型、不要求續跑、不改寫助理回答或原始對話。",
     ]
     contexts = receipt["stop_contexts"]
@@ -417,13 +453,20 @@ def handle(
     *,
     wall: float | None = None,
     monotonic: float | None = None,
+    home: Path | None = None,
 ) -> dict[str, Any] | None:
     """One start-time footer instruction; Stop never requests continuation."""
     event = payload.get("hook_event_name")
-    if event not in EVENTS or payload.get("agent_id"):
+    if event not in EVENTS:
         return None
     try:
         if not settings(root)["enabled"]:
+            return None
+        if event == "SubagentStop":
+            from .child_usage import capture
+            capture(payload, root, home=home, now=wall)
+            return None
+        if payload.get("agent_id"):
             return None
         session, turn = payload.get("session_id"), payload.get("turn_id")
         if not isinstance(session, str) or not session or len(session) > 256:
@@ -501,11 +544,13 @@ def handle(
             started = json.loads(row["baseline"])
             stopped = snapshot(payload.get("transcript_path"), turn)
             usage, status = _delta(started, stopped)
+            from .child_usage import collect
+            children = collect(root, session, row["started"], now, home=home)
             receipt = {
-                "schema_version": 1,
+                "schema_version": 2,
                 "scope": "user_turn_stop_boundary",
                 "task_hash": started.get("task_hash") or "unknown",
-                "task": task_description(session)
+                "task": task_description(session, home=home)
                 if started.get("task_hash") == stable_hash(session)
                 else None,
                 "turn_hash": row["turn_hash"],
@@ -522,7 +567,8 @@ def handle(
                 "stop_hook_active": payload.get("stop_hook_active") is True,
                 "model_requests_for_report": 0,
                 "native_quota_refreshed": False,
-                "subagents_included": False,
+                "subagents_included": children.get("agents_with_usage", 0) > 0,
+                "subagents": children,
                 "final_usage_may_not_yet_be_persisted": True,
             }
             try:

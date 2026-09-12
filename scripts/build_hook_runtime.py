@@ -31,7 +31,7 @@ EVENTS = (
 )
 MODULES = (
     "__init__.py", "governor.py", "ledger.py", "transcript.py", "util.py", "hook_adapter.py",
-    "auto_report.py", "auto_preview.py", "task_catalog.py",
+    "auto_report.py", "auto_preview.py", "task_catalog.py", "child_usage.py",
 )
 
 

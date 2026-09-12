@@ -108,7 +108,7 @@ class Governor:
     def handle(self, payload: dict[str, Any]) -> dict[str, Any] | None:
         result = self._handle_budget(payload)
         if payload.get("hook_event_name") in (
-            "UserPromptSubmit", "Stop", "Interrupt", "SessionEnd"
+            "UserPromptSubmit", "Stop", "Interrupt", "SessionEnd", "SubagentStop"
         ):
             # Preserve decisions and context; reporting may add one start footer.
             # Rejected prompts do not start a timing interval.

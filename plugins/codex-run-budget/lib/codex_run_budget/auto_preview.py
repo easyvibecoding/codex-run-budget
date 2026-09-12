@@ -1,6 +1,6 @@
 """One bounded pre-final snapshot for Codex's inline visualization surface.
 
-This tool never starts or completes a turn, calls a model, reads other Tasks,
+This tool never starts or completes a turn, calls a model, reads unrelated Tasks,
 or rewrites a previously presented snapshot. The model emits only its reference.
 """
 
@@ -18,13 +18,16 @@ from pathlib import Path
 from string import Template
 from urllib.parse import quote
 
-from .auto_report import _delta, settings, snapshot
+from .auto_report import _delta, child_coverage, observed_total, settings, snapshot
+from .child_usage import collect
 from .task_catalog import TaskCatalog, _uuid
 from .util import stable_hash
 
 
 def render_card(receipt: dict) -> str:
-    usage = receipt["usage"]
+    parent = receipt["usage"]
+    children = receipt.get("subagents") or {"status": "unavailable"}
+    usage, complete = observed_total(parent, children)
 
     def number(key):
         return f"{usage[key]:,}" if usage is not None else "未觀測"
@@ -48,13 +51,31 @@ def render_card(receipt: dict) -> str:
     values = {
         "key": receipt["key"], "task": receipt["task_name"],
         "captured": receipt["captured_at"], "total": number("total"), "elapsed": elapsed,
-        "usage_label": "開始至快照的累計差額" if usage is not None else "缺少可靠的前後計數器",
+        "total_label": "已觀測合計 Token" if complete else "已觀測小計 Token",
+        "usage_label": "主代理＋子代理" if complete else "部分資料缺漏，非完整總量",
+        "parent_total": f"{parent['total']:,}" if parent is not None else "未觀測",
+        "child_total": (
+            "不適用" if children.get("status") == "none" else
+            f"{children['usage']['total']:,}" if children.get("usage") is not None else "未觀測"
+        ),
+        "coverage": child_coverage(children),
         "model": observed("model"), "effort": observed("reasoning_effort"),
         "fast": observed("fast_mode", {True: "開啟", False: "關閉"}),
         "input": number("input"), "cached": number("cached_input"),
         "output": number("output"), "reasoning": number("reasoning_output"),
     }
-    return Template(template.decode()).substitute({k: escape(str(v)) for k, v in values.items()})
+    escaped = {k: escape(str(v)) for k, v in values.items()}
+    # Native display names are data. Only this fixed markup is inserted unescaped.
+    escaped["agents"] = "".join(
+        '<div class="report-agent"><div>' + escape(row["display_name"])
+        + '<div class="text-small">由 ' + escape(row.get("parent_name") or "未知親代")
+        + " 派生 · " + ("收到結束事件" if row.get("terminal_observed") else "結束尚未確認")
+        + '</div></div><div class="tabular-nums">'
+        + (f"{row['usage']['total']:,}" if row.get("usage") is not None else "未觀測")
+        + "</div></div>"
+        for row in children.get("rows", [])[:32]
+    )
+    return Template(template.decode()).substitute(escaped)
 
 
 def preview(root: Path, session: str, turn: str, *, output_dir: Path, home=None) -> dict:
@@ -80,10 +101,11 @@ def preview(root: Path, session: str, turn: str, *, output_dir: Path, home=None)
         return {"status": "no_active_start"}
     if row["session_hash"] != stable_hash(session) or row["turn_hash"] != stable_hash(turn):
         raise ValueError("timing identity mismatch")
+    captured = time.time()
     seconds = time.monotonic() - row["monotonic"]
     if (
         not math.isfinite(seconds) or seconds < 0
-        or abs(time.time() - row["started"] - seconds) > 10
+        or abs(captured - row["started"] - seconds) > 10
     ):
         seconds = None
     if policy["threshold_seconds"] and (seconds is None or seconds <= policy["threshold_seconds"]):
@@ -99,10 +121,12 @@ def preview(root: Path, session: str, turn: str, *, output_dir: Path, home=None)
     if current.get("task_hash") != stable_hash(session):
         return {"status": "source_unavailable"}
     usage, status = _delta(json.loads(row["baseline"]), current)
+    children = collect(root, session, row["started"], captured, home=home)
     receipt = {
         "key": key, "task_name": task["display_name"], "usage": usage, "usage_status": status,
         "contexts": current["contexts"], "elapsed_seconds": seconds,
-        "captured_at": datetime.now().astimezone().strftime("%H:%M:%S %Z"),
+        "captured_at": datetime.fromtimestamp(captured).astimezone().strftime("%H:%M:%S %Z"),
+        "subagents": children,
     }
     if not output_dir.is_absolute() or any(
         p.is_symlink() for p in (output_dir, *output_dir.parents)

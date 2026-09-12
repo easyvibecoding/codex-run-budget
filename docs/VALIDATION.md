@@ -1,5 +1,65 @@
 # Validation evidence
 
+## Deterministic child receipts and inline subtotal — 2026-09-13 Asia/Taipei
+
+`SubagentStop` now saves already-persisted, explicitly child-owned per-request
+usage. The parent's existing one pre-final preview reconciles those receipts
+with a bounded read of the native descendant set, deduplicates response hashes,
+and sums only observations inside the parent turn window. Copied parent records
+and child lifetime counters are not added. Rendering and collection call no
+model; the normal preview tool round trip still uses tokens. Neither capture nor
+reconciliation requests continuation, waits for a child, or changes governance.
+
+219 tests passed, plus Ruff, repository, plugin and changed-skill validators.
+Coverage includes real-module capture/preview/Stop integration, explicit identity,
+window boundaries, replay, reused agents, parent fork copies, late records,
+conflicts, source shrink, scan limits, missing data, report-off preservation,
+privacy, escaping, immutable cards and preserved HALT decisions. Independent
+read-back reviewed the collection and report integration; the final overlapping
+header correction was covered by a new regression and the installed test below.
+
+Two actual installed Codex CLI runs each created exactly one child that answered
+an arithmetic question. Each parent completed one turn with one normal-answer
+inline reference to an existing card and one Stop receipt. Numeric storage tagged
+one request `source=hook` in each run: this proves the child Stop captured usage
+before the later parent preview, rather than only relying on preview fallback.
+The first run captured 30,049 child tokens, but exposed a conservative false
+`partial` marker when a redundant 128 KiB header ended mid-record even though the
+tail contained the entire file. That artificial-cut handling was corrected.
+
+The final installed run completed in 22.444 seconds. Its child receipt and card
+agreed on 23,783 tokens: 23,738 input (5,888 cached) plus 45 output (38 reasoning).
+There was one observed child, one unique request, no pending/missing child and
+no selection limit; the scan read 223,822 bytes. Native reported turn usage was
+92,744 input (75,136 cached) and 566 output tokens; this includes test/startup
+context and is not incremental reporter cost. No report-hook failure or
+report-driven extra turn occurred. The pre-existing chronicle unstable-feature
+warning remained. The fresh parent's initial counter baseline was unavailable,
+so the card correctly showed a known child subtotal and an unknown parent,
+not a fabricated complete combined total. Synthetic integration separately
+verified 500 parent + 200 child = 700 without double-counting cached/reasoning.
+
+The actual final-test fragment was checked in the official visualize wrapper at
+736px and 320px, light and dark: all four cases retained the 1px outer border,
+had no horizontal overflow, displayed the child row and expanded details.
+Desktop-light and mobile-dark screenshots were visually read back. This checks
+layout, not an unobserved claim that the final desktop answer has already painted.
+
+Installed `0.13.0+codex.20260912211751` with the official cachebuster and retention
+updater. Source/cache and all retained prior-cache identities matched. All 11
+plugin hooks and the unrelated Railway hook read back enabled/trusted with no
+hook warnings/errors. Config changes were only the 11 reviewed hook trust hashes
+and the CLI-created trust entry for the isolated test directory; saved automatic
+report preferences were byte-identical. No budget or recurring observer was
+enabled. Runtime SHA-256:
+`e6a7a2d610c3180ab1a56eb0256262f5dc9c553c6befe54724f493af60a070ed`.
+
+The longstanding desktop Task still has no current active report-start baseline;
+it is not relabelled or repaired with invented values. A fresh Task is the runtime
+pickup boundary. The native child Stop is an observation opportunity, not proof
+that every final token has flushed. Missing/unreadable/truncated evidence remains
+unknown/partial; the pre-final card is immutable and Stop settlement stays separate.
+
 ## Bordered card and child-scope clarification — 2026-09-13 Asia/Taipei
 
 The user's desktop screenshot confirms that the preceding v0.13 inline fragment

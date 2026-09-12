@@ -12,6 +12,7 @@
     #run-budget-$key summary { cursor: pointer; }
     #run-budget-$key .report-detail { display: grid; grid-template-columns: 1fr auto; gap: 8px 16px; }
     #run-budget-$key .report-detail dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+    #run-budget-$key .report-agent { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; padding: 12px 0; border-top: 1px solid var(--border); }
   </style>
   <div class="report-head">
     <h2>本回合用量</h2>
@@ -20,7 +21,7 @@
   <p>$task</p>
   <div class="viz-grid">
     <div class="card viz-stat">
-      <div>主代理 Token</div>
+      <div>$total_label</div>
       <div class="viz-stat-value tabular-nums">$total</div>
       <div class="text-small">$usage_label</div>
     </div>
@@ -30,21 +31,25 @@
       <div class="text-small">包含工具與等待</div>
     </div>
   </div>
+  <p class="text-small">$coverage</p>
   <dl class="report-config">
-    <div><dt>模型</dt><dd>$model</dd></div>
-    <div><dt>思考等級</dt><dd>$effort</dd></div>
-    <div><dt>Fast</dt><dd>$fast</dd></div>
+    <div><dt>主代理模型</dt><dd>$model</dd></div>
+    <div><dt>主代理思考等級</dt><dd>$effort</dd></div>
+    <div><dt>主代理 Fast</dt><dd>$fast</dd></div>
   </dl>
   <details>
     <summary>Token 明細與計量範圍</summary>
     <dl class="report-detail">
+      <dt>主代理</dt><dd>$parent_total</dd>
+      <dt>子代理已觀測小計</dt><dd>$child_total</dd>
       <dt>輸入（含快取）</dt><dd>$input</dd>
       <dt>其中快取輸入</dt><dd>$cached</dd>
       <dt>輸出（含思考）</dt><dd>$output</dd>
       <dt>其中思考 Token</dt><dd>$reasoning</dd>
     </dl>
-    <p class="text-small">僅目前主代理；子代理尚未納入本卡統計，不代表資料收集失敗。
-      計數器可能落後，不含之後的工具與結論。
+    $agents
+    <p class="text-small">主代理採開始至快照的累計差額；子代理採窗口內已保存的逐請求紀錄，按請求去重。
+      資料可能延遲或不完整，不含快照之後的工具與結論。
       這不是訂閱額度百分比或帳單。未知不代表 0；Stop 結算另存，不會回寫這張快照。</p>
   </details>
 </section>

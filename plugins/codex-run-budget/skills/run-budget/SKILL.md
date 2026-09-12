@@ -274,10 +274,16 @@ disk and later model reading still cost resources. Do not add a model follow-up
 just to produce, decorate or announce these automatic receipts.
 
 Call them user-turn Stop snapshots, not proof the whole Task has completed.
-Missing starts, interrupted turns and subagents are excluded; duplicate Stops
-are not regenerated. Other hooks may continue after the snapshot. Boundary
-counter differences can be missing or lag final persistence, and do not include
-descendants, actual quota shares or billing. Historical settings are observed,
+Missing starts and interrupted turns are excluded; duplicate Stops are not
+regenerated. Subagents do not generate their own inline card. Instead,
+SubagentStop deterministically saves available usage evidence; the parent's one
+preview rereads bounded exact descendants and merges deduplicated request records
+within this parent turn's observation window. No self-report prompt, polling,
+forced stop or report-driven continuation is needed. Missing/late records remain
+partial or unknown, never zero. The card separates parent and child subtotals.
+Other hooks may continue after the snapshot. Parent boundary-counter differences
+and child request records may lag final persistence; neither establishes actual
+quota shares or billing. Historical settings are observed,
 not inferred or used to allocate token totals. The bounded index keeps at most
 10,000 turns; report failures are informational and never change governance.
 

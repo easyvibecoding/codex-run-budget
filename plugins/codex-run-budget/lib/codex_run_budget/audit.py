@@ -22,6 +22,7 @@ from typing import Any
 from .lifecycle import aggregate_lifecycle
 from .meter_plan import plan_type
 from .transcript import MAX_TRANSCRIPT_BYTES, _usage_from_line
+from .transcript import request_usage as _usage
 from .util import stable_hash
 
 # A caller can inspect many transcript pages, but the captured snapshots are
@@ -555,38 +556,6 @@ def _token_count_plan_observation(payload: dict[str, Any]) -> tuple[bool, str | 
     # A plan observed in a preceding token_count is useful nearby evidence,
     # not a billing assertion about the specific request that follows.
     return True, value, f"token_count.rate_limits.{key}"
-
-
-def _usage(value: Any) -> dict[str, int] | None:
-    """Validate one request-level usage object.
-
-    ``cache_write_input_tokens`` and ``reasoning_output_tokens`` were added by
-    the v2 transcript format.  Missing optional fields are zero so v1 reports
-    retain their old totals and keys.
-    """
-
-    if not isinstance(value, dict):
-        return None
-    required_keys = ("input_tokens", "cached_input_tokens", "output_tokens", "total_tokens")
-    optional_keys = ("cache_write_input_tokens", "reasoning_output_tokens")
-    if any(key not in value for key in required_keys):
-        return None
-    keys = required_keys + optional_keys
-    values: dict[str, int] = {}
-    for key in keys:
-        raw = value.get(key, 0)
-        if type(raw) is not int or raw < 0:
-            return None
-        values[key] = raw
-    if values["cached_input_tokens"] > values["input_tokens"]:
-        return None
-    if values["cache_write_input_tokens"] > values["input_tokens"]:
-        return None
-    if values["reasoning_output_tokens"] > values["output_tokens"]:
-        return None
-    if values["total_tokens"] != values["input_tokens"] + values["output_tokens"]:
-        return None
-    return values
 
 
 def _in_scope(stamp: float | None, since: float | None, until: float | None) -> bool:

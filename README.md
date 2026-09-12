@@ -143,8 +143,12 @@ remain. For an explicitly desired duration filter, use
 `auto-report enable --threshold-seconds 300` (strictly greater than 300 seconds).
 
 These bounded receipts are lighter than the manual multi-window report above:
-current transcript boundary counters only, no native-quota refresh or other
-Task/subagent aggregation. Missing counters stay unknown; Stop may precede
+parent boundary counters plus deduplicated descendant request records in the
+current turn's observation window, with no native-quota refresh or unrelated
+Task scan. `SubagentStop` saves available numeric evidence; the parent's one
+pre-final read reconciles late records without asking children to self-report,
+wait, stop or continue. Parent/child subtotals, names/ownership and incomplete
+coverage are shown in the card. Missing counters stay unknown; Stop may precede
 the final persisted usage event. The inline card is explicitly a **pre-final
 snapshot**; it excludes subsequent tools/final text and is not updated by Stop.
 The reference is model-written in the normal answer, not an edit to a sent answer.
