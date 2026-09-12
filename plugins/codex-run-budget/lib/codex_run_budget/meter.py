@@ -22,7 +22,7 @@ from urllib.parse import quote
 
 from .audit import KNOWN_MODELS
 from .meter_plan import normalize_subscription, plan_type
-from .meter_policy import pricing_context
+from .meter_policy import credit_scenarios, pricing_context
 from .survey import survey_transcripts
 from .util import stable_hash
 
@@ -30,6 +30,13 @@ MAX_SNAPSHOTS = 10_000
 MAX_SNAPSHOT_BYTES = 1024 * 1024
 _LABEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9_. /:+-]{0,127}\Z")
 _DATE = re.compile(r"\d{4}-\d{2}-\d{2}\Z")
+_REACHED_TYPES = (
+    "rate_limit_reached",
+    "workspace_owner_credits_depleted",
+    "workspace_member_credits_depleted",
+    "workspace_owner_usage_limit_reached",
+    "workspace_member_usage_limit_reached",
+)
 _TOKEN_FIELDS = {
     "inputTokens": "input_tokens",
     "cachedInputTokens": "cached_input_tokens",
@@ -139,6 +146,11 @@ def _official_usage(item: dict[str, Any]) -> dict[str, Any]:
             and input_tokens is not None
             and output_tokens is not None
             and total != input_tokens + output_tokens
+        ) or (
+            input_tokens is not None
+            and tokens["cached_input_tokens"] is not None
+            and tokens["net_new_input_tokens"] is not None
+            and tokens["cached_input_tokens"] + tokens["net_new_input_tokens"] != input_tokens
         ) or any(
             input_tokens is not None and tokens[field] is not None and tokens[field] > input_tokens
             for field in ("cached_input_tokens", "net_new_input_tokens")
@@ -238,6 +250,8 @@ def normalize_snapshot(sources: dict[str, Any]) -> dict[str, Any]:
                 if individual
                 else None,
                 "spend_control_reached": _bool(bucket.get("spendControlReached")),
+                "rate_limit_reached_type": bucket.get("rateLimitReachedType")
+                if bucket.get("rateLimitReachedType") in _REACHED_TYPES else None,
             }
         )
     usage = sources.get("account_usage")
@@ -293,9 +307,18 @@ def normalize_snapshot(sources: dict[str, Any]) -> dict[str, Any]:
         "capture_started_at": started,
         "captured_at": finished,
         "account_hash": stable_hash(account) if isinstance(account, str) and account else None,
-        "source_status": "available"
-        if any(w["used_percent"] is not None for b in limits for w in b["windows"])
-        else "unavailable",
+        "source_status": "available" if (
+            _bool(raw.get("ordinaryUsageAllowed")) is not None
+            or any(
+                any(w["used_percent"] is not None for w in b["windows"])
+                or any(value is not None for value in b["credits"].values())
+                or b["rate_limit_reached_type"] is not None
+                or b["spend_control_reached"] is not None
+                or (b["individual_limit"] is not None
+                    and any(value is not None for value in b["individual_limit"].values()))
+                for b in limits
+            )
+        ) else "unavailable",
         "ordinary_usage_allowed": _bool(raw.get("ordinaryUsageAllowed")),
         "limits": limits,
         "subscription": normalize_subscription(sources.get("account_response"), limits),
@@ -497,6 +520,8 @@ def compare_snapshots(before: dict[str, Any], after: dict[str, Any]) -> dict[str
 
 
 def _format(value: Any) -> str:
+    if type(value) is bool:
+        return "true" if value else "false"
     return (
         "unknown"
         if value is None
@@ -524,6 +549,9 @@ def snapshot_summary(snapshot: dict[str, Any]) -> str:
         f"evidence: {subscription.get('status') or 'not_recorded'}; "
         "allowance tier multiplier: unknown"
     )
+    allowed = snapshot.get("ordinary_usage_allowed")
+    permission = "allowed" if allowed is True else "not_allowed" if allowed is False else "unknown"
+    lines.append(f"Backend ordinary included usage permission: {permission}")
     for bucket in snapshot["limits"]:
         for window in bucket["windows"]:
             lines.append(
@@ -532,6 +560,23 @@ def snapshot_summary(snapshot: dict[str, Any]) -> str:
                 f"used {_format(window['used_percent'])}%; "
                 f"remaining {_format(window['remaining_percent'])}%; "
                 f"resets {_utc(window['resets_at'])}"
+            )
+        credits = bucket.get("credits") or {}
+        lines.append(
+            f"{bucket['limit_id']} native controls: reached type "
+            f"{bucket.get('rate_limit_reached_type') or 'unknown'}; "
+            f"spend control reached {_format(bucket.get('spend_control_reached'))}; "
+            f"has credits {_format(credits.get('has_credits'))}; "
+            f"unlimited credits {_format(credits.get('unlimited'))}; "
+            f"credit balance {_format(credits.get('balance'))}"
+        )
+        individual = bucket.get("individual_limit")
+        if individual:
+            lines.append(
+                "  Native individual spend control: "
+                f"used {_format(individual.get('used'))} / {_format(individual.get('limit'))}; "
+                f"remaining {_format(individual.get('remaining_percent'))}%; "
+                f"resets {_utc(individual.get('resets_at'))} (not model-token quota)"
             )
     if not snapshot["limits"]:
         lines.append("Quota data unavailable (not zero usage).")
@@ -553,6 +598,10 @@ def snapshot_summary(snapshot: dict[str, Any]) -> str:
             )
     lines.append(
         "Credits estimates and local tokens are not quota percentages; missing means unknown."
+    )
+    lines.append(
+        "Permission is not inferred from percentages, reset times or credit balance. "
+        "Active-turn continuation and other shared usage can differ from new-turn admission."
     )
     if snapshot["diagnostics"]:
         lines.append("Diagnostics: " + ", ".join(snapshot["diagnostics"]))
@@ -807,6 +856,52 @@ def tasks_summary(report: dict[str, Any]) -> str:
     lines.append("Historical plan is a nearby quota observation, not a verified per-request bill.")
     lines.append("Fast reference (2026-09-12, ChatGPT credits only): Astra/5.6/5.5 2.5x; 5.4 2x.")
     lines.append("These published mode multipliers are not measured task charges or quota shares.")
+    return "\n".join(lines)
+
+
+def meter_estimate(
+    *,
+    sessions: Path | None = None,
+    days: float = 7,
+    limit: int = 200,
+    thread_ids: list[str] | None = None,
+    now: float | None = None,
+) -> dict[str, Any]:
+    """Use the offline Task seam; never query native billing or mutate storage."""
+    report = meter_tasks(
+        sessions=sessions, days=days, limit=limit, thread_ids=thread_ids, now=now
+    )
+    report["status"] = "counterfactual_credit_scenarios"
+    report["credit_scenarios"] = credit_scenarios(
+        report["local_usage"]["request_context_usage"]
+    )
+    return report
+
+
+def estimate_summary(report: dict[str, Any]) -> str:
+    scenarios = report["credit_scenarios"]
+    reference = scenarios["reference"]
+    coverage = scenarios["coverage"]
+    lines = [
+        "Counterfactual ChatGPT credit scenarios — NOT actual charges or quota percentages",
+        f"Rate card verified {reference['verified_on']}; "
+        f"freshness {reference['freshness']['status']}",
+        f"Priced requests: {coverage['priced_requests']}; "
+        f"excluded: {coverage['excluded_requests']}",
+        f"Standard scenario: {_format(scenarios['standard_scenario_credits'])} credits; "
+        f"Fast scenario: {_format(scenarios['fast_scenario_credits'])} credits",
+        "Task / model / effort / observed Fast | requests | Standard credits | Fast credits",
+    ]
+    for row in sorted(scenarios["rows"], key=lambda row: -row["requests"])[:20]:
+        lines.append(
+            f"{(row.get('thread_hash') or 'unknown')[:12]} / {row.get('model')} / "
+            f"{row.get('reasoning_effort') or 'unknown'} / "
+            f"{_format(row.get('observed_fast_mode'))} | {row['requests']} | "
+            f"{_format(row['standard_scenario_credits'])} | "
+            f"{_format(row['fast_scenario_credits'])} ({row['status']})"
+        )
+    lines.extend(scenarios["limitations"])
+    lines.append("Rate source: " + reference["token_rate_source"])
     return "\n".join(lines)
 
 

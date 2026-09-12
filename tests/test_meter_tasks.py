@@ -184,7 +184,7 @@ class MeterTasksTest(unittest.TestCase):
 
     def test_cli_tasks_and_rates_do_not_read_native_or_write_storage(self):
         destination = self.root / "not-created"
-        for action in ("tasks", "rates"):
+        for action in ("tasks", "rates", "estimate"):
             output = io.StringIO()
             with patch("codex_run_budget.meter_source.read_meter_sources") as native:
                 with redirect_stdout(output):

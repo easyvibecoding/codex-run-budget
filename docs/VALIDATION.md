@@ -1,5 +1,31 @@
 # Validation evidence
 
+## Documented credit scenarios and native controls — 2026-09-12, v0.8.0
+
+154 tests passed, including offline estimate selection, Decimal credit arithmetic,
+cached/reasoning subset handling, unpriced Spark/unknown models, unknown Fast
+rates, unsupported cache-write bases, reference freshness, credit-only quota
+observations, native limit reasons, missing-vs-false controls, permission
+independence and contradictory backend cache splits. Ruff and repository,
+plugin and skill validators passed.
+
+Official pricing, speed, app-server and workspace-control documentation were
+fetched and compared with the installed Codex CLI 0.154.0 generated schema and
+the meter's source path. The new field is additive in schema-2 snapshot payloads;
+SQLite schema and old payloads are unchanged.
+
+An isolated CLI install at `0.8.0+codex.20260912132946` successfully ran the native
+read and offline estimate. A real native response simultaneously reported zero
+credits and allowed ordinary included usage, validating why those fields must
+stay separate. A bounded one-day scan selected 90 Tasks / 10,957 requests, with
+9,780 priceable text-token requests and 1,177 excluded Spark/unknown-model
+requests. Historical Fast remained unknown; actual charge and quota-attribution
+fields remained null. These are local coverage figures, not billed account usage.
+
+The meter SQLite file SHA-256 was identical before and after both read-only
+commands. The hook archive differs from v0.7.0 only in the package-version
+member; governance, ledger, transcript enforcement and hook policy are unchanged.
+
 ## Cross-task subscription and configuration meter — 2026-09-12, v0.7.0
 
 141 tests passed, including cross-task filtering, within-turn settings changes,

@@ -229,6 +229,8 @@ python3 plugins/codex-run-budget/scripts/run_budget.py meter snapshot
 python3 plugins/codex-run-budget/scripts/run_budget.py meter report
 # Cross-task model / reasoning / Fast observations, no baseline needed:
 python3 plugins/codex-run-budget/scripts/run_budget.py meter tasks --days 1
+# Counterfactual Standard/Fast credits for observed tokens, not actual charges:
+python3 plugins/codex-run-budget/scripts/run_budget.py meter estimate --days 1
 ```
 
 The meter preserves each native bucket's actual duration, used/remaining
@@ -246,6 +248,13 @@ side by side, **not allocated proportionally**. Missing official thread usage
 is unknown, and unchanged percentages do not prove free usage. Estimates are
 not settled billing or included-quota percentages. There is no background
 polling or extra model workload. See [native meter details](docs/METER.md).
+
+Snapshots also expose native included-usage permission, credit balance and spend
+controls independently; zero purchased credits is not zero included allowance.
+The offline `estimate` action splits uncached input, cached input and output
+using the dated official rate card, showing Standard/Fast scenarios and excluded
+coverage. It never derives actual charges, dollars, or quota percentages. See
+[the documented mechanism and code path](docs/METER_MECHANICS.md).
 
 ## Development
 

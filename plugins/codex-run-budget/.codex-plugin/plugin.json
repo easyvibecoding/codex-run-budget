@@ -1,6 +1,6 @@
 {
   "name": "codex-run-budget",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Shared token governance, native account quota sensing, and recent-task telemetry for Codex.",
   "author": {
     "name": "EasyVibeCoding",
@@ -20,8 +20,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Codex Run Budget",
-    "shortDescription": "Quotas, subscription and cross-task token context.",
-    "longDescription": "Adds shared token governance and lifecycle diagnostics. Native quota sensing records account percentages and reset windows separately from local model tokens and backend-estimated credits, without inventing per-model quota allocations or changing budgets.",
+    "shortDescription": "Native quotas, controls and token credit scenarios.",
+    "longDescription": "Adds shared token governance and lifecycle diagnostics. Reads native quota, subscription and spend controls. Cross-task model/Fast/reasoning observations and dated token-credit scenarios stay separate from backend estimates and actual charges, without inventing per-model quota allocations or changing budgets.",
     "developerName": "EasyVibeCoding",
     "category": "Productivity",
     "capabilities": [

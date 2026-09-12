@@ -71,7 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
     meter = sub.add_parser("meter", help="sense native account quotas; keep local snapshots")
     meter.add_argument(
         "action",
-        choices=("snapshot", "report", "history", "tasks", "rates"),
+        choices=("snapshot", "report", "history", "tasks", "rates", "estimate"),
         nargs="?",
         default="snapshot",
     )
@@ -79,7 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--thread",
         action="append",
         default=[],
-        help="snapshot: backend usage UUID (up to 8); report/tasks: exact local task filter",
+        help="snapshot: backend UUID (up to 8); report/tasks/estimate: exact local task filter",
     )
     meter.add_argument("--json", action="store_true")
     meter.add_argument(
@@ -127,7 +127,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "meter":
         # Keep native reads and meter storage out of the enforcement runtime.
         from .meter import (
+            estimate_summary,
             load_snapshots,
+            meter_estimate,
             meter_report,
             meter_tasks,
             normalize_snapshot,
@@ -160,14 +162,17 @@ def main(argv: list[str] | None = None) -> int:
                     thread_ids=args.thread,
                 )
                 rendered = report_summary(report)
-            elif args.action == "tasks":
-                report = meter_tasks(
+            elif args.action in ("tasks", "estimate"):
+                reader = meter_estimate if args.action == "estimate" else meter_tasks
+                report = reader(
                     sessions=args.directory,
                     days=args.days,
                     limit=args.limit if args.limit is not None else 200,
                     thread_ids=args.thread,
                 )
-                rendered = tasks_summary(report)
+                rendered = (
+                    estimate_summary(report) if args.action == "estimate" else tasks_summary(report)
+                )
             elif args.action == "rates":
                 report = pricing_context()
                 rendered = json.dumps(report, indent=2, sort_keys=True)

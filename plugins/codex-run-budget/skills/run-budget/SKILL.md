@@ -164,11 +164,26 @@ plans are nearby quota observations, not exact per-request billing facts. Do
 not turn a `pro`/`prolite` enum into a detected 5x/20x allowance without direct
 evidence or backfill old Task plans from the current subscription.
 
-`meter rates` shows a dated official Fast/plan reference, not live prices or
-measured charges. Recheck its linked official source for current pricing claims;
-do not multiply raw tokens by a mode factor to invent quota percentages. Input
-already includes cached input, output includes reasoning, and reasoning levels
-have no fixed consumption multiplier in this meter.
+Snapshots also show native included-usage permission, limit-reached reasons,
+credit balance and spend controls when reported. A zero credit balance does not
+mean included quota is exhausted. Missing controls are unknown, not cleared;
+percentages and reset times do not prove permission to start another turn.
+Credit-only accounts can have usable observations without percentage windows.
+
+`meter rates` shows a dated official token/Fast/plan reference, not live prices
+or measured charges. `meter estimate --days 1` (with optional exact `--thread`)
+reprices observed text tokens as Standard and Fast **counterfactual scenarios**.
+It is offline, uses the same token cohort for both columns, and never chooses
+the historical mode or a Pro tier. Check excluded-request coverage and reference
+freshness; its 30-day review reminder is not an official tariff validity period.
+
+Recheck linked official sources for current pricing claims. The formula uses
+uncached input, cached input and output at their separate rates; output already
+includes reasoning. Neither scenario is actual credits deducted, USD, historical
+pricing, or an included-quota percentage. It excludes unpriced models,
+unsupported cache-write bases and separate tool/image/voice charges. API,
+legacy Enterprise and negotiated USD billing may use different rate cards.
+Reasoning levels have no fixed consumption multiplier in this meter.
 
 ## Update safely
 

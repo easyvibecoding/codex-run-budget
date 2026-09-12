@@ -25,6 +25,8 @@ python3 plugins/codex-run-budget/scripts/run_budget.py meter tasks --thread <UUI
 python3 plugins/codex-run-budget/scripts/run_budget.py meter report --thread <UUID>
 # Dated official mode/plan reference, not measured charges:
 python3 plugins/codex-run-budget/scripts/run_budget.py meter rates
+# Reprice local text tokens under the dated card: NOT historical charges:
+python3 plugins/codex-run-budget/scripts/run_budget.py meter estimate --days 1
 ```
 
 `--thread <UUID>` requests backend-estimated thread usage; repeat it for up to
@@ -92,6 +94,51 @@ multiplied by local tokens to invent a Task charge or quota percentage.
 | Native used/remaining percentage | Account quota bucket at observation time | A task-specific or model-specific charge |
 | Local model request tokens | Bounded, deduplicated completion-time observations in the selected interval | All account activity, settled billing, or model quota share |
 | Backend-estimated thread credits | Native estimated usage for the requested thread/model when available | Included-quota percentage or final settled charge |
+
+`meter estimate` adds a fourth, explicitly **counterfactual** measurement. It
+uses a dated public ChatGPT text-token rate card, not an account billing record.
+The Standard formula is:
+
+```text
+credits = ((input - cached_input) × input_rate
+           + cached_input × cached_rate + output × output_rate) / 1,000,000
+```
+
+The Fast scenario applies only the documented model-specific Fast factor to the
+same priced token basis. The two columns are scenarios, not a statistical range
+or evidence that switching modes preserves output/work. Recorded Fast/effort is
+shown alongside them without selecting an actual charge. Reasoning tokens are
+already in output; there is no effort multiplier. Unknown model rates and
+unsupported cache-write bases are excluded with request coverage. A missing
+Fast rate makes the combined Fast scenario unavailable, not zero. Tools, images,
+voice, retrieval-specific charges and account agreements are not reconstructed.
+
+The reference includes its source, verification date, and a 30-day review
+reminder. That interval is this tool's maintenance heuristic, not an official
+validity period; applying today's card to older tokens does not establish a
+historical rate. API, legacy Enterprise and USD agreements may differ. No
+credits-to-dollars or credits-to-included-quota conversion is exposed.
+
+## Subscription mechanics and native controls
+
+The [official pricing documentation](https://learn.chatgpt.com/docs/pricing)
+distinguishes shared included usage from credits that can extend eligible usage.
+Local, cloud and ChatGPT Work activity can share allowance; published message
+ranges are illustrations, not fixed message/token ceilings. Spark has its own
+preview bucket and is not a Fast toggle. An active turn may continue after a
+limit is reached, subject to fair use; that is not proof a new turn is allowed.
+
+The generated Codex CLI 0.154.0 protocol distinguishes `ordinaryUsageAllowed`,
+`rateLimitReachedType`, `credits`, `individualLimit` and `spendControlReached`.
+The snapshot preserves and displays these independently. Known backend limit
+reasons are allowlisted; missing/new enum values remain unknown. A credit-only
+snapshot can be available without a percentage window. Neither a 0-credit
+balance nor a displayed 100% window establishes general access by itself.
+No notification, top-up, reset or configuration-write RPC is called.
+
+See [app-server fields](https://learn.chatgpt.com/docs/app-server) and
+[workspace spend controls](https://learn.chatgpt.com/docs/enterprise/usage-limits).
+Workspace controls are plan-dependent and do not govern Platform API billing.
 
 The app-server documents [account quota and token activity reads](https://learn.chatgpt.com/docs/app-server#api-overview-1).
 The locally generated Codex 0.154.0 protocol includes optional `threadUsage`
