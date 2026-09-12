@@ -35,6 +35,7 @@ def survey_transcripts(
     days: float = 7,
     limit: int = 200,
     now: float | None = None,
+    since: float | None = None,
 ) -> dict[str, Any]:
     """Select recent regular JSONL pages, then analyze one bounded time window.
 
@@ -49,7 +50,9 @@ def survey_transcripts(
     until = time.time() if now is None else now
     if not math.isfinite(until):
         raise ValueError("invalid survey timestamp")
-    since = until - days * 86400
+    since = until - days * 86400 if since is None else since
+    if not math.isfinite(since) or not 0 < until - since <= 365 * 86400:
+        raise ValueError("invalid survey interval")
     root = (directory if directory is not None else sessions_dir()).expanduser()
     if root.is_symlink() or not root.is_dir():
         raise ValueError("survey requires an existing transcript directory")

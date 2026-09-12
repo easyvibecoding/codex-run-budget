@@ -1,7 +1,7 @@
 {
   "name": "codex-run-budget",
-  "version": "0.5.0",
-  "description": "Shared token governance and read-only recent-task telemetry for Codex sessions and subagents.",
+  "version": "0.6.0",
+  "description": "Shared token governance, native account quota sensing, and recent-task telemetry for Codex.",
   "author": {
     "name": "EasyVibeCoding",
     "url": "https://github.com/easyvibecoding"
@@ -20,8 +20,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Codex Run Budget",
-    "shortDescription": "Budgets and lifecycle diagnostics for Codex.",
-    "longDescription": "Adds a local shared ledger, token lineage, deterministic STEER guidance, and next-supported-boundary HALT controls through Codex lifecycle hooks. Read-only surveys inspect recent unbudgeted tasks, turn endings, interruptions, compactions, models, wait outcomes, and repeated results without changing governance.",
+    "shortDescription": "Native quotas, tokens and lifecycle diagnostics.",
+    "longDescription": "Adds shared token governance and lifecycle diagnostics. Native quota sensing records account percentages and reset windows separately from local model tokens and backend-estimated credits, without inventing per-model quota allocations or changing budgets.",
     "developerName": "EasyVibeCoding",
     "category": "Productivity",
     "capabilities": [
@@ -31,10 +31,8 @@
     "websiteURL": "https://github.com/easyvibecoding/codex-run-budget",
     "defaultPrompt": [
       "Start a 100k shared run budget for this task.",
-      "Show the current run-budget status.",
-      "Explain this run's token lineage.",
-      "Survey recent tasks for model usage, wait outcomes, and repeated results.",
-      "Inspect recent turn endings, interruptions, and compactions."
+      "Survey recent tasks for model tokens and lifecycle evidence.",
+      "Sense native Codex quota percentages and compare saved observations with local model tokens."
     ]
   }
 }

@@ -1,6 +1,6 @@
 ---
 name: run-budget
-description: Set, inspect, halt, resume, or explain a shared token budget, or audit local Codex tasks for lifecycle, model usage, waiting, and repeated tool work. Use for run budgets, token lineage, STEER/HALT governance, or retrospective task-efficiency analysis.
+description: Operate shared token budgets, sense native Codex account quota percentages, compare model token observations, or audit task lifecycle and efficiency. Use for quota sensing, token lineage, STEER/HALT governance, and retrospective task analysis.
 ---
 
 # Run Budget
@@ -114,6 +114,36 @@ and subagents. For waits, `timed_out=false` means an event return, not necessari
 agent completion. Separate old and new task trees when evaluating a settings
 change. Repeated unchanged results are review candidates, not proof of waste;
 do not claim token savings from elapsed waits or before/after cohorts alone.
+
+## Sense native account quota
+
+For a current percentage without saving history, use `meter --no-save`. For
+requested measurement, save snapshots around ordinary work and compare them:
+
+```sh
+python3 "$PLUGIN_ROOT/scripts/run_budget.py" meter snapshot
+python3 "$PLUGIN_ROOT/scripts/run_budget.py" meter report
+python3 "$PLUGIN_ROOT/scripts/run_budget.py" meter history
+```
+
+Each snapshot calls the signed-in Codex app-server, without a model request,
+and appends allowlisted usage to a separate local `meter.sqlite3`. It never
+resets quota, spends reset credits, starts a budget, or changes hooks. There
+is no automatic polling. Capture again after the work; `report --baseline N`
+can compare with an earlier saved snapshot. Use `--json` for all observations.
+
+`--thread <UUID>` optionally requests official thread/model usage (up to 8
+threads). Missing `threadUsage` means unavailable, not zero. When supplied,
+`estimatedUsageCreditsMicros` is a backend estimate, not settled billing or
+included-quota percentage. Preserve model, reasoning effort, speed, and the
+cached/input/output basis when interpreting credits per million tokens.
+
+Name quota windows by their actual duration; `primary` is not always five
+hours. A changed account, plan or reset invalidates its before/after delta.
+Zero displayed change is not proof of free usage. Local token-share percentages
+must not be used to split account quota among models: concurrent tasks, other
+devices, partial transcripts and reporting lag prevent that inference. Do not
+run extra model workloads just to force the percentage meter to move.
 
 ## Update safely
 

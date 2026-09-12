@@ -1,5 +1,34 @@
 # Validation evidence
 
+## Native account quota meter — 2026-09-12, v0.6.0
+
+The suite passed 114 tests, plus Ruff and repository/plugin/skill validators.
+Coverage includes multiple quota buckets, weekly-in-primary, missing data,
+account/plan/reset changes, permission preservation, integer-resolution limits,
+backend estimates, conflicting token subtotals, private identifiers, isolated
+storage, symlink rejection, native handshake/EOF/deadline failures and exact
+local interval edges. The independent review identified a missing-plan case;
+it now suppresses the delta instead of assuming the plan stayed unchanged.
+
+Using the actual signed-in Codex CLI 0.154.0 app-server, two native snapshots
+captured an increase of one percentage point in the same main weekly quota
+window. The bounded matching local interval contained two different models;
+the report retained their observed request tokens and left their quota shares
+unknown. A separate unused model bucket returned changing reset times and was
+correctly marked not comparable. No model workload was created to move the
+meter, and no reset-credit mutation or budget control was used.
+
+Account token summary/daily buckets were available. Native estimated usage
+for two requested real threads returned `threadUsage: null`; both were shown
+as unavailable, never as free usage or a token-to-quota conversion. The adapter
+keeps raw responses in memory only; CLI and storage pass through the numeric
+allowlist and identity hashing. An isolated installed cachebuster also read
+the live quota and the saved two-snapshot/local-token report successfully.
+
+The hook archive differs from v0.5.0 only in its package version member. Native
+meter calls are outside hooks and the enforcement ledger. Runtime SHA-256:
+`47c9773ab8640edf8df4372809525152e9aad016148719dc5638587a015c645f`.
+
 ## Turn lifecycle telemetry — 2026-09-12, v0.5.0
 
 The dependency-free suite passed 92 tests, plus Ruff, repository, plugin, and

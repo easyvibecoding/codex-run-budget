@@ -204,7 +204,10 @@ Set `CODEX_RUN_BUDGET_HOME` to override it. The SQLite database records:
 - observation health and pending-agent reservations.
 
 It does not intentionally record prompts, command text, tool arguments, tool
-responses, or transcript content. Nothing is sent over the network.
+responses, or transcript content. Governance and offline audits do not send
+telemetry over the network. The optional native meter uses Codex's signed-in
+account connection for read-only quota/usage requests, including thread IDs
+explicitly selected for backend usage lookup.
 
 Inspect recent runs and privacy-preserving lineage:
 
@@ -213,6 +216,29 @@ python3 plugins/codex-run-budget/scripts/run_budget.py list
 python3 plugins/codex-run-budget/scripts/run_budget.py show latest --json
 python3 plugins/codex-run-budget/scripts/run_budget.py events latest
 ```
+
+## Native account quota sensing
+
+Read the current quota percentage without saving a snapshot, or record
+observations around normal work:
+
+```sh
+python3 plugins/codex-run-budget/scripts/run_budget.py meter --no-save
+python3 plugins/codex-run-budget/scripts/run_budget.py meter snapshot
+# After ordinary work, record another snapshot, then:
+python3 plugins/codex-run-budget/scripts/run_budget.py meter report
+```
+
+The meter preserves each native bucket's actual duration, used/remaining
+percentage and reset time. Saved snapshots live in a separate local database;
+no budget or hook setting is changed. `--thread <UUID>` requests optional
+backend-estimated model credits and tokens; `--json` retains all bounded detail.
+
+Account percentage-point changes and local model-token observations are shown
+side by side, **not allocated proportionally**. Missing official thread usage
+is unknown, and unchanged percentages do not prove free usage. Estimates are
+not settled billing or included-quota percentages. There is no background
+polling or extra model workload. See [native meter details](docs/METER.md).
 
 ## Development
 
