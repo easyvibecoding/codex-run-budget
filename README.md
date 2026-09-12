@@ -68,17 +68,24 @@ and print/save-as-PDF; JSON preserves the evidence schema. Exact `--thread`
 filters are repeatable. Output never overwrites an existing file. See
 [report semantics and coverage](docs/REPORTS.md) before interpreting totals.
 
-### Automatic zero-model-call receipts (v0.10)
+### Automatic zero-model-call receipts (v0.10.1)
 
-Opt in once for future user turns, independently of token budgets:
+Automatic receipts are **on by default**, independently of token budgets.
+Use the persistent report-only switch (it does not disable the plugin):
 
 ```sh
 python3 plugins/codex-run-budget/scripts/run_budget.py auto-report enable
+python3 plugins/codex-run-budget/scripts/run_budget.py auto-report disable
 python3 plugins/codex-run-budget/scripts/run_budget.py auto-report status
 python3 plugins/codex-run-budget/scripts/run_budget.py auto-report list
 ```
 
-Each main user turn's first eligible `Stop` writes private Markdown, HTML and
+An explicit off setting is preserved across upgrades; only a missing settings
+file gets the default on value. You can also ask Codex to “turn automatic
+per-turn reports on/off”; it runs the same switch and reads back the result.
+This is a local plugin setting, not a new native Codex Settings toggle.
+
+When enabled, each main user turn's first eligible `Stop` writes private Markdown, HTML and
 JSON files and emits a short UI `systemMessage` with the Markdown path. The
 default threshold is **zero**: elapsed time is information, not a cost gate.
 This is a turn-stop receipt, not proof the whole Task is complete. It makes no

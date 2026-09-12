@@ -220,18 +220,26 @@ and symlink paths. Task/turn IDs are hashed; never add prompt-derived names.
 
 ## Automatic turn-stop receipts
 
-When the user asks to enable automatic zero-model-call reports, run:
+When the user asks to turn automatic per-turn reports on/off, use the report-only
+switch; do not disable the plugin or its budget hooks. For on, run `enable`;
+for off, run `disable`; always read back `status`:
 
 ```sh
 python3 "$PLUGIN_ROOT/scripts/run_budget.py" auto-report enable
+python3 "$PLUGIN_ROOT/scripts/run_budget.py" auto-report disable
 python3 "$PLUGIN_ROOT/scripts/run_budget.py" auto-report status
 ```
 
-The distributed default is off; enabling defaults to threshold 0, so every
+Choose only the requested action above, not both. The default is on when settings
+are absent; an explicit off setting survives upgrades. Do not rewrite user
+preferences merely to apply the default. Enabling defaults to threshold 0, so every
 eligible main user turn can report. Do not add a five-minute gate unless the
 user requests one (`--threshold-seconds 300`). `auto-report list` reads recent
 receipt state, and `auto-report disable` preserves existing files. These
 commands are independent of budget enforcement; do not start a budget for them.
+The setting is checked at each relevant hook, not cached per Task. This is a
+local plugin configuration, not a new native app Settings toggle. A conversational
+request to change it uses normal tokens; automatic generation needs no model call.
 
 UserPromptSubmit records a baseline; the first eligible Stop generates private
 Markdown/HTML/JSON and a short UI `systemMessage`. No model/network requests,

@@ -78,9 +78,31 @@ class AutoReportTest(unittest.TestCase):
         return json.loads(next((self.data / "auto-reports").glob("*.json")).read_text())
 
     def test_disabled_has_no_report_store_side_effects(self):
+        configure(self.data, enabled=False)
+        before = set(self.data.rglob("*"))
         self.assertFalse(settings(self.data)["enabled"])
         self.assertIsNone(self.event("UserPromptSubmit"))
+        self.assertEqual(set(self.data.rglob("*")), before)
+
+    def test_missing_settings_default_on_without_writing_preferences(self):
+        self.assertEqual(settings(self.data), {"enabled": True, "threshold_seconds": 0})
         self.assertFalse(self.data.exists())
+        self.assertIsNone(self.event("UserPromptSubmit"))
+        self.append(counter(1200))
+        self.assertEqual(set(self.event("Stop", 1)), {"systemMessage"})
+        self.assertEqual(self.report()["usage"]["total"], 200)
+        self.assertFalse((self.data / "auto-report.json").exists())
+
+    def test_switch_is_reread_and_explicit_off_is_not_overridden(self):
+        self.event("UserPromptSubmit")
+        configure(self.data, enabled=False)
+        saved = (self.data / "auto-report.json").read_bytes()
+        self.assertIsNone(self.event("Stop", 1))
+        self.assertEqual((self.data / "auto-report.json").read_bytes(), saved)
+        self.assertFalse(list((self.data / "auto-reports").glob("*.json")))
+        configure(self.data, enabled=True)
+        self.event("UserPromptSubmit", 2, turn_id="next-turn")
+        self.assertIsNotNone(self.event("Stop", 3, turn_id="next-turn"))
 
     def test_parallel_tasks_can_initialize_shared_store(self):
         configure(self.data, enabled=True)

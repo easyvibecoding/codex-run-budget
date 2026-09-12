@@ -1,5 +1,26 @@
 # Validation evidence
 
+## Default-on report switch — 2026-09-12 UTC, v0.10.1
+
+182 tests passed. The added cases establish that missing preferences default
+to enabled without writing settings, explicit off prevents report I/O, and
+the switch is reread between start/Stop and across turns. The pinned-runtime
+cache-eviction test now also exercises reporting without any preferences file.
+Only the missing-settings default and package metadata changed in runtime code;
+the lifecycle and enforcement implementation is unchanged from v0.10.0.
+
+An isolated `0.10.1+codex.20260912171543` install returned on from `auto-report
+status` without creating the selected data directory, then persisted/read back
+off and on through separate CLI processes. No governance ledger was created.
+Repository/plugin/skill validators and runtime reproducibility checks passed.
+No additional model canary was needed for this settings-only change; the actual
+turn/Stop lifecycle evidence remains the v0.10.0 validation below.
+
+Stable installation matched source, retained 0.3.0–0.10.0 caches, and refreshed
+only the 11 reviewed hook trust hashes. The saved report preference was byte-for-byte
+unchanged. This user remained enabled with threshold 0. Runtime SHA-256:
+`0a726c523bd9ece300b76e6ab256455b1cdc3bffed28f6a948cf22be80ac55ab`.
+
 ## Automatic deterministic Stop receipts — 2026-09-12 UTC, v0.10.0
 
 180 tests passed, including concurrent Task initialization and duplicate Stops,

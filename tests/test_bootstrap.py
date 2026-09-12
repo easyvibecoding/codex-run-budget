@@ -104,10 +104,6 @@ class BootstrapTest(unittest.TestCase):
         self.assertNotEqual(stopped.get("decision"), "block")
 
     def test_auto_report_is_in_pinned_runtime_after_cache_eviction(self):
-        self.data.mkdir()
-        (self.data / "auto-report.json").write_text(
-            json.dumps({"enabled": True, "threshold_seconds": 0})
-        )
         original = self.transcript.read_text()
         self.transcript.write_text(
             json.dumps({"type": "session_meta", "payload": {"id": "safe-test-task"}})
@@ -118,6 +114,7 @@ class BootstrapTest(unittest.TestCase):
         result = self.invoke("Stop")
         self.assertEqual(set(result), {"systemMessage"})
         self.assertEqual(len(list((self.data / "auto-reports").glob("*.md"))), 1)
+        self.assertFalse((self.data / "auto-report.json").exists())
         self.assertEqual(self.invoke("Stop"), {})
 
     def test_missing_runtime_has_structured_denial_and_no_stop_retry(self):

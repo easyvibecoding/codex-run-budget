@@ -1,7 +1,9 @@
 # Automatic user-turn receipts
 
-The opt-in `auto-report` feature is deterministic Python, not a model task.
-The distributed default is disabled. `auto-report enable` selects threshold 0:
+The user-switchable `auto-report` feature is deterministic Python, not a model task.
+From v0.10.1, the default is enabled when no settings file exists. An explicit
+`enabled: false` remains off after upgrades. Reading defaults never writes a
+settings file or overwrites a user's choice. `auto-report enable` selects threshold 0:
 every eligible main-user-turn Stop can generate one receipt, even immediately
 after its start. Timing remains useful metadata but is not a generation gate.
 
@@ -70,6 +72,16 @@ in `auto-report.json`, separate from governance state. Configuration changes do
 not start a budget, change native subscriptions or alter models. An optional
 `--threshold-seconds 300` on `enable` selects strictly-over-five-minute receipts;
 it is unnecessary for saving model-generation cost and is not the default.
+
+The switch is checked at each relevant hook, so turning it off also suppresses
+a pending Stop receipt. Turning it on cannot recreate a start that happened
+while reporting was off; future user turns establish their own baselines.
+Users may ask Codex to turn automatic per-turn reports on/off; the skill runs
+these same commands and reads back `status`. Such a conversational configuration
+request uses a normal model turn; subsequent report generation itself does not.
+This is a local configuration switch, not an added native app Settings widget.
+Official plugin guidance routes
+[Codex-local preferences to config files](https://developers.openai.com/plugins/guides/submit-claude-plugin#replace-claude-userconfig).
 
 After an upgrade, review/trust changed hooks and use a new Task to pick up the
 new pinned runtime. Existing Tasks retain their previously loaded hook code.

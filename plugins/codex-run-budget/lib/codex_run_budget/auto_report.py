@@ -1,4 +1,4 @@
-"""Opt-in, bounded per-turn receipts. Reporting never controls the agent loop."""
+"""Default-on, user-switchable receipts. Reporting never controls the agent loop."""
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ def _directory(root: Path) -> Path:
 def settings(root: Path) -> dict[str, Any]:
     path = root / "auto-report.json"
     if not path.exists() and not path.is_symlink():
-        return {"enabled": False, "threshold_seconds": 0}
+        return {"enabled": True, "threshold_seconds": 0}
     descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(descriptor, "rb") as stream:
         if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
