@@ -32,6 +32,17 @@ The runtime must remain usable with Python 3.10+ and the standard library.
   enforcement without new Codex interfaces and live evidence.
 - An active fail-closed run must deny supported pre-execution boundaries after
   an internal ledger failure.
+- Repository changes must pass the deterministic sensitive-data gate before
+  commit. Scan the Git index with `python3 scripts/check_sensitive_data.py
+  --index --fail-on-findings`; the pre-commit hook uses the same command.
+  CI also audits all reachable history, including files embedded in the
+  runtime zipapp. Never add prompts, transcripts, native Task identifiers or
+  names, private paths, credentials, database dumps, or generated reports.
+  Use `example.invalid`/`example.com` and clearly synthetic values in
+  documentation and tests. Author/copyright/public repository metadata may be
+  kept, but human review is still required for names, emails, phone numbers,
+  internal hosts and workflow examples that a deterministic rule cannot
+  classify reliably.
 
 ## Required verification
 

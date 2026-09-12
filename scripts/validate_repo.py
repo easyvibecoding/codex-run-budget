@@ -6,6 +6,7 @@ import py_compile
 import re
 import sys
 from pathlib import Path
+from string import Formatter
 
 from build_hook_runtime import artifacts
 
@@ -28,6 +29,31 @@ REQUIRED_EVENTS = {
 
 def fail(message: str) -> None:
     raise AssertionError(message)
+
+
+def validate_catalogs() -> None:
+    """Build-time completeness checks; never repeated at a hook boundary."""
+    directory = PLUGIN / "lib/codex_run_budget/assets/locales"
+    locales = {"en", "zh-Hant", "zh-Hans", "ja", "ko", "de", "fr", "es", "pt"}
+    domains = [directory, *(directory / domain for domain in ("reports", "cli", "observations"))]
+    formatter = Formatter()
+    for domain in domains:
+        if {p.stem for p in domain.glob("*.json")} != locales:
+            fail(f"incomplete language catalog: {domain.name}")
+        base = json.loads((domain / "en.json").read_text(encoding="utf-8"))
+        for locale in sorted(locales):
+            values = json.loads((domain / (locale + ".json")).read_text(encoding="utf-8"))
+            if not isinstance(values, dict) or values.keys() != base.keys():
+                fail(f"language keys differ: {domain.name}/{locale}")
+            for key, value in values.items():
+                if not isinstance(value, str) or not value:
+                    fail(f"invalid language value: {domain.name}/{locale}/{key}")
+                def placeholders(text):
+                    return sorted((name, spec, conversion or "")
+                                  for _, name, spec, conversion in formatter.parse(text)
+                                  if name is not None)
+                if placeholders(value) != placeholders(base[key]):
+                    fail(f"language placeholders differ: {domain.name}/{locale}/{key}")
 
 
 def main() -> int:
@@ -98,6 +124,7 @@ def main() -> int:
         if phrase not in readme:
             fail(f"README is missing required disclosure: {phrase}")
 
+    validate_catalogs()
     print("Repository validation passed.")
     return 0
 

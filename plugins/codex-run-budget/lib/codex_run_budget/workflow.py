@@ -14,6 +14,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .report import write_report
+from .report_i18n import ReportText, human_text
 from .report_render import _md_table
 from .task_catalog import TaskCatalog, _uuid
 from .transcript import _usage_from_line
@@ -24,6 +25,22 @@ HEADER_BYTES = 128 * 1024
 MAX_TASKS = 32
 MAX_SNAPSHOTS = 500
 KINDS = {"task_started", "task_complete", "turn_aborted"}
+# Event/status values stay machine-readable in snapshots.  The catalog key is
+# only consulted by the human Markdown/stdout route.
+LABEL_KEYS = {
+    "task_started": "workflow_task_started",
+    "task_complete": "workflow_task_complete",
+    "turn_aborted": "workflow_turn_aborted",
+    "source_unavailable": "workflow_source_unavailable",
+    "lineage_incomplete": "workflow_lineage_incomplete",
+    "abort_observed_check_native": "workflow_abort_observed_check_native",
+    "old_evidence_not_proof_of_stall": "workflow_old_evidence_not_proof_of_stall",
+    "usage_delta_unavailable": "workflow_usage_delta_unavailable",
+}
+
+# Kept as a compatibility view for callers that imported LABELS.  It contains
+# the historical Traditional Chinese strings and is never used for localized
+# human output.
 LABELS = {
     "task_started": "觀測到回合起始",
     "task_complete": "觀測到回合結束",
@@ -34,6 +51,30 @@ LABELS = {
     "old_evidence_not_proof_of_stall": "紀錄較舊，不能直接判定卡住",
     "usage_delta_unavailable": "此 Task 的 Token 前後差額不可比較",
 }
+
+
+def _label(text: ReportText, kind, fallback_key="workflow_unobserved") -> str:
+    key = LABEL_KEYS.get(kind, fallback_key)
+    try:
+        return text(key)
+    except KeyError:
+        # A partially upgraded catalog must not make an observation unusable.
+        return LABELS.get(kind, "未觀測") if text.locale == "zh-Hant" else kind or "unknown"
+
+
+def _source_label(text: ReportText, status) -> str:
+    if status == "observed":
+        key = "workflow_source_observed"
+    elif status == "unavailable":
+        key = "workflow_source_unavailable"
+    elif status == "identity_mismatch":
+        key = "workflow_source_identity_mismatch"
+    else:
+        key = "workflow_source_unknown"
+    try:
+        return text(key)
+    except KeyError:
+        return str(status)
 
 
 def _safe_path(path):
@@ -391,58 +432,101 @@ class WorkflowObserver:
             connection.close()
 
 
-def render(result):
+def render(result, locale="zh-Hant", *, text=None):
+    """Render a bounded workflow report for people, never for JSON consumers.
+
+    ``locale`` remains a positional compatibility argument for existing callers;
+    the CLI passes a resolved ``ReportText`` so locale discovery happens once at
+    the human-output seam.  Direct library callers retain the historical
+    Traditional Chinese default and do not perform host-language discovery.
+    """
+    if text is None:
+        text = locale if isinstance(locale, ReportText) else ReportText(locale, domain="cli")
     rows = []
     for task in result["tasks"]:
         observed = task["observation"]
         rows.append(
             [
                 task["display_name"],
-                task["parent_name"] or "—",
-                task["root_name"] or "未知",
-                LABELS.get((observed.get("lifecycle") or {}).get("kind"), "未觀測"),
-                observed["source_status"],
+                task["parent_name"] or text("workflow_dash"),
+                task["root_name"] or text("workflow_unknown_root"),
+                _label(text, (observed.get("lifecycle") or {}).get("kind")),
+                _source_label(text, observed["source_status"]),
             ]
         )
     names = {r["thread_hash"]: r["display_name"] for r in result["tasks"]}
+    limited = text("workflow_yes") if result["selection_limited"] else text("workflow_no")
+    token_delta = (
+        text("workflow_unknown")
+        if result["observed_token_delta"] is None
+        else text.number(result["observed_token_delta"])
+    )
     return "\n".join(
         [
-            "# Workflow 觀察",
+            "# " + text("workflow_title"),
             "",
-            f"選定 {len(rows)} 個 Task；範圍受限：{result['selection_limited']}。",
-            "",
-            _md_table(
-                ["Task / 代理", "直屬主代理", "所屬主 Task", "最後生命週期證據", "資料來源"], rows
+            text(
+                "workflow_selected",
+                count=text.number(len(rows)),
+                limited=limited,
             ),
             "",
-            f"可比較 {result['comparable_tasks']} 個 Task 的前後 Token 差額："
-            f"{result['observed_token_delta']}。",
-            f"本次讀取 {result['scan_bytes']} bytes；模型呼叫 0。",
+            _md_table(
+                [
+                    text("workflow_task_agent"),
+                    text("workflow_direct_parent"),
+                    text("workflow_root_task"),
+                    text("workflow_last_lifecycle"),
+                    text("workflow_source"),
+                ],
+                rows,
+                text,
+            ),
+            "",
+            text(
+                "workflow_token_delta",
+                comparable=text.number(result["comparable_tasks"]),
+                token_delta=token_delta,
+            ),
+            text(
+                "workflow_scan_cost",
+                bytes=text.number(result["scan_bytes"]),
+                requests=text.number(result["model_requests"]),
+            ),
             "",
             _md_table(
-                ["Task", "需確認訊號"],
+                [text("workflow_signal_task"), text("workflow_signal")],
                 [
-                    [names.get(s["task"], "選定任務"), LABELS.get(s["kind"], s["kind"])]
+                    [
+                        names.get(s["task"], text("workflow_selected_task")),
+                        _label(text, s["kind"], "workflow_unknown_signal"),
+                    ]
                     for s in result["signals"]
                 ],
+                text,
             ),
             "",
-            "這是本機紀錄觀察，不是原生即時狀態。"
-            "task_complete 只證明回合結束，不是 workflow 驗收。",
-            "無新紀錄不等於卡死；Token 差額不是額度或帳單，部分 Task 不可比較時不能當作全量。",
-            "每頁最多讀 256 KiB 尾端；tool/wait 計數只有尾端直接呼叫，未解開 code-mode 包裝。",
-            "效率改善需比較相同工作範圍與驗收品質；本工具不宣稱已省下時間或 Token。",
+            text("workflow_note_local"),
+            text("workflow_note_complete"),
+            text("workflow_note_stall"),
+            text("workflow_note_bounds"),
+            text("workflow_note_efficiency"),
             "",
         ]
     )
 
 
-def run(args):
+def run(args, *, text=None):
+    """Execute one bounded workflow action.
+
+    Machine fields are never translated. Changed observations retain their
+    human Markdown artifact even with JSON output; unchanged JSON and native
+    wait targets do not resolve language. Callers can pass already resolved text.
+    """
     if args.action is None:
+        text = text or human_text("cli", home=getattr(args, "codex_home", None))
         print(
-            "workflow observe --thread 選擇代碼 [--include-agents] [--after CURSOR]\n"
-            "workflow targets：只列原生 wait_threads 的精確目標，不讀對話。\n"
-            "預設最多 8 個 Task；觀察只回差異，不開背景排程或操控代理。"
+            text("workflow_usage")
         )
         return
     selectors = args.thread or [os.environ.get("CODEX_THREAD_ID")]
@@ -475,32 +559,48 @@ def run(args):
     result = observer.capture(
         selectors, include_agents=args.include_agents, limit=args.limit, after=args.after
     )
+    if result["changed"] or not args.json:
+        text = text or human_text("cli", home=getattr(args, "codex_home", None))
     if result["changed"]:
         path = observer.root / f"{result['cursor']}.md"
-        write_report(path, render(result))
+        write_report(path, render(result, text=text))
         result["report_path"] = str(path.absolute())
     if args.json:
         print(json.dumps(result, ensure_ascii=False))
     else:
+        status = text("workflow_changed") if result["changed"] else text("workflow_unchanged")
         print(
-            f"{'觀察到變化' if result['changed'] else '無新變化'}；"
-            f"{result['selected_tasks']} 個 Task；"
-            f"{len(result['new_signals'])} 個新訊號；讀取 {result['scan_bytes']} bytes。"
+            text(
+                "workflow_compact",
+                status=status,
+                tasks=text.number(result["selected_tasks"]),
+                signals=text.number(len(result["new_signals"])),
+                bytes=text.number(result["scan_bytes"]),
+            )
         )
         for row in result["changes"][:8]:
-            print(f"- {row['display_name']}：{LABELS.get(row['last_lifecycle'], '生命週期未觀測')}")
+            print(f"- {row['display_name']}: {_label(text, row['last_lifecycle'])}")
         names = {r["thread_hash"]: r["display_name"] for r in result["tasks"]}
         for signal in result["new_signals"][:5]:
-            print(f"- {names[signal['task']]}：{LABELS[signal['kind']]}")
+            label = _label(text, signal["kind"], "workflow_unknown_signal")
+            print(f"- {names[signal['task']]}: {label}")
         if result["cleared_signals"]:
-            print(f"已解除 {len(result['cleared_signals'])} 個先前訊號。")
+            print(text("workflow_cleared", count=text.number(len(result["cleared_signals"]))))
         if result["selection_limited"]:
-            print("選取已達上限，不是完整代理樹。")
-        print(
-            f"可比較 Token 差額：{result['observed_token_delta']}"
-            f"（{result['comparable_tasks']} 個 Task）。"
+            print(text("workflow_selection_limited"))
+        token_delta = (
+            text("workflow_unknown")
+            if result["observed_token_delta"] is None
+            else text.number(result["observed_token_delta"])
         )
-        print("原生即時狀態／workflow 驗收尚未查證；不據此自動介入。")
-        print(f"cursor: {result['cursor']}")
+        print(
+            text(
+                "workflow_compactable_delta",
+                token_delta=token_delta,
+                comparable=text.number(result["comparable_tasks"]),
+            )
+        )
+        print(text("workflow_not_live"))
+        print(f"{text('workflow_cursor')}: {result['cursor']}")
         if result.get("report_path"):
-            print(f"[觀察報告](<{result['report_path']}>)")
+            print(f"[{text('workflow_report_link')}](<{result['report_path']}>)")

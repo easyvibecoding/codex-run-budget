@@ -24,6 +24,7 @@ from codex_run_budget.report import (  # noqa: E402
     resolve_windows,
     write_report,
 )
+from codex_run_budget.report_i18n import ReportText  # noqa: E402
 from codex_run_budget.survey import survey_transcripts  # noqa: E402
 from codex_run_budget.util import stable_hash  # noqa: E402
 
@@ -303,6 +304,78 @@ class ReportTest(unittest.TestCase):
         link.symlink_to(output)
         with self.assertRaises(ValueError):
             write_report(link, "overwrite")
+
+    def test_report_human_rendering_follows_explicit_locale_and_preserves_native_name(self):
+        report = self.report()
+        thread_hash = next(iter(report["task_catalog"]), stable_hash(TASK_A))
+        report["task_catalog"][thread_hash] = {
+            **report["task_catalog"].get(thread_hash, {}),
+            "display_name": "Native Task / 不翻譯",
+            "name_source": "codex_name",
+        }
+        english = render_report(report, "markdown", locale="en")
+        self.assertIn("# Codex usage report", english)
+        self.assertIn("Native Task / 不翻譯", english)
+        self.assertNotIn("## 時間窗口比較", english)
+        german = render_report(report, "html", text=ReportText("de", domain="reports"))
+        self.assertIn('<html lang="de">', german)
+        self.assertIn("Vergleich der Zeitfenster", german)
+        self.assertNotIn(">##", german)
+        self.assertNotIn(">###", german)
+        self.assertIn('</button>\n</div>\n<p id="selection-status"', german)
+        self.assertIn("Native Task / 不翻譯", german)
+        self.assertIn('data-status-template="{window}', german)
+
+    def test_report_json_is_source_data_and_does_not_resolve_locale(self):
+        report = self.report()
+        source = copy.deepcopy(report)
+        with patch(
+            "codex_run_budget.report_i18n.resolve_locale",
+            side_effect=AssertionError("JSON must not resolve locale"),
+        ):
+            rendered = render_report(report, "json", locale="de")
+        self.assertEqual(json.loads(rendered), source)
+
+    def test_report_json_pure_route_skips_locale_but_mixed_route_localizes_summary(self):
+        base = [
+            "--data-dir",
+            str(self.root / "data"),
+            "report",
+            "window",
+            "--all-tasks",
+            "--windows",
+            "24h",
+            "--directory",
+            str(self.sessions),
+            "--format",
+            "json",
+        ]
+        pure = io.StringIO()
+        with (
+            patch(
+                "codex_run_budget.report_i18n.resolve_locale",
+                side_effect=AssertionError("pure JSON must not resolve locale"),
+            ),
+            patch("codex_run_budget.report.time.time", return_value=self.end),
+            redirect_stdout(pure),
+        ):
+            self.assertEqual(main([*base, "--full"]), 0)
+        self.assertEqual(json.loads(pure.getvalue())["schema_version"], 1)
+
+        output = self.root / "mixed.json"
+        mixed = io.StringIO()
+        with (
+            patch(
+                "codex_run_budget.report_i18n.resolve_locale",
+                return_value={"locale": "de", "locale_source": "test"},
+            ) as resolver,
+            patch("codex_run_budget.report.time.time", return_value=self.end),
+            redirect_stdout(mixed),
+        ):
+            self.assertEqual(main([*base, "--output", str(output)]), 0)
+        self.assertEqual(json.loads(output.read_text())["schema_version"], 1)
+        self.assertIn("Umfang:", mixed.getvalue())
+        resolver.assert_called_once_with(home=None)
 
     def test_empty_calendar_and_cli_no_store_write(self):
         midnight = datetime.fromisoformat("2026-01-01T00:00:00+00:00").timestamp()

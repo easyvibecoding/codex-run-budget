@@ -434,13 +434,25 @@ def write_report(path: Path, rendered: str) -> None:
         output.write(raw)
 
 
-def render_report(report: dict[str, Any], format_name: str = "markdown") -> str:
+def render_report(
+    report: dict[str, Any],
+    format_name: str = "markdown",
+    locale: str | None = None,
+    text=None,
+) -> str:
+    """Render a human report or return the unchanged machine JSON payload.
+
+    Locale resolution belongs to the caller's human-output seam.  In
+    particular, the JSON route never reads Codex settings or loads a catalog.
+    ``locale``/``text`` are accepted only by Markdown and HTML renderers;
+    omitting both preserves the historical Traditional Chinese library view.
+    """
     from .report_render import render_html, render_markdown
 
     if format_name == "json":
         return json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     if format_name == "html":
-        return render_html(report)
+        return render_html(report, locale=locale, text=text)
     if format_name == "markdown":
-        return render_markdown(report)
+        return render_markdown(report, locale=locale, text=text)
     raise ValueError("unknown report format")

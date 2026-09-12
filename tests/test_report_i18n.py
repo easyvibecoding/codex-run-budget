@@ -18,7 +18,9 @@ from codex_run_budget.report_i18n import (  # noqa: E402
     CONFIG_BYTES,
     LOCALES,
     ReportText,
+    _catalog,
     _legacy_override,
+    human_text,
     normalize,
     resolve_locale,
 )
@@ -26,6 +28,30 @@ from test_auto_report import counter  # noqa: E402
 
 
 class ReportI18nTest(unittest.TestCase):
+    def test_human_seam_is_explicit_and_technical_values_do_not_resolve_preferences(self):
+        with patch("codex_run_budget.report_i18n.resolve_locale") as resolver:
+            text = ReportText("de")
+            self.assertEqual(text.number(12.5), "12,5")
+            self.assertEqual(text.number(12000), "12.000")
+            resolver.assert_not_called()
+            resolver.return_value = {"locale": "ja", "locale_source": "example"}
+            self.assertEqual(human_text(home=Path("example-home")).locale, "ja")
+            resolver.assert_called_once_with(home=Path("example-home"))
+
+    def test_catalog_paths_are_fixed_and_fallback_is_domain_local(self):
+        with self.assertRaises(ValueError):
+            _catalog("en", "../../private")
+        with self.assertRaises(ValueError):
+            _catalog("../../private")
+        def catalog(locale, domain="turn"):
+            if domain == "turn":
+                return {"common": "共有"}
+            return {"specific": "English {value}"} if locale == "en" else {}
+        with patch("codex_run_budget.report_i18n._catalog", side_effect=catalog):
+            text = ReportText("ja", domain="cli")
+            self.assertEqual(text("specific", value="Native"), "English Native")
+            self.assertEqual(text("common"), "共有")
+
     def test_locale_normalization_and_unknown_fallback(self):
         for value, expected in {
             "en-US": "en", "zh_TW": "zh-Hant", "zh-Hant-TW": "zh-Hant",

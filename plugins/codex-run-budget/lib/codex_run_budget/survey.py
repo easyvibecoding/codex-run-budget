@@ -14,12 +14,27 @@ from pathlib import Path
 from typing import Any
 
 from .audit import audit_transcripts
+from .report_i18n import ReportText
 from .transcript import MAX_TRANSCRIPT_BYTES
 from .util import stable_hash
 
 MAX_SURVEY_BYTES = 4 * 1024 * 1024 * 1024
 MAX_DISCOVERY_ENTRIES = 100_000
 MAX_SURVEY_FILES = 1000
+
+
+def _observation_text(locale: str) -> ReportText:
+    return ReportText(locale, domain="observations")
+
+
+def _human(value: Any, text: ReportText) -> str:
+    if value is None:
+        return "unknown" if text.locale == "en" else text("unknown")
+    if type(value) is bool:
+        return "true" if value else "false"
+    if type(value) in (int, float):
+        return text.number(value)
+    return str(value)
 
 
 def _matches_task(path: Path, hashes: set[str]) -> bool:
@@ -235,34 +250,44 @@ def _has_evidence(audit: dict[str, Any]) -> bool:
     )
 
 
-def _lifecycle_lines(lifecycle: dict[str, Any], *, details: bool) -> list[str]:
+def _lifecycle_lines(
+    lifecycle: dict[str, Any], *, details: bool, text: ReportText
+) -> list[str]:
     summary = lifecycle.get("summary", {})
     if not summary.get("turns"):
-        lines = ["Turn lifecycle: no matching turn records; state coverage unknown"]
+        lines = [text("lifecycle_no_records")]
         if summary.get("compactions") or summary.get("unattributed_compactions"):
             lines.append(
-                f"Compactions: {summary.get('compactions', 0):,}; "
-                f"unattributed {summary.get('unattributed_compactions', 0):,}"
+                text(
+                    "lifecycle_compactions",
+                    compactions=_human(summary.get("compactions", 0), text),
+                    unattributed=_human(summary.get("unattributed_compactions", 0), text),
+                )
             )
         return lines
     lines = [
-        "Turn lifecycle: "
-        + ", ".join(
-            f"{label} {summary.get(key, 0):,}"
-            for key, label in (
-                ("turns", "observed"),
-                ("completed", "completed"),
-                ("aborted", "aborted"),
-                ("no_terminal_observed", "no terminal observed"),
-                ("conflicted", "conflicted"),
-            )
+        text(
+            "lifecycle_summary",
+            observed=f"observed {_human(summary.get('turns', 0), text)}",
+            completed=f"completed {_human(summary.get('completed', 0), text)}",
+            aborted=f"aborted {_human(summary.get('aborted', 0), text)}",
+            no_terminal=(
+                f"no terminal observed {_human(summary.get('no_terminal_observed', 0), text)}"
+            ),
+            conflicted=f"conflicted {_human(summary.get('conflicted', 0), text)}",
         ),
-        f"Later turn starts: after aborted {summary.get('aborted_with_later_turn', 0):,}, "
-        f"after no terminal {summary.get('no_terminal_with_later_turn', 0):,}; "
-        f"compactions {summary.get('compactions', 0):,} "
-        f"(unattributed {summary.get('unattributed_compactions', 0):,})",
-        "Missing terminal evidence does not mean running/stuck; a later turn is not proof "
-        "of same-work recovery.",
+        text(
+            "lifecycle_later",
+            aborted=(
+                f"after aborted {_human(summary.get('aborted_with_later_turn', 0), text)}"
+            ),
+            no_terminal=(
+                f"after no terminal {_human(summary.get('no_terminal_with_later_turn', 0), text)}"
+            ),
+            compactions=_human(summary.get("compactions", 0), text),
+            unattributed=_human(summary.get("unattributed_compactions", 0), text),
+        ),
+        text("lifecycle_missing"),
     ]
     if not details:
         return lines
@@ -280,17 +305,24 @@ def _lifecycle_lines(lifecycle: dict[str, Any], *, details: bool) -> list[str]:
     )[:20]
     lines.extend(
         [
-            f"Lifecycle evidence rows: {len(ranked)} of {len(rows)}; "
-            "conflicts/missing endings, aborted, then compaction count (not an alarm ranking).",
-            "thread/turn | state | duration | compactions | start evidence | later turn",
+            text(
+                "lifecycle_rows",
+                shown=_human(len(ranked), text),
+                total=_human(len(rows), text),
+            ),
+            text("lifecycle_columns"),
         ]
     )
     for row in ranked:
         duration = row.get("duration_ms")
         duration_text = (
-            f"{duration / 1000:.1f}s ({row.get('duration_source') or 'unknown'})"
+            text(
+                "lifecycle_duration",
+                value=text.number(duration / 1000, 1),
+                source=row.get("duration_source") or "unknown",
+            )
             if duration is not None
-            else "unknown"
+            else ("unknown" if text.locale == "en" else text("unknown"))
         )
         start = (
             "before window"
@@ -304,12 +336,15 @@ def _lifecycle_lines(lifecycle: dict[str, Any], *, details: bool) -> list[str]:
             f"{row['thread_hash'][:12]}/{row['turn_hash'][:12]} | {row['state']} | "
             f"{duration_text} | {row.get('compactions', 0)} | {start} | {later}"
         )
-    lines.append("Durations are reported wall-clock spans, not CPU time or token savings.")
+    lines.append(text("lifecycle_duration_note"))
     return lines
 
 
-def survey_summary(report: dict[str, Any], *, lifecycle_details: bool = False) -> str:
+def survey_summary(
+    report: dict[str, Any], *, lifecycle_details: bool = False, locale: str = "en"
+) -> str:
     """Compact default output; full per-thread evidence remains available as JSON."""
+    text = _observation_text(locale)
     selection, audit = report["selection"], report["audit"]
     threads = audit.get("threads", [])
     roles = Counter(row.get("role") or "unknown" for row in threads)
@@ -317,76 +352,98 @@ def survey_summary(report: dict[str, Any], *, lifecycle_details: bool = False) -
     waits = audit.get("waits", [])
     tools = audit.get("tools", [])
     lines = [
-        "Run Budget recent-task survey (read-only)",
-        f"Window: {selection['since']} to {selection['until']}",
-        f"Selected pages: {selection['selected_files']}; observed threads: {len(threads)} "
-        f"(parent {roles['parent']}, subagent {roles['subagent']}, unknown {roles['unknown']})",
-        "Discovery coverage: "
-        + (
-            "limited; inspect selection diagnostics"
-            if selection["coverage_limited"]
-            else "within discovery limits (not a completeness guarantee)"
+        text("survey_title"),
+        text("survey_window", since=selection["since"], until=selection["until"]),
+        text(
+            "survey_selected",
+            selected=_human(selection["selected_files"], text),
+            threads=_human(len(threads), text),
+            parent=_human(roles["parent"], text),
+            subagent=_human(roles["subagent"], text),
+            unknown=_human(roles["unknown"], text),
         ),
-        "Evidence coverage: "
-        + (
-            "partial or uncertain; inspect diagnostics"
-            if _evidence_issues(audit)
-            else (
-                "observed records only"
-                if _has_evidence(audit)
-                else "unknown; no matching usage, tool, or lifecycle records"
-            )
+        text(
+            "survey_discovery",
+            value=text(
+                "survey_discovery_limited"
+                if selection["coverage_limited"]
+                else "survey_discovery_ok"
+            ),
+        ),
+        text(
+            "survey_evidence",
+            value=text(
+                "survey_evidence_partial"
+                if _evidence_issues(audit)
+                else (
+                    "survey_evidence_observed"
+                    if _has_evidence(audit)
+                    else "survey_evidence_unknown"
+                )
+            ),
         ),
         (
-            f"Observed requests: {usage['unique_responses']:,}; "
-            f"request tokens: {usage['total_tokens']:,} (not billing usage)"
+            text(
+                "survey_requests",
+                requests=_human(usage["unique_responses"], text),
+                tokens=_human(usage["total_tokens"], text),
+            )
             if usage
-            else "Observed request usage: unknown (no valid request records)"
+            else text("survey_requests_unknown")
         ),
     ]
     if usage:
         lines.append(
-            f"Input: {usage['input_tokens']:,}; cached input: {usage['cached_input_tokens']:,}; "
-            f"output: {usage['output_tokens']:,}"
+            text(
+                "survey_input",
+                input=_human(usage["input_tokens"], text),
+                cached=_human(usage["cached_input_tokens"], text),
+                output=_human(usage["output_tokens"], text),
+            )
         )
     lines.append(
-        "wait_agent: "
-        + ", ".join(
-            f"{label} {sum(row.get(key, 0) for row in waits):,}"
-            for key, label in (
-                ("calls", "calls"),
-                ("timed_out", "timeouts"),
-                ("event_returns", "event returns"),
-                ("unknown", "unknown outcomes"),
-                ("short_timeouts", "timeouts under 60s"),
-            )
+        text(
+            "survey_waits",
+            calls=_human(sum(row.get("calls", 0) for row in waits), text),
+            timeouts=_human(sum(row.get("timed_out", 0) for row in waits), text),
+            event_returns=_human(sum(row.get("event_returns", 0) for row in waits), text),
+            unknown=_human(sum(row.get("unknown", 0) for row in waits), text),
+            short_timeouts=_human(sum(row.get("short_timeouts", 0) for row in waits), text),
         )
         if waits
-        else "wait_agent: no matching call records; outcome coverage unknown"
+        else text("survey_waits_none")
     )
     lines.append(
-        "Repeated-result candidates: "
-        + ", ".join(
-            f"{label} {sum(row.get(key, 0) for row in tools):,}"
-            for key, label in (
-                ("unchanged_result_repeats", "unchanged"),
-                ("changed_result_repeats", "changed"),
-                ("unknown_result_repeats", "unknown"),
-            )
+        text(
+            "survey_repeats",
+            unchanged=_human(
+                sum(row.get("unchanged_result_repeats", 0) for row in tools), text
+            ),
+            changed=_human(sum(row.get("changed_result_repeats", 0) for row in tools), text),
+            unknown=_human(sum(row.get("unknown_result_repeats", 0) for row in tools), text),
         )
         if tools
-        else "Repeated-result candidates: no matching tool records"
+        else text("survey_repeats_none")
     )
-    lines.extend(_lifecycle_lines(audit.get("lifecycle", {}), details=lifecycle_details))
+    lines.extend(
+        _lifecycle_lines(
+            audit.get("lifecycle", {}), details=lifecycle_details, text=text
+        )
+    )
     diagnostics = _evidence_issues(audit)
     if diagnostics:
         lines.append(
-            "Data diagnostics: " + ", ".join(f"{k}={v}" for k, v in sorted(diagnostics.items()))
+            text(
+                "survey_diagnostics",
+                values=", ".join(
+                    f"{k}={_human(v, text)}" for k, v in sorted(diagnostics.items())
+                ),
+            )
         )
     lines.extend(
         [
-            "Event returns do not prove agent completion; repeated results do not prove waste.",
-            "Use --lifecycle for bounded turn details; --json for all evidence and diagnostics.",
+            text("survey_event_note"),
+            text("survey_usage_note"),
         ]
     )
     return "\n".join(lines)

@@ -8,3 +8,29 @@ __pycache__/
 *.sqlite3-wal
 coverage.xml
 htmlcov/
+
+# Local credentials and private exports.  The deterministic scanner remains
+# the enforcement gate; these patterns only reduce accidental `git add`.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.kdbx
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.db
+*.dump
+*.bak
+*.jsonl
+*.ndjson
+
+# Codex/report exports are local-only; the scanner still blocks a forced add.
+/outputs/
+codex-turn-*.html
+turn-report-*.html
+usage-*.html
+report-*.md

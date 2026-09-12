@@ -1,4 +1,4 @@
-"""Small, deterministic report-language interface; no global locale mutation.
+"""Small, deterministic human-output language interface; no global locale mutation.
 
 Only bundled strings are formatted. Native Task names and machine-readable
 receipt fields are not translated. Locale discovery is separate from rendering,
@@ -23,6 +23,7 @@ except ImportError:  # Python 3.10 keeps the runtime dependency-free.
     _tomllib = None
 
 LOCALES = ("en", "zh-Hant", "zh-Hans", "ja", "ko", "de", "fr", "es", "pt")
+DOMAINS = ("turn", "reports", "cli", "observations")
 CONFIG_BYTES = 256 * 1024
 
 
@@ -189,10 +190,13 @@ def normalize(value) -> str | None:
     return parts[0] if parts[0] in LOCALES else None
 
 
-@lru_cache(maxsize=len(LOCALES))
-def _catalog(locale: str) -> dict[str, str]:
-    # Locale is an allowlisted identifier, never a path from user preferences.
-    content = pkgutil.get_data("codex_run_budget", f"assets/locales/{locale}.json")
+@lru_cache(maxsize=len(LOCALES) * len(DOMAINS))
+def _catalog(locale: str, domain: str = "turn") -> dict[str, str]:
+    # Both identifiers are allowlisted, never paths from user preferences.
+    if locale not in LOCALES or domain not in DOMAINS:
+        raise ValueError("unsupported language catalog")
+    prefix = "" if domain == "turn" else domain + "/"
+    content = pkgutil.get_data("codex_run_budget", f"assets/locales/{prefix}{locale}.json")
     if content is None:
         raise ValueError("report language bundle unavailable")
     values = json.loads(content)
@@ -204,18 +208,30 @@ def _catalog(locale: str) -> dict[str, str]:
 
 
 class ReportText:
-    def __init__(self, locale="en"):
+    def __init__(self, locale="en", *, domain="turn"):
         self.locale = normalize(locale) or "en"
-        self.values = _catalog(self.locale)
+        self.domain = domain
+        self.values = _catalog(self.locale, domain)
+
+    def _value(self, key: str) -> str:
+        if key in self.values:
+            return self.values[key]
+        fallback = _catalog("en", self.domain)
+        if key in fallback:
+            return fallback[key]
+        # Common display primitives are owned by the small turn catalog.
+        return _catalog(self.locale)[key]
 
     def __call__(self, key: str, **values) -> str:
-        return self.values[key].format(**values)
+        return self._value(key).format(**values)
 
     def number(self, value, digits=0) -> str:
         if value is None:
             return self("not_observed")
-        text = format(value, f",.{digits}f") if digits else format(value, ",d")
-        separators = {",": self.values["group"], ".": self.values["decimal"]}
+        if type(value) not in (int, float):
+            return str(value)
+        text = format(value, f",.{digits}f") if digits else format(value, ",")
+        separators = {",": self._value("group"), ".": self._value("decimal")}
         return text.translate(str.maketrans(separators))
 
     def duration(self, seconds, *, minutes=True) -> str:
@@ -223,3 +239,8 @@ class ReportText:
             return self("unknown")
         return self("minutes" if minutes else "seconds",
                     value=self.number(seconds / 60 if minutes else seconds, 1))
+
+
+def human_text(domain="turn", *, home=None) -> ReportText:
+    """Resolve preferences only at a human-output seam, never for machine JSON."""
+    return ReportText(resolve_locale(home=home)["locale"], domain=domain)

@@ -18,7 +18,7 @@ python3 plugins/codex-run-budget/scripts/run_budget.py report task \
 
 # Explicit descendant usage (unlike metadata-only report agents).
 python3 plugins/codex-run-budget/scripts/run_budget.py report tree \
-  --thread 12345678-1234-1234-1234-123456789abc --windows 24h
+  --thread '<task-id>' --windows 24h
 
 # Explicit cross-Task historical interval; never an implicit default.
 python3 plugins/codex-run-budget/scripts/run_budget.py report window --all-tasks \
@@ -134,6 +134,30 @@ PDF saving uses the browser's print dialog, not a bundled PDF dependency.
 
 The report never creates a budget, changes hooks/settings, resumes Tasks,
 polls, resets quota, or submits extra model work.
+
+## Repository data hygiene
+
+Generated Markdown/HTML/JSON reports are private artifacts and must not be
+checked into the repository. Keep them under the local budget data directory
+or an ignored `outputs/` directory, and review any export before sharing. Do
+not commit prompts, transcript or tool content, native Task names/IDs, private
+paths, account identifiers, credentials, database dumps, or real workflow
+samples. Documentation and tests use `example.invalid`/`example.com` and
+constructed values instead. Author and copyright metadata may remain in the
+public files; names and contact details still need a human ownership review.
+
+The dependency-free gate scans the exact staged index and refuses findings:
+
+```sh
+python3 scripts/check_sensitive_data.py --index --fail-on-findings
+```
+
+`git config core.hooksPath .githooks` enables the repository pre-commit and
+pre-push checks. CI fetches full history and audits every reachable blob,
+including members of `runtime/hook.pyz`; scanner output contains only a
+relative location, line, rule, category and SHA-256 fingerprint, never the
+matched value. A history finding is an explicit audit result, not permission
+to erase or rewrite history; revoke any credential through its issuer.
 
 ## Historical v0.9 validation — 2026-09-13 (Asia/Taipei)
 

@@ -1,4 +1,9 @@
-"""Offline Markdown and printable HTML views of the same report schema."""
+"""Offline Markdown and printable HTML views of the same report schema.
+
+The report payload is deliberately language-neutral.  Only this rendering
+boundary receives a :class:`ReportText`; identifiers, status codes, model
+names and native Task metadata remain data and are never translated.
+"""
 
 from __future__ import annotations
 
@@ -11,123 +16,200 @@ from pathlib import Path
 from typing import Any
 
 
-def _text(value: Any) -> str:
-    return "未觀測" if value is None else str(value)
+def _labels(*, locale: str | None = None, text=None):
+    """Return a report-domain text adapter without mutating global locale.
+
+    Direct library callers retain the historical Traditional Chinese default;
+    the CLI passes a live ``human_text("reports")`` adapter explicitly.
+    """
+    if text is not None:
+        return text
+    from .report_i18n import ReportText
+
+    return ReportText(locale or "zh-Hant", domain="reports")
 
 
-def _number(value: Any) -> str:
-    return f"{value:,}" if type(value) in (int, float) else _text(value)
+def _text(value: Any, labels) -> str:
+    return labels("not_observed") if value is None else str(value)
 
 
-def _short(value: Any) -> str:
-    return str(value)[:12] if value else "未識別"
+def _number(value: Any, labels) -> str:
+    if value is None:
+        return labels("not_observed")
+    if type(value) in (int, float):
+        return labels.number(value)
+    return str(value)
 
 
-def _task(report, thread_hash):
-    return report.get("task_catalog", {}).get(thread_hash, {}).get(
-        "display_name"
-    ) or "未命名任務 · " + _short(thread_hash)
+def _short(value: Any, labels) -> str:
+    return str(value)[:12] if value else labels("unidentified")
 
 
-def _parent(report, thread_hash):
+def _task(report, thread_hash, labels):
+    row = report.get("task_catalog", {}).get(thread_hash, {})
+    name = row.get("display_name")
+    # ``unnamed``/``unavailable`` are deterministic placeholders.  A name
+    # supplied by Codex or agent metadata is private user data and must remain
+    # byte-for-byte intact; never rewrite it by looking for a localized word.
+    if name and row.get("name_source") not in ("unnamed", "unavailable"):
+        return str(name)
+    return labels("unnamed_task_hash", hash=_short(thread_hash, labels))
+
+
+def _parent(report, thread_hash, labels):
     row = report.get("task_catalog", {}).get(thread_hash, {})
     if row.get("lineage_status") == "conflicting_parent_sources":
-        return "父系資料衝突，未歸屬"
+        return labels("parent_conflict")
     if row.get("parent_hash"):
-        parent = row.get("parent_name") or _task(report, row["parent_hash"])
-        return "直屬 " + parent + "；主 Task " + (row.get("root_name") or "未觀測")
-    return "主代理" if row.get("root_hash") == thread_hash else "未觀測"
-
-
-def _time(value: Any) -> str:
+        parent = row.get("parent_name") or _task(report, row["parent_hash"], labels)
+        root = row.get("root_name") or labels("not_observed")
+        return labels("direct_parent", parent=parent, root=root)
     return (
-        datetime.fromtimestamp(value, timezone.utc).isoformat() if value is not None else "未觀測"
+        labels("parent_agent")
+        if row.get("root_hash") == thread_hash
+        else labels("not_observed")
     )
 
 
-def _config(row: dict[str, Any]) -> str:
+def _time(value: Any, labels) -> str:
+    return (
+        datetime.fromtimestamp(value, timezone.utc).isoformat()
+        if value is not None
+        else labels("not_observed")
+    )
+
+
+def _config(row: dict[str, Any], labels) -> str:
     fast = row.get("fast_mode")
-    label = "開" if fast is True else "關" if fast is False else "未知"
+    fast_label = (
+        labels("fast_on")
+        if fast is True
+        else labels("fast_off")
+        if fast is False
+        else labels("fast_unknown")
+    )
     status = row.get("context_status", {})
-    return (
-        f"{row['model']} · 思考 {_text(row.get('reasoning_effort'))} "
-        f"[{status.get('reasoning_effort', 'missing')}] · Fast {label} "
-        f"[{status.get('fast_mode', 'missing')}] · tier {_text(row.get('service_tier'))} "
-        f"· plan {_text(row.get('plan_type'))} [{status.get('plan_type', 'missing')}]"
+    return labels(
+        "config_context",
+        model=_text(row.get("model"), labels),
+        effort=_text(row.get("reasoning_effort"), labels),
+        effort_status=status.get("reasoning_effort", "missing"),
+        fast=fast_label,
+        fast_status=status.get("fast_mode", "missing"),
+        tier=_text(row.get("service_tier"), labels),
+        plan=_text(row.get("plan_type"), labels),
+        plan_status=status.get("plan_type", "missing"),
     )
 
 
-def _coverage(report: dict[str, Any]) -> str:
+def _coverage(report: dict[str, Any], labels) -> str:
     coverage = report["coverage"]
     selection = coverage["selection"]
     flags = []
     if report["scope"].get("tree_selection_limited"):
-        flags.append("代理樹已達數量／深度上限，非完整後代用量")
+        flags.append(labels("coverage_tree_limited"))
     if coverage["selection_limited"]:
-        flags.append("已達選檔／容量上限")
+        flags.append(labels("coverage_selection_limited"))
     if coverage["evidence_limited"]:
-        flags.append("部分證據缺漏或有衝突")
+        flags.append(labels("coverage_evidence_limited"))
     if coverage["ambiguous_time_requests_excluded"]:
-        flags.append(f"排除 {coverage['ambiguous_time_requests_excluded']} 筆時間不明請求")
+        flags.append(
+            labels(
+                "coverage_ambiguous_time",
+                count=_number(coverage["ambiguous_time_requests_excluded"], labels),
+            )
+        )
     if coverage["native_history_limit_reached"]:
-        flags.append("原生快照僅取最新 1,000 筆")
+        flags.append(labels("coverage_native_history_limit"))
     missing = report["scope"]["selected_tasks_without_observations"]
     if missing:
-        flags.append("指定 Task 無請求觀測：" + ", ".join(_task(report, h) for h in missing))
-    return f"{selection['selected_files']} 個本機紀錄頁；僅代表已觀測範圍，非全帳號完整帳單。" + (
-        "／".join(flags) + "。" if flags else ""
-    )
+        flags.append(
+            labels(
+                "coverage_missing_tasks",
+                tasks=", ".join(_task(report, h, labels) for h in missing),
+            )
+        )
+    return labels(
+        "coverage_summary",
+        selected_files=_number(selection["selected_files"], labels),
+    ) + ("／".join(flags) + "。" if flags else "")
 
 
-def _native_lines(report: dict[str, Any]) -> list[str]:
+def _native_lines(report: dict[str, Any], labels) -> list[str]:
     latest = report["native_latest"]
     if latest is None:
-        return ["沒有已保存的原生快照；額度與訂閱未觀測，不代表零。"]
+        return [labels("no_native_snapshot")]
     subscription = latest.get("subscription") or {}
     lines = [
-        f"保存時間 {_time(latest['captured_at'])}；距報告截止 "
-        f"{_number(round(latest['age_at_report_end_seconds']))} 秒（不是即時讀取）。",
-        f"訂閱 {_text(subscription.get('plan_type'))}；"
-        f"原生一般用量許可 {_text(latest.get('ordinary_usage_allowed'))}。",
+        labels(
+            "native_saved",
+            time=_time(latest["captured_at"], labels),
+            seconds=_number(round(latest["age_at_report_end_seconds"]), labels),
+        ),
+        labels(
+            "native_subscription",
+            plan=_text(subscription.get("plan_type"), labels),
+            allowed=_text(latest.get("ordinary_usage_allowed"), labels),
+        ),
     ]
     for bucket in latest["limits"]:
         for window in bucket["windows"]:
             lines.append(
-                f"{bucket['limit_id']}／{window['duration_minutes']} 分鐘："
-                f"已用 {_text(window['used_percent'])}% · "
-                f"剩餘 {_text(window['remaining_percent'])}% · "
-                f"重設 {_time(window['resets_at'])}。"
+                labels(
+                    "native_window",
+                    limit=bucket["limit_id"],
+                    duration=window["duration_minutes"],
+                    used=_text(window.get("used_percent"), labels),
+                    remaining=_text(window.get("remaining_percent"), labels),
+                    reset=_time(window.get("resets_at"), labels),
+                )
             )
         credits = bucket.get("credits") or {}
         if credits.get("balance") is not None:
             lines.append(
-                f"{bucket['limit_id']} credits 餘額 {_text(credits['balance'])}；"
-                "與訂閱內含額度分開。"
+                labels(
+                    "native_credits",
+                    limit=bucket["limit_id"],
+                    balance=_text(credits.get("balance"), labels),
+                )
             )
     return lines
 
 
-def _delta_lines(window: dict[str, Any]) -> list[str]:
+def _delta_lines(window: dict[str, Any], labels) -> list[str]:
     native = window["native_quota"]
     comparison = native["comparison"]
     if comparison is None:
-        return [f"窗口內 {native['snapshot_count']} 筆原生快照，無足夠前後對照。"]
+        return [
+            labels(
+                "delta_no_compare",
+                count=_number(native["snapshot_count"], labels),
+            )
+        ]
     lines = [
-        f"帳號快照子區間 {native['observed_since']} → {native['observed_until']}；"
-        "不是整個報告窗口，也不能分攤到 Task。"
+        labels(
+            "delta_scope",
+            since=native["observed_since"],
+            until=native["observed_until"],
+        )
     ]
     for row in comparison["windows"]:
         lines.append(
-            f"{row['limit_id']}／{row['duration_minutes']} 分鐘："
-            f"已用變化 {_text(row['used_percentage_points'])} 百分點 "
-            f"({row['status']}; {', '.join(row['issues']) or 'same observed window'})"
+            labels(
+                "delta_window",
+                limit=row["limit_id"],
+                duration=row["duration_minutes"],
+                points=_text(row.get("used_percentage_points"), labels),
+                status=row["status"],
+                issues=", ".join(row["issues"]) or labels("same_observed_window"),
+            )
         )
     return lines
 
 
-def _md(value: Any) -> str:
+def _md(value: Any, labels) -> str:
     return (
-        escape(_text(value), quote=False)
+        escape(_text(value, labels), quote=False)
         .replace("|", "&#124;")
         .replace("`", "&#96;")
         .replace("[", "&#91;")
@@ -138,149 +220,190 @@ def _md(value: Any) -> str:
     )
 
 
-def _md_table(headers: list[str], rows: list[list[Any]]) -> str:
+def _md_table(headers: list[str], rows: list[list[Any]], labels) -> str:
     return "\n".join(
         [
-            "| " + " | ".join(headers) + " |",
+            "| " + " | ".join(_md(v, labels) for v in headers) + " |",
             "| " + " | ".join("---" for _ in headers) + " |",
-            *("| " + " | ".join(_md(v) for v in row) + " |" for row in rows),
+            *(
+                "| " + " | ".join(_md(v, labels) for v in row) + " |"
+                for row in rows
+            ),
         ]
     )
 
 
-def _window_summary(window: dict[str, Any]) -> list[Any]:
+def _window_summary(window: dict[str, Any], labels) -> list[Any]:
     usage = window["usage"] or {}
     scenario = window["credit_scenarios"]
     return [
         window["name"],
-        len(window["tasks"]),
-        _number(usage.get("unique_responses")),
-        _number(usage.get("total_tokens")),
-        _number(usage.get("cached_input_tokens")),
-        _text(scenario["standard_scenario_credits"]),
-        _text(scenario["fast_scenario_credits"]),
+        _number(len(window["tasks"]), labels),
+        _number(usage.get("unique_responses"), labels),
+        _number(usage.get("total_tokens"), labels),
+        _number(usage.get("cached_input_tokens"), labels),
+        _text(scenario["standard_scenario_credits"], labels),
+        _text(scenario["fast_scenario_credits"], labels),
     ]
 
 
-def render_markdown(report: dict[str, Any]) -> str:
+def render_markdown(
+    report: dict[str, Any],
+    *,
+    locale: str | None = None,
+    text=None,
+) -> str:
+    labels = _labels(locale=locale, text=text)
+    selected_scope = (
+        labels("scope_selected")
+        if report["scope"]["thread_hashes"]
+        else labels("scope_all")
+    )
     lines = [
-        "# Codex 用量報告",
+        labels("markdown_title"),
         "",
-        f"產生時間：{report['generated_at']} · 時區：{report['timezone']}",
+        labels(
+            "generated_at",
+            value=report["generated_at"],
+            timezone=report["timezone"],
+        ),
         "",
-        "範圍："
-        + (
-            "指定 Task（不自動包含子代理）"
-            if report["scope"]["thread_hashes"]
-            else "近期本機所有已觀測 Task"
-        )
-        + "。優先顯示 Codex 任務名稱／代理暱稱；缺漏不以提示詞補值。",
+        labels("scope_prefix") + selected_scope + labels("scope_suffix"),
         "",
-        _coverage(report),
+        _coverage(report, labels),
         "",
-        "## 時間窗口比較",
+        labels("windows_heading"),
         "",
-        "窗口採 [起點, 終點)，彼此重疊不可加總。沒有觀測不等於用量為零。",
+        labels("windows_note"),
         "",
         _md_table(
             [
-                "窗口",
-                "觀測 Task",
-                "請求",
-                "Token",
-                "其中快取輸入",
-                "Standard 情境 credits",
-                "Fast 情境 credits",
+                labels("column_window"),
+                labels("column_observed_tasks"),
+                labels("column_requests"),
+                labels("column_tokens"),
+                labels("column_cached_input"),
+                labels("column_standard_credits"),
+                labels("column_fast_credits"),
             ],
-            [_window_summary(w) for w in report["windows"]],
+            [_window_summary(w, labels) for w in report["windows"]],
+            labels,
         ),
         "",
-        "Credits 欄是同一批 Token 的費率情境估算，不是實際扣款或訂閱百分比。",
+        labels("credits_note"),
         "",
-        "## 原生額度與訂閱（全帳號共享）",
+        labels("native_heading"),
         "",
-        *(_md(v) for v in _native_lines(report)),
+        *(_md(v, labels) for v in _native_lines(report, labels)),
     ]
     for window in report["windows"]:
         lines += [
             "",
-            f"## {window['name']} 明細",
+            labels("window_details_heading", name=window["name"]),
             "",
-            f"{window['since']} → {window['until']}",
+            window["since"] + " → " + window["until"],
             "",
             _md_table(
                 [
-                    "Task / 代理",
-                    "所屬主 Task / 直屬代理",
-                    "角色",
-                    "請求",
-                    "Token",
-                    "未快取輸入",
-                    "快取輸入",
-                    "輸出",
+                    labels("column_task_agent"),
+                    labels("column_parent"),
+                    labels("column_role"),
+                    labels("column_requests"),
+                    labels("column_tokens"),
+                    labels("column_uncached_input"),
+                    labels("column_cached_input"),
+                    labels("column_output"),
                 ],
                 [
                     [
-                        _task(report, r["thread_hash"]),
-                        _parent(report, r["thread_hash"]),
+                        _task(report, r["thread_hash"], labels),
+                        _parent(report, r["thread_hash"], labels),
                         r["role"],
-                        _number(r["unique_responses"]),
-                        _number(r["total_tokens"]),
-                        _number(r["uncached_input_tokens"]),
-                        _number(r["cached_input_tokens"]),
-                        _number(r["output_tokens"]),
+                        _number(r["unique_responses"], labels),
+                        _number(r["total_tokens"], labels),
+                        _number(r["uncached_input_tokens"], labels),
+                        _number(r["cached_input_tokens"], labels),
+                        _number(r["output_tokens"], labels),
                     ]
                     for r in window["tasks"]
                 ],
+                labels,
             ),
             "",
-            "### 模型與當時設定",
+            labels("model_heading"),
             "",
-            f"顯示 {len(window['contexts'])}／{window['context_detail_count']} 組，依 Token 排序。",
+            labels(
+                "model_caption",
+                shown=_number(len(window["contexts"]), labels),
+                total=_number(window["context_detail_count"], labels),
+            ),
             "",
             _md_table(
-                ["Task", "當時設定與證據狀態", "請求", "Token"],
+                [
+                    labels("column_task"),
+                    labels("column_context_status"),
+                    labels("column_requests"),
+                    labels("column_tokens"),
+                ],
                 [
                     [
-                        _task(report, r["thread_hash"]),
-                        _config(r),
-                        _number(r["unique_responses"]),
-                        _number(r["total_tokens"]),
+                        _task(report, r["thread_hash"], labels),
+                        _config(r, labels),
+                        _number(r["unique_responses"], labels),
+                        _number(r["total_tokens"], labels),
                     ]
                     for r in window["contexts"]
                 ],
+                labels,
             ),
             "",
-            "### 回合請求明細",
+            labels("turns_heading"),
             "",
-            f"顯示最新 {len(window['turns'])}／{window['turn_detail_count']} 組；"
-            "未識別回合會合併成 unknown，並非已完成回合數。",
+            labels(
+                "turns_caption",
+                shown=_number(len(window["turns"]), labels),
+                total=_number(window["turn_detail_count"], labels),
+            ),
             "",
             _md_table(
-                ["Task / 回合", "最後請求 UTC", "請求", "Token", "當時設定"],
+                [
+                    labels("column_turn"),
+                    labels("column_last_request"),
+                    labels("column_requests"),
+                    labels("column_tokens"),
+                    labels("column_context"),
+                ],
                 [
                     [
-                        _task(report, r["thread_hash"]) + " / 回合 " + _short(r["turn_hash"]),
-                        _time(r["last_observed_at"]),
-                        _number(r["unique_responses"]),
-                        _number(r["total_tokens"]),
-                        " / ".join(_config(c) for c in r["contexts"]),
+                        _task(report, r["thread_hash"], labels)
+                        + " / "
+                        + labels("turn_number", value=_short(r["turn_hash"], labels)),
+                        _time(r["last_observed_at"], labels),
+                        _number(r["unique_responses"], labels),
+                        _number(r["total_tokens"], labels),
+                        " / ".join(_config(c, labels) for c in r["contexts"]),
                     ]
                     for r in window["turns"]
                 ],
+                labels,
             ),
             "",
-            *(_md(v) for v in _delta_lines(window)),
+            *(_md(v, labels) for v in _delta_lines(window, labels)),
         ]
     lines += [
         "",
-        "## 證據與限制",
+        labels("evidence_heading"),
         "",
-        "輸入已包含快取輸入；輸出已包含思考 Token，不要重複加總。歷史設定缺漏不以目前設定補值。",
-        "情境估算可能排除未知模型或不支援的 Token 基礎；排除不代表免費。",
+        labels("evidence_intro"),
+        labels("evidence_scenario"),
         "",
         _md_table(
-            ["窗口", "可估價請求", "排除請求", "Fast 證據狀態"],
+            [
+                labels("column_window"),
+                labels("column_priced_requests"),
+                labels("column_excluded_requests"),
+                labels("column_fast_evidence"),
+            ],
             [
                 [
                     w["name"],
@@ -290,25 +413,32 @@ def render_markdown(report: dict[str, Any]) -> str:
                 ]
                 for w in report["windows"]
             ],
+            labels,
         ),
         "",
-        "費率查核日期：" + _md(report["pricing_reference"]["verified_on"]),
+            labels(
+                "pricing_date",
+                date=_md(report["pricing_reference"]["verified_on"], labels),
+            ),
         "",
-        "[官方 Codex 價格](https://learn.chatgpt.com/docs/pricing) · "
-        "[Fast 模式](https://learn.chatgpt.com/docs/agent-configuration/speed)",
+        labels("official_links"),
         "",
-        "本報告不會改變預算、Hook、Task 狀態或額度；完整結構化證據可用 --format json 匯出。",
+        labels("no_mutation"),
     ]
     return "\n".join(lines) + "\n"
 
 
-def _table(headers: list[str], rows: list[tuple[str | None, list[Any]]]) -> str:
-    head = "".join(f'<th scope="col">{escape(v)}</th>' for v in headers)
+def _table(headers: list[str], rows: list[tuple[str | None, list[Any]]], labels) -> str:
+    head = "".join(f'<th scope="col">{escape(_text(v, labels))}</th>' for v in headers)
     body = "".join(
         (f'<tr data-task="{escape(task, quote=True)}">' if task else "<tr>")
         + "".join(
-            ('<td class="value">' if re.fullmatch(r"[0-9][0-9,.]*", _text(v)) else "<td>")
-            + escape(_text(v))
+            (
+                '<td class="value">'
+                if re.fullmatch(r"[0-9][0-9,.]*", _text(v, labels))
+                else "<td>"
+            )
+            + escape(_text(v, labels))
             + "</td>"
             for v in values
         )
@@ -321,34 +451,70 @@ def _table(headers: list[str], rows: list[tuple[str | None, list[Any]]]) -> str:
     )
 
 
-def render_html(report: dict[str, Any]) -> str:
+def _html_heading(value: Any) -> str:
+    """Adapt a shared Markdown heading label for an HTML heading element.
+
+    The report catalog intentionally shares heading strings between Markdown
+    and HTML (for example ``## Time-window comparison``).  Markdown consumes
+    the marker, while HTML already supplies its own semantic heading element;
+    rendering the marker literally would expose ``##`` to readers.
+    """
+    return re.sub(r"^\s*#{1,6}\s*", "", str(value))
+
+
+def render_html(
+    report: dict[str, Any],
+    *,
+    locale: str | None = None,
+    text=None,
+) -> str:
+    labels = _labels(locale=locale, text=text)
     assets = Path(__file__).with_name("report_assets")
     script = (assets / "report.js").read_text(encoding="utf-8")
     style = (assets / "report.css").read_text(encoding="utf-8")
     digest = base64.b64encode(hashlib.sha256(script.encode()).digest()).decode()
+    selected_scope = (
+        labels("scope_selected")
+        if report["scope"]["thread_hashes"]
+        else labels("scope_all")
+    )
+    generated = labels(
+        "generated_at",
+        value=report["generated_at"],
+        timezone=report["timezone"],
+    )
+    scope = labels("scope_prefix") + selected_scope + labels("scope_suffix")
+    status_template = labels(
+        "status_template", window="{window}", task="{task}", rows="{rows}"
+    )
+    windows_heading = _html_heading(labels("windows_heading"))
     pieces = [
-        '<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8">',
+        "<!doctype html>"
+        f'<html lang="{escape(labels.locale, quote=True)}">'
+        "<head><meta charset=\"utf-8\">",
         '<meta name="viewport" content="width=device-width, initial-scale=1">',
         '<meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; '
         f"script-src &#39;sha256-{digest}&#39;; style-src &#39;unsafe-inline&#39;; "
         'base-uri &#39;none&#39;; form-action &#39;none&#39;">',
-        f"<title>Codex 用量報告</title><style>{style}</style></head><body><main>",
-        '<header><p class="eyebrow">CODEX / OBSERVED USAGE</p><h1>用量，有跡可循。</h1>',
-        f"<p>{escape(report['generated_at'])} · {escape(report['timezone'])}</p></header>",
-        '<p class="scope">'
-        + (
-            "指定 Task · 不自動包含子代理"
-            if report["scope"]["thread_hashes"]
-            else "近期本機所有已觀測 Task"
-        )
-        + "</p>",
-        f'<p class="notice">{escape(_coverage(report))}</p>',
-        '<section aria-labelledby="comparison"><h2 id="comparison">時間窗口比較</h2>',
-        "<p>依請求紀錄時間計量 · 重疊窗口不可加總 · 未觀測 ≠ 零用量</p>",
-        '<div class="legend"><span>未快取輸入</span><span>快取輸入</span>'
-        "<span>輸出（含思考）</span></div>",
+        f"<title>{escape(labels('html_title'))}</title><style>{style}</style></head>",
+        f'<body><main id="report-root" '
+        f'data-status-template="{escape(status_template, quote=True)}" '
+        f'data-status-empty="{escape(labels("status_empty"), quote=True)}">',
+        f'<header><p class="eyebrow">{escape(labels("eyebrow"))}</p>'
+        f'<h1>{escape(labels("html_heading"))}</h1>',
+        f"<p>{escape(generated)}</p></header>",
+        f'<p class="scope">{escape(scope)}</p>',
+        f'<p class="notice">{escape(_coverage(report, labels))}</p>',
+        f'<section aria-labelledby="comparison"><h2 id="comparison">{escape(windows_heading)}</h2>',
+        f"<p>{escape(labels('html_windows_note'))}</p>",
+        f'<div class="legend"><span>{escape(labels("legend_uncached"))}</span>'
+        f'<span>{escape(labels("legend_cached"))}</span>'
+        f'<span>{escape(labels("legend_output"))}</span></div>',
     ]
-    maximum = max(((w["usage"] or {}).get("total_tokens", 0) for w in report["windows"]), default=0)
+    maximum = max(
+        ((w["usage"] or {}).get("total_tokens", 0) for w in report["windows"]),
+        default=0,
+    )
     for window in report["windows"]:
         usage = window["usage"] or {}
         segments = "".join(
@@ -358,129 +524,179 @@ def render_html(report: dict[str, Any]) -> str:
                 ("uncached_input_tokens", "cached_input_tokens", "output_tokens")
             )
         )
-        label = f"{window['name']}: {_number(usage.get('total_tokens'))} Token"
+        label = labels(
+            "bar_aria",
+            name=window["name"],
+            tokens=_number(usage.get("total_tokens"), labels),
+        )
         pieces.append(
             f'<div class="bar-row"><span>{escape(window["name"])}</span>'
-            f'<div class="track" role="img" aria-label="{escape(label)}">{segments}</div>'
-            f'<span class="numeric">{escape(_number(usage.get("total_tokens")))}</span></div>'
+            f'<div class="track" role="img" aria-label="{escape(label, quote=True)}">'
+            f"{segments}</div>"
+            f'<span class="numeric">'
+            f'{escape(_number(usage.get("total_tokens"), labels))}</span></div>'
         )
     pieces += [
         _table(
-            ["窗口", "Task", "請求", "Token", "快取輸入", "Standard credits*", "Fast credits*"],
-            [(None, _window_summary(w)) for w in report["windows"]],
+            [
+                labels("column_window"),
+                labels("column_task"),
+                labels("column_requests"),
+                labels("column_tokens"),
+                labels("column_cached_input"),
+                labels("column_standard_credits"),
+                labels("column_fast_credits"),
+            ],
+            [(None, _window_summary(w, labels)) for w in report["windows"]],
+            labels,
         ),
-        '<p class="caption">* 同一批 Token 的費率情境，'
-        "不是實際扣款或訂閱額度百分比。</p></section>",
-        '<section><h2>原生額度與訂閱</h2><p class="eyebrow">全帳號共享 · 保存快照</p>',
-        *(f"<p>{escape(v)}</p>" for v in _native_lines(report)),
-        "</section>",
-        '<section><h2>Task 與回合明細</h2><div class="controls">',
-        '<label>時間窗口<select id="window-picker">',
+        f'<p class="caption">{escape(labels("credits_note"))}</p></section>',
+        f'<section><h2>{escape(_html_heading(labels("native_heading")))}</h2>'
+        f'<p class="eyebrow">{escape(labels("native_subheading"))}</p>',
+        *(f"<p>{escape(v)}</p>" for v in _native_lines(report, labels)),
+        f'</section><section><h2>{escape(labels("task_details_heading"))}</h2>'
+        '<div class="controls">',
+        f'<label>{escape(labels("window_picker"))}<select id="window-picker">',
         *(
             f'<option value="{i}">{escape(w["name"])}</option>'
             for i, w in enumerate(report["windows"])
         ),
-        '</select></label><label>明細 Task（不改變上方彙總）<select id="task-picker">',
-        '<option value="">全部</option>',
+        f'</select></label><label>{escape(labels("task_picker"))}<select id="task-picker">',
+        f'<option value="">{escape(labels("all_tasks"))}</option>',
     ]
     tasks = sorted({row["thread_hash"] for w in report["windows"] for row in w["tasks"]})
     pieces += [
-        f'<option value="{escape(task)}">{escape(_task(report, task))}</option>' for task in tasks
+        f'<option value="{escape(task, quote=True)}">{escape(_task(report, task, labels))}</option>'
+        for task in tasks
     ]
     pieces += [
-        '</select></label><button id="print-report" type="button">列印 / 存為 PDF</button>',
-        '</div><p id="selection-status" role="status" aria-live="polite"></p>',
-        "<noscript>JavaScript 未啟用：以下依序顯示全部窗口，篩選器不生效。</noscript>",
+        f'</select></label><button id="print-report" type="button">'
+        f'{escape(labels("print_button"))}</button>',
+        "</div>",
+        '<p id="selection-status" role="status" aria-live="polite"></p>',
+        f'<noscript>{escape(labels("noscript"))}</noscript>',
     ]
     for i, window in enumerate(report["windows"]):
+        article_heading = labels(
+            "window_article_heading",
+            name=window["name"],
+            since=window["since"],
+            until=window["until"],
+        )
+        model_caption = labels(
+            "html_model_caption",
+            shown=len(window["contexts"]),
+            total=window["context_detail_count"],
+        )
+        turns_caption = labels(
+            "html_turns_caption",
+            shown=len(window["turns"]),
+            total=window["turn_detail_count"],
+        )
+        scenario_coverage = labels(
+            "scenario_coverage",
+            priced=window["credit_scenarios"]["coverage"]["priced_requests"],
+            excluded=window["credit_scenarios"]["coverage"]["excluded_requests"],
+        )
         pieces += [
-            f'<article data-window="{i}"><h3>{escape(window["name"])} · '
-            f"{escape(window['since'])} → {escape(window['until'])}</h3>",
+            f'<article data-window="{i}"><h3>{escape(article_heading)}</h3>',
             _table(
                 [
-                    "Task / 代理",
-                    "所屬主 Task / 直屬代理",
-                    "角色",
-                    "請求",
-                    "Token",
-                    "未快取輸入",
-                    "快取輸入",
-                    "輸出",
+                    labels("column_task_agent"),
+                    labels("column_parent"),
+                    labels("column_role"),
+                    labels("column_requests"),
+                    labels("column_tokens"),
+                    labels("column_uncached_input"),
+                    labels("column_cached_input"),
+                    labels("column_output"),
                 ],
                 [
                     (
                         r["thread_hash"],
                         [
-                            _task(report, r["thread_hash"]),
-                            _parent(report, r["thread_hash"]),
+                            _task(report, r["thread_hash"], labels),
+                            _parent(report, r["thread_hash"], labels),
                             r["role"],
-                            _number(r["unique_responses"]),
-                            _number(r["total_tokens"]),
-                            _number(r["uncached_input_tokens"]),
-                            _number(r["cached_input_tokens"]),
-                            _number(r["output_tokens"]),
+                            _number(r["unique_responses"], labels),
+                            _number(r["total_tokens"], labels),
+                            _number(r["uncached_input_tokens"], labels),
+                            _number(r["cached_input_tokens"], labels),
+                            _number(r["output_tokens"], labels),
                         ],
                     )
                     for r in window["tasks"]
                 ],
+                labels,
             ),
-            "<h3>模型與當時設定</h3>",
-            f"<p>顯示 {len(window['contexts'])}／{window['context_detail_count']} 組"
-            "（依 Token 排序）。"
-            "未知 Fast 不是關閉；plan 是鄰近觀測，不是每筆請求的扣款方案。</p>",
+            f'<h3>{escape(_html_heading(labels("model_heading")))}</h3>',
+            f'<p>{escape(model_caption)} '
+            f'{escape(labels("html_model_note"))}</p>',
             _table(
-                ["Task", "當時設定 · 證據狀態", "請求", "Token"],
+                [
+                    labels("column_task"),
+                    labels("column_context_status"),
+                    labels("column_requests"),
+                    labels("column_tokens"),
+                ],
                 [
                     (
                         r["thread_hash"],
                         [
-                            _task(report, r["thread_hash"]),
-                            _config(r),
-                            _number(r["unique_responses"]),
-                            _number(r["total_tokens"]),
+                            _task(report, r["thread_hash"], labels),
+                            _config(r, labels),
+                            _number(r["unique_responses"], labels),
+                            _number(r["total_tokens"], labels),
                         ],
                     )
                     for r in window["contexts"]
                 ],
+                labels,
             ),
-            "<details><summary>展開回合請求明細</summary>",
-            f"<p>最新 {len(window['turns'])}／{window['turn_detail_count']} 組。"
-            "未識別回合合併呈現；這不是完成回合數。</p>",
+            f'<details><summary>{escape(labels("turns_summary"))}</summary>',
+            f'<p>{escape(turns_caption)}</p>',
             _table(
-                ["Task / 回合", "最後請求 UTC", "請求", "Token", "當時設定"],
+                [
+                    labels("column_turn"),
+                    labels("column_last_request"),
+                    labels("column_requests"),
+                    labels("column_tokens"),
+                    labels("column_context"),
+                ],
                 [
                     (
                         r["thread_hash"],
                         [
-                            _task(report, r["thread_hash"]) + " / 回合 " + _short(r["turn_hash"]),
-                            _time(r["last_observed_at"]),
-                            _number(r["unique_responses"]),
-                            _number(r["total_tokens"]),
-                            " / ".join(_config(c) for c in r["contexts"]),
+                            _task(report, r["thread_hash"], labels)
+                            + " / "
+                            + labels("turn_number", value=_short(r["turn_hash"], labels)),
+                            _time(r["last_observed_at"], labels),
+                            _number(r["unique_responses"], labels),
+                            _number(r["total_tokens"], labels),
+                            " / ".join(_config(c, labels) for c in r["contexts"]),
                         ],
                     )
                     for r in window["turns"]
                 ],
+                labels,
             ),
             "</details>",
-            *(f'<p class="caption">{escape(v)}</p>' for v in _delta_lines(window)),
-            '<p class="caption">情境估算覆蓋 '
-            f"{window['credit_scenarios']['coverage']['priced_requests']} 筆請求，"
-            f"排除 {window['credit_scenarios']['coverage']['excluded_requests']} 筆。"
-            "排除不代表免費。</p>",
+            *(f'<p class="caption">{escape(v)}</p>' for v in _delta_lines(window, labels)),
+            f'<p class="caption">{escape(scenario_coverage)}</p>',
             "</article>",
         ]
+    pricing_label = labels(
+        "pricing_date",
+        date=_text(report["pricing_reference"]["verified_on"], labels),
+    )
     pieces += [
-        "</section><footer><h2>如何讀這份報告</h2>",
-        "<p>輸入包含快取；輸出包含思考，不能重複加總。歷史設定不以目前設定補值。"
-        "Token 份額不能用來分攤帳號額度；Standard / Fast 情境沒有證明當時的實際扣款。</p>",
-        "<p>任務名稱與代理暱稱來自原生中繼資料，可能含敏感資訊，分享前請檢查。"
-        "ID 已雜湊；不使用提示詞、預覽或對話內容補名。報告不連網、"
-        "不變更預算、Hook、Task 狀態或額度。</p>",
-        "<p>費率查核日期："
-        + escape(_text(report["pricing_reference"]["verified_on"]))
-        + ' · <a href="https://learn.chatgpt.com/docs/pricing">官方價格</a> · '
-        '<a href="https://learn.chatgpt.com/docs/agent-configuration/speed">Fast 說明</a></p>',
-        f"</footer></main><script>{script}</script></body></html>",
+        f'</section><footer><h2>{escape(_html_heading(labels("evidence_heading")))}</h2>',
+        f'<p>{escape(labels("html_evidence_intro"))}</p>',
+        f'<p>{escape(labels("html_sensitive_note"))}</p>',
+        f'<p>{escape(pricing_label)} · '
+        '<a href="https://learn.chatgpt.com/docs/pricing">'
+        f'{escape(labels("official_price"))}</a> · '
+        f'<a href="https://learn.chatgpt.com/docs/agent-configuration/speed">{escape(labels("fast_link"))}</a></p>',
+        f'</footer></main><script>{script}</script></body></html>',
     ]
     return "\n".join(pieces) + "\n"

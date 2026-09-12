@@ -232,6 +232,8 @@ class SurveyTest(unittest.TestCase):
             "\n".join(json.dumps({"timestamp": stamp, **record}) for record in records) + "\n"
         )
         ledger = self.root / "no-ledger"
+        # The product follows Codex UI preferences, not the test runner's LANG.
+        (self.root / "config.toml").write_text('[desktop]\nlocaleOverride="en"\n')
         env = {**os.environ, "CODEX_HOME": str(self.root), "CODEX_RUN_BUDGET_HOME": str(ledger)}
         command = [sys.executable, str(PLUGIN / "scripts/run_budget.py"), "survey"]
         result = subprocess.run([*command, "--lifecycle"], env=env, capture_output=True, text=True)

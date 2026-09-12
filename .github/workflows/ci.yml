@@ -8,6 +8,19 @@ permissions:
   contents: read
 
 jobs:
+  sensitive-data:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Scan checked-out index for sensitive data
+        run: python3 scripts/check_sensitive_data.py --index --fail-on-findings
+      - name: Scan reachable Git history for sensitive data
+        run: python3 scripts/check_sensitive_data.py --history --fail-on-findings
   test:
     runs-on: ubuntu-latest
     strategy:

@@ -1,8 +1,17 @@
 "use strict";
 (() => {
+  const root = document.getElementById("report-root");
   const windowPicker = document.getElementById("window-picker");
   const taskPicker = document.getElementById("task-picker");
   const status = document.getElementById("selection-status");
+  const statusTemplate = root?.dataset.statusTemplate ||
+    "{window} · {task} · {rows} filtered detail rows (including collapsed content; not request count)";
+  const statusEmpty = root?.dataset.statusEmpty ||
+    " · No detail rows are available in this scope; also check truncation and coverage.";
+  function format(template, values) {
+    return template.replace(/\{([a-z]+)\}/gi, (_, key) =>
+      Object.prototype.hasOwnProperty.call(values, key) ? values[key] : "");
+  }
   function update() {
     let visibleRows = 0;
     document.querySelectorAll("[data-window]").forEach(section => {
@@ -12,9 +21,12 @@
         if (!section.hidden && !row.hidden) visibleRows += 1;
       });
     });
-    status.textContent = `${windowPicker.selectedOptions[0].textContent} · ${
-      taskPicker.selectedOptions[0].textContent} · ${visibleRows} 筆篩選後明細列（含摺疊內容，非請求數）`;
-    if (!visibleRows) status.textContent += " · 此範圍沒有可顯示明細；請同時查看截斷與涵蓋範圍。";
+    status.textContent = format(statusTemplate, {
+      window: windowPicker.selectedOptions[0].textContent,
+      task: taskPicker.selectedOptions[0].textContent,
+      rows: visibleRows,
+    });
+    if (!visibleRows) status.textContent += statusEmpty;
   }
   windowPicker.addEventListener("change", update);
   taskPicker.addEventListener("change", update);

@@ -42,6 +42,7 @@ def artifacts(plugin: Path = PLUGIN) -> dict[Path, bytes]:
     package = plugin / "lib/codex_run_budget"
     for name in (*MODULES, "migrations/002_hardening.sql", "assets/turn-card.html"):
         content["codex_run_budget/" + name] = (package / name).read_bytes()
+    # CLI/manual-report domains are deliberately excluded from per-hook payloads.
     for path in sorted((package / "assets/locales").glob("*.json")):
         content["codex_run_budget/assets/locales/" + path.name] = path.read_bytes()
     archive = io.BytesIO()

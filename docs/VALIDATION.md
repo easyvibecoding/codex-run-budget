@@ -1,5 +1,64 @@
 # Validation evidence
 
+## Human-output localization and repository data guard — 2026-09-13 Asia/Taipei
+
+265 tests passed, plus Ruff and repository/plugin validators. The four bundled
+catalog domains each contain all nine supported languages, with matching keys
+and placeholder names/specifications: 66 automatic-card keys, 112 manual-report
+keys, 102 CLI/workflow keys and 81 observation-summary keys per language.
+Only the nine small automatic-card catalogs enter the hook zipapp. Human
+renderers preserve numeric source data and original native/model identifiers.
+Pure JSON routes do not discover locale or load catalogs; mixed routes localize
+only an actually emitted human artifact or terminal summary.
+
+Nine synthetic manual reports passed browser checks at both 736px and 320px
+(18 cases), with the real CSP enabled and network requests blocked. The selected
+window/Task filters worked, JavaScript reported no errors, and the document did
+not overflow horizontally. A synthetic Task name containing HTML punctuation
+and a literal `{rows}` placeholder remained unchanged. German and Japanese
+screenshots were visually inspected. These fixtures are not actual user usage
+and were kept outside the repository. This is not a new native UI lifecycle test.
+
+Installed `0.13.0+codex.20260912222414` using the retention updater and reviewed
+the changed hook hashes through the native app-server. All 11 plugin hooks read
+back enabled/trusted with no hook warnings or errors. Source and installed
+cache identities matched, including all 36 catalogs in the full plugin and only
+nine in the hook archive. Deterministic installed-CLI checks covered all nine
+languages, canonical model-rate JSON and localized confirmations for JSON-file
+exports. The real host report menu selected `zh-Hant`; synthetic Codex homes
+supplied the other language settings without changing the real preference.
+No new model request was made for this installation check. All configuration
+except the reviewed plugin trust hashes, plus the report switch, stayed unchanged.
+
+Read-back also detected missing old caches. The updater's entry backup already
+contained only the new version; the cause of that earlier loss was not established.
+Twenty previous versions were restored and matched the captured cache hashes.
+The immediately preceding version had no matching retained copy: all 48 tracked
+plugin files were reconstructed and individually verified against commit
+`0d9422fa86d4e069d7eec43db7af36e3e7e3f7f6`, and its known pinned runtime was
+prewarmed. Its reconstructed tree did not match the earlier captured cache hash,
+so byte-identical restoration of that cache is not claimed. A new retain-only
+backup then verified all 22 current/previous version paths. The new runtime SHA-256
+is `c1182cdf1e14e36dcf94fe68beee258a8b557524fb4abdca0fb74d6bc1978c40`.
+
+The deterministic sensitive-data scanner and independent redacted Gitleaks
+8.30.1 audits found no findings in the current worktree or 23 reachable commits
+before this change. The gate also reads staged blobs and bounded zipapp members,
+including historical versions. Its 16 tests cover index/worktree divergence,
+removed historical credentials, nested archives, corrupt/oversized inputs,
+credential-looking filenames and redacted failures. An independent adversarial
+read-back passed 14 acceptance checks, including a safe placeholder followed by
+a second secret on the same line and fail-closed unreadable Git/archive inputs.
+
+Repository-local pre-commit and pre-push hooks were enabled after checking that
+no custom hook configuration would be replaced. CI now runs an independent
+index/full-history gate. GitHub's native secret scanning and push protection
+were already enabled and had zero open alerts at read-back; no remote security
+setting, real credential, or Git history was changed. Author/public attribution
+remains allowed and examples use synthetic data. This is evidence for the checked
+rules and scope, not proof that semantic names or binary media can never contain
+private information; manual review remains required.
+
 ## Automatic report language — 2026-09-13 Asia/Taipei
 
 Verified the installed Codex App's setting adapter, without changing preferences:

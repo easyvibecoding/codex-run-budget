@@ -12,6 +12,11 @@ built against the public [Codex hooks interface](https://learn.chatgpt.com/docs/
 > This is an independent community project, not an OpenAI or Microsoft product.
 > It is a guardrail, not a billing meter or a zero-overshoot guarantee.
 
+Human-facing reports, menus and summaries follow the saved Codex language, with
+nine bundled languages and an English fallback. Machine JSON, commands, evidence
+codes and model/native names stay unchanged; no model translates output at runtime.
+See [localization scope](docs/LOCALIZATION.md) and [sensitive-data protection](SECURITY.md).
+
 ## What it does
 
 - Uses Codex's parent `session_id` as a shared run key for the main agent and
@@ -54,7 +59,7 @@ when Codex prompts you; untrusted hooks are skipped by design.
 ### On-demand workflow observations
 
 Describe the work you want inspected or improved; Task IDs are not required.
-For example: “找最近每天 X 策展的 Task，觀察重複 QA 的原因，先提出改善建議。”
+For a fictional example: “找範例發佈流程的 Task，觀察重複檢查的原因，先提出改善建議。”
 The `workflow-observe` skill resolves bounded native Task names/summaries and
 locks exact identities before observing. A clear match proceeds; ambiguity gets
 one meaningful question, not a request to copy UUIDs. “直接改善流程” can authorize

@@ -9,25 +9,18 @@ import time
 from pathlib import Path
 
 from .report import build_report, render_report, write_report
+from .report_i18n import ReportText, human_text
 from .report_render import _md_table
 from .task_catalog import TaskCatalog, _uuid
 from .util import data_path
 
-MENU = """Codex 用量分析：先選範圍，不讀取全量歷史。
-- report tasks：最近 10 個任務名稱與選擇代碼，僅中繼資料。
-- report task：目前 Task 最近 24h；可用 --thread 選擇代碼指定。
-- report agents：目前 Task 的代理關係，不讀 Token 紀錄。
-- report tree：明確分析目前 Task 與子代理，最近 24h。
-- report window --windows 5h：目前 Task 的單一窗口。
-跨任務必須明確加 --all-tasks；預設最多 20 頁、20 組明細。
-分析預設存檔、只回短摘要；--full 才將完整報告印到 stdout。
-Codex slash 入口：/skills → usage-task / usage-agents / usage-window。
-"""
 
-
-def _attach_names(report, home, known):
+def _attach_names(report, home, known, labels=None):
     try:
-        with TaskCatalog(home) as catalog:
+        options = {}
+        if labels is not None:
+            options["unnamed_label"] = labels("unnamed_task")
+        with TaskCatalog(home, **options) as catalog:
             for key, row in report["task_catalog"].items():
                 try:
                     metadata = known.get(key) or catalog.describe(catalog.get(key))
@@ -52,19 +45,34 @@ def _attach_names(report, home, known):
         report["catalog_status"] = "partial_or_unavailable"
 
 
-def run(args):
+def run(args, *, locale=None):
     if args.limit is not None and not 1 <= args.limit <= 1000:
         raise ValueError("limit must be 1..1000")
     view = args.view
+    # Machine JSON never needs a human adapter, even if a caller accidentally
+    # forwards a locale.  The CLI normally passes ``locale`` only on its human
+    # route; keeping this guard here protects direct library callers too.
+    labels = (
+        ReportText(locale, domain="reports")
+        if locale is not None and args.format != "json"
+        else None
+    )
+
+    def human_labels():
+        nonlocal labels
+        if labels is None:
+            labels = human_text("reports", home=args.codex_home)
+        return labels
+
     if view is None:
         if not any(
             (args.thread, args.all_tasks, args.windows, args.since, args.until, args.output)
         ):
-            print(MENU, end="")
+            print(human_labels()("menu"), end="")
             return
         view = "window"
     if view == "help":
-        print(MENU, end="")
+        print(human_labels()("menu"), end="")
         return
     if view == "tasks" and args.thread:
         raise ValueError("use report task/agents with --thread")
@@ -77,8 +85,10 @@ def run(args):
         selectors = args.thread or [os.environ.get("CODEX_THREAD_ID")]
         if view != "tasks" and not all(selectors):
             raise ValueError("no current Task; run report tasks, then use --thread")
+        human = human_labels() if args.format != "json" else None
+        catalog_options = {"unnamed_label": human("unnamed_task")} if human else {}
         try:
-            with TaskCatalog(args.codex_home) as catalog:
+            with TaskCatalog(args.codex_home, **catalog_options) as catalog:
                 if view == "tasks":
                     selected = catalog.recent(min(args.limit or 10, 100))
                 else:
@@ -116,20 +126,34 @@ def run(args):
             else:
                 print(
                     _md_table(
-                        ["任務 / 代理", "選擇代碼", "直屬主代理", "所屬主 Task", "角色"],
+                        [
+                            human("column_task_agent"),
+                            human("column_selector"),
+                            human("column_parent"),
+                            human("column_root"),
+                            human("column_role"),
+                        ],
                         [
                             [
                                 r["display_name"],
                                 r["selector"],
-                                r["parent_name"] or "—",
-                                r["root_name"] or "未觀測",
+                                r["parent_name"] or human("dash"),
+                                r["root_name"] or human("not_observed"),
                                 r["agent_role"] or r["role"],
                             ]
                             for r in rows
                         ],
+                        human,
                     )
                 )
-                print(f"\n僅讀中繼資料；{len(rows)} 筆；範圍受限：{limited}。")
+                print(
+                    "\n"
+                    + human(
+                        "metadata_summary",
+                        count=human.number(len(rows)),
+                        limited=human("bool_yes") if limited else human("bool_no"),
+                    )
+                )
             return
     report = build_report(
         sessions=args.directory,
@@ -143,13 +167,14 @@ def run(args):
         limit=args.limit or 20,
         detail_limit=args.detail_limit,
     )
-    _attach_names(report, args.codex_home, known)
+    human = human_labels() if args.format != "json" else None
+    _attach_names(report, args.codex_home, known, human)
     for key, metadata in known.items():
         report["task_catalog"].setdefault(key, metadata)
     report["scope"]["requested_view"] = view
     if view == "tree":
         report["scope"]["tree_selection_limited"] = limited
-    rendered = render_report(report, args.format)
+    rendered = render_report(report, args.format, text=human)
     if args.full and args.output is None:
         print(rendered, end="")
         return
@@ -162,19 +187,56 @@ def run(args):
         extension = {"markdown": "md", "html": "html", "json": "json"}[args.format]
         output = directory / f"usage-{time.time_ns()}.{extension}"
     write_report(output, rendered)
-    labels = [r["display_name"] for r in report["task_catalog"].values()]
+    # A JSON artifact is still followed by a human-readable summary unless
+    # ``--full`` streamed the canonical payload directly above.  Resolve the
+    # catalog only at this mixed-output boundary; JSON bytes were written
+    # before any human formatting is attempted.
+    if human is None and args.format == "json":
+        human = human_labels()
+    names = [_task_display_name(row, human) for row in report["task_catalog"].values()]
     print(
-        "範圍："
-        + ("；".join(labels[:3]) or "選定範圍無請求觀測")
-        + (" …" if len(labels) > 3 else "")
+        human(
+            "summary_scope",
+            tasks=("；".join(names[:3]) or human("scope_empty"))
+            + (" …" if len(names) > 3 else ""),
+        )
     )
     for window in report["windows"]:
         usage = window["usage"] or {}
         print(
-            f"{window['name']}：{usage.get('total_tokens', '未觀測')} Token；"
-            f"{usage.get('unique_responses', '未觀測')} 筆請求"
+            human(
+                "summary_window",
+                name=window["name"],
+                tokens=human.number(usage.get("total_tokens")),
+                requests=human.number(usage.get("unique_responses")),
+            )
         )
-    print(f"僅分析 {report['coverage']['selection']['selected_files']} 個紀錄頁；完整報告已存檔。")
+    print(
+        human(
+            "summary_files",
+            files=human.number(report["coverage"]["selection"]["selected_files"]),
+        )
+    )
     if view == "tree" and limited:
-        print("代理樹已達數量或深度上限；不是完整後代用量。")
-    print(f"[開啟報告](<{Path(output).absolute()}>)")
+        print(human("summary_tree_limited"))
+    print(
+        "["
+        + human("report_output_link")
+        + "](<"
+        + _safe_link_path(Path(output).absolute())
+        + ">)"
+    )
+
+
+def _task_display_name(row, labels):
+    name = row.get("display_name")
+    if name and row.get("name_source") not in ("unnamed", "unavailable"):
+        return str(name)
+    return labels("unnamed_task_hash", hash=row.get("selector", "unknown")) if labels else (
+        "Unnamed task · " + str(row.get("selector", "unknown"))
+    )
+
+
+def _safe_link_path(path: Path) -> str:
+    """Keep the Markdown destination harmless when a user chooses a odd path."""
+    return str(path).replace(">", "%3E").replace("\n", "%0A").replace("\r", "%0D")

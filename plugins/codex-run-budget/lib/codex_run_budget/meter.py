@@ -23,6 +23,7 @@ from urllib.parse import quote
 from .audit import KNOWN_MODELS
 from .meter_plan import normalize_subscription, plan_type
 from .meter_policy import credit_scenarios, pricing_context
+from .report_i18n import ReportText
 from .survey import survey_transcripts
 from .util import stable_hash
 
@@ -44,6 +45,61 @@ _TOKEN_FIELDS = {
     "outputTokens": "output_tokens",
     "totalTokens": "total_tokens",
 }
+
+
+# Issue values are part of the structured report contract.  A translated
+# explanation is only an adjacent human hint; the original code remains in
+# every rendered summary so consumers can still match it deterministically.
+_ISSUE_KEYS = {
+    "account_identity_unavailable": "issue_account_identity_unavailable",
+    "account_changed": "issue_account_changed",
+    "subscription_conflicted": "issue_subscription_conflicted",
+    "billing_route_changed": "issue_billing_route_changed",
+    "subscription_changed": "issue_subscription_changed",
+    "overlapping_or_unordered_captures": "issue_overlapping_or_unordered_captures",
+    "window_latest_unavailable": "issue_window_latest_unavailable",
+    "window_baseline_unavailable": "issue_window_baseline_unavailable",
+    "plan_unavailable": "issue_plan_unavailable",
+    "plan_changed": "issue_plan_changed",
+    "quota_alias_changed": "issue_quota_alias_changed",
+    "window_identity_unavailable": "issue_window_identity_unavailable",
+    "reset_or_window_changed": "issue_reset_or_window_changed",
+    "reset_boundary_crossed": "issue_reset_boundary_crossed",
+    "percentage_unavailable": "issue_percentage_unavailable",
+    "quota_decreased_or_corrected": "issue_quota_decreased_or_corrected",
+}
+
+
+def _observation_text(locale: str) -> ReportText:
+    return ReportText(locale, domain="observations")
+
+
+def _human(value: Any, text: ReportText) -> str:
+    """Format a display value without changing structured/status values."""
+    if value is None:
+        # Keep the historical lowercase English rendering byte-compatible;
+        # translated catalogs can use their locale's ordinary unknown label.
+        return "unknown" if text.locale == "en" else text("unknown")
+    if type(value) is bool:
+        return "true" if value else "false"
+    if type(value) in (int, float):
+        return text.number(value)
+    return str(value)
+
+
+def _issue(code: Any, text: ReportText) -> str:
+    """Keep an issue code and append a fixed translated explanation when known."""
+    if not isinstance(code, str):
+        return _human(code, text)
+    key = _ISSUE_KEYS.get(code)
+    if not key or text.locale == "en":
+        return code
+    try:
+        return f"{code} ({text(key)})"
+    except KeyError:
+        # A newly introduced code is still useful and must not disappear just
+        # because its catalog has not been extended yet.
+        return code
 
 
 def _number(value: Any, *, integer: bool = False) -> int | float | None:
@@ -538,73 +594,92 @@ def _utc(stamp: Any) -> str:
         return "unknown"
 
 
-def snapshot_summary(snapshot: dict[str, Any]) -> str:
-    lines = [f"Codex native quota meter — {_utc(snapshot['captured_at'])}"]
+def snapshot_summary(snapshot: dict[str, Any], *, locale: str = "en") -> str:
+    """Render one native quota snapshot for humans.
+
+    The snapshot itself is deliberately language-neutral JSON.  ``locale`` is
+    consumed only here, at the human-output seam; no preference lookup occurs.
+    """
+    text = _observation_text(locale)
+    unknown = "unknown" if text.locale == "en" else text("unknown")
+    lines = [text("snapshot_title", time=_utc(snapshot["captured_at"]))]
     if snapshot.get("id") is not None:
-        lines.append(f"Saved local snapshot #{snapshot['id']} (no budget change)")
+        lines.append(text("snapshot_saved", id=_human(snapshot["id"], text)))
     subscription = snapshot.get("subscription") or {}
     lines.append(
-        f"Subscription at capture: {subscription.get('plan_type') or 'unknown'}; "
-        f"billing route: {subscription.get('auth_type') or 'unknown'}; "
-        f"evidence: {subscription.get('status') or 'not_recorded'}; "
-        "allowance tier multiplier: unknown"
+        text(
+            "snapshot_subscription",
+            plan=subscription.get("plan_type") or unknown,
+            auth=subscription.get("auth_type") or unknown,
+            evidence=subscription.get("status") or "not_recorded",
+            unknown=unknown,
+        )
     )
     allowed = snapshot.get("ordinary_usage_allowed")
-    permission = "allowed" if allowed is True else "not_allowed" if allowed is False else "unknown"
-    lines.append(f"Backend ordinary included usage permission: {permission}")
+    permission = "allowed" if allowed is True else "not_allowed" if allowed is False else unknown
+    lines.append(text("snapshot_permission", permission=permission))
     for bucket in snapshot["limits"]:
         for window in bucket["windows"]:
             lines.append(
-                f"{bucket['limit_id']} / {_format(window['duration_minutes'])} min "
-                f"(plan {bucket.get('plan_type') or 'unknown'}): "
-                f"used {_format(window['used_percent'])}%; "
-                f"remaining {_format(window['remaining_percent'])}%; "
-                f"resets {_utc(window['resets_at'])}"
+                text(
+                    "snapshot_window",
+                    limit=bucket["limit_id"],
+                    duration=_human(window["duration_minutes"], text),
+                    plan=bucket.get("plan_type") or unknown,
+                    used=_human(window["used_percent"], text),
+                    remaining=_human(window["remaining_percent"], text),
+                    reset=_utc(window["resets_at"]),
+                )
             )
         credits = bucket.get("credits") or {}
         lines.append(
-            f"{bucket['limit_id']} native controls: reached type "
-            f"{bucket.get('rate_limit_reached_type') or 'unknown'}; "
-            f"spend control reached {_format(bucket.get('spend_control_reached'))}; "
-            f"has credits {_format(credits.get('has_credits'))}; "
-            f"unlimited credits {_format(credits.get('unlimited'))}; "
-            f"credit balance {_format(credits.get('balance'))}"
+            text(
+                "snapshot_controls",
+                limit=bucket["limit_id"],
+                reached=bucket.get("rate_limit_reached_type") or unknown,
+                spend=_human(bucket.get("spend_control_reached"), text),
+                has=_human(credits.get("has_credits"), text),
+                unlimited=_human(credits.get("unlimited"), text),
+                balance=_human(credits.get("balance"), text),
+            )
         )
         individual = bucket.get("individual_limit")
         if individual:
             lines.append(
-                "  Native individual spend control: "
-                f"used {_format(individual.get('used'))} / {_format(individual.get('limit'))}; "
-                f"remaining {_format(individual.get('remaining_percent'))}%; "
-                f"resets {_utc(individual.get('resets_at'))} (not model-token quota)"
+                text(
+                    "snapshot_individual",
+                    used=_human(individual.get("used"), text),
+                    limit=_human(individual.get("limit"), text),
+                    remaining=_human(individual.get("remaining_percent"), text),
+                    reset=_utc(individual.get("resets_at")),
+                )
             )
     if not snapshot["limits"]:
-        lines.append("Quota data unavailable (not zero usage).")
+        lines.append(text("snapshot_unavailable"))
     lifetime = snapshot["account_usage"]["lifetime_tokens"]
-    lines.append(f"Account lifetime tokens: {_format(lifetime)} (not this quota-window total)")
+    lines.append(text("snapshot_lifetime", tokens=_human(lifetime, text)))
     groups_shown = 0
     for thread in snapshot["official_thread_usage"]:
         identity = (thread["thread_hash"] or "unknown")[:12]
-        lines.append(f"Thread {identity} official usage: {thread['status']}")
+        lines.append(text("snapshot_thread", identity=identity, status=thread["status"]))
         for group in thread["groups"]:
             if groups_shown >= 20:
                 break
             groups_shown += 1
             lines.append(
-                f"  {group['model'] or 'unknown'} / {group['reasoning_effort'] or 'unknown'} / "
-                f"{group['speed'] or 'unknown'}: tokens {_format(group['total_tokens'])}; "
-                f"backend-estimated credits/1M tokens "
-                f"{_format(group['estimated_credits_per_million_tokens'])}"
+                text(
+                    "snapshot_group",
+                    model=group["model"] or unknown,
+                    effort=group["reasoning_effort"] or unknown,
+                    speed=group["speed"] or unknown,
+                    tokens=_human(group["total_tokens"], text),
+                    credits=_human(group["estimated_credits_per_million_tokens"], text),
+                )
             )
-    lines.append(
-        "Credits estimates and local tokens are not quota percentages; missing means unknown."
-    )
-    lines.append(
-        "Permission is not inferred from percentages, reset times or credit balance. "
-        "Active-turn continuation and other shared usage can differ from new-turn admission."
-    )
+    lines.append(text("snapshot_credits_note", unknown=unknown))
+    lines.append(text("snapshot_permission_note"))
     if snapshot["diagnostics"]:
-        lines.append("Diagnostics: " + ", ".join(snapshot["diagnostics"]))
+        lines.append(text("snapshot_diagnostics", values=", ".join(snapshot["diagnostics"])))
     return "\n".join(lines)
 
 
@@ -821,41 +896,41 @@ def meter_tasks(
     }
 
 
-def tasks_summary(report: dict[str, Any]) -> str:
+def tasks_summary(report: dict[str, Any], *, locale: str = "en") -> str:
+    text = _observation_text(locale)
     local = report.get("local_usage") or {}
     interval = report.get("interval") or report
     lines = [
-        f"Cross-task observations: {local.get('task_count', 0)} tasks (local/partial)",
-        f"Window: {_utc(interval.get('since'))} → {_utc(interval.get('until'))}",
-        "task | turn | model | effort | service tier | Fast | plan | requests | total tokens",
+        text(
+            "tasks_heading",
+            count=_human(local.get("task_count", 0), text),
+        ),
+        text("tasks_window", since=_utc(interval.get("since")), until=_utc(interval.get("until"))),
+        text("tasks_columns"),
     ]
     for row in sorted(
         local.get("request_context_usage", []), key=lambda row: -row.get("total_tokens", 0)
     )[:20]:
-        lines.append(
-            " | ".join(
-                str(value) if value is not None else "unknown"
-                for value in (
-                    (row.get("thread_hash") or "unknown")[:12],
-                    (row.get("turn_hash") or "unknown")[:12],
-                    row.get("model"),
-                    row.get("reasoning_effort"),
-                    row.get("service_tier"),
-                    row.get("fast_mode"),
-                    row.get("plan_type"),
-                    row.get("unique_responses"),
-                    row.get("total_tokens"),
-                )
-            )
+        values = (
+            (row.get("thread_hash") or "unknown")[:12],
+            (row.get("turn_hash") or "unknown")[:12],
+            row.get("model"),
+            row.get("reasoning_effort"),
+            row.get("service_tier"),
+            row.get("fast_mode"),
+            row.get("plan_type"),
+            row.get("unique_responses"),
+            row.get("total_tokens"),
         )
+        lines.append(" | ".join(_human(value, text) for value in values))
     if not local.get("request_context_usage"):
-        lines.append("No attributable request context in the selected local evidence.")
+        lines.append(text("tasks_none"))
     if local.get("missing_selected_thread_hashes"):
-        lines.append("Some selected tasks have no observed request usage; missing is not zero.")
+        lines.append(text("tasks_missing"))
     lines.extend(local.get("limitations", []))
-    lines.append("Historical plan is a nearby quota observation, not a verified per-request bill.")
-    lines.append("Fast reference (2026-09-12, ChatGPT credits only): Astra/5.6/5.5 2.5x; 5.4 2x.")
-    lines.append("These published mode multipliers are not measured task charges or quota shares.")
+    lines.append(text("tasks_plan_note"))
+    lines.append(text("tasks_fast_reference"))
+    lines.append(text("tasks_fast_note"))
     return "\n".join(lines)
 
 
@@ -878,54 +953,79 @@ def meter_estimate(
     return report
 
 
-def estimate_summary(report: dict[str, Any]) -> str:
+def estimate_summary(report: dict[str, Any], *, locale: str = "en") -> str:
+    text = _observation_text(locale)
     scenarios = report["credit_scenarios"]
     reference = scenarios["reference"]
     coverage = scenarios["coverage"]
     lines = [
-        "Counterfactual ChatGPT credit scenarios — NOT actual charges or quota percentages",
-        f"Rate card verified {reference['verified_on']}; "
-        f"freshness {reference['freshness']['status']}",
-        f"Priced requests: {coverage['priced_requests']}; "
-        f"excluded: {coverage['excluded_requests']}",
-        f"Standard scenario: {_format(scenarios['standard_scenario_credits'])} credits; "
-        f"Fast scenario: {_format(scenarios['fast_scenario_credits'])} credits",
-        "Task / model / effort / observed Fast | requests | Standard credits | Fast credits",
+        text("estimate_title"),
+        text(
+            "estimate_rate",
+            verified=reference["verified_on"],
+            freshness=reference["freshness"]["status"],
+        ),
+        text(
+            "estimate_coverage",
+            priced=_human(coverage["priced_requests"], text),
+            excluded=_human(coverage["excluded_requests"], text),
+        ),
+        text(
+            "estimate_scenarios",
+            standard=_human(scenarios["standard_scenario_credits"], text),
+            fast=_human(scenarios["fast_scenario_credits"], text),
+        ),
+        text("estimate_columns"),
     ]
     for row in sorted(scenarios["rows"], key=lambda row: -row["requests"])[:20]:
         lines.append(
-            f"{(row.get('thread_hash') or 'unknown')[:12]} / {row.get('model')} / "
-            f"{row.get('reasoning_effort') or 'unknown'} / "
-            f"{_format(row.get('observed_fast_mode'))} | {row['requests']} | "
-            f"{_format(row['standard_scenario_credits'])} | "
-            f"{_format(row['fast_scenario_credits'])} ({row['status']})"
+            text(
+                "estimate_row",
+                task=(row.get("thread_hash") or "unknown")[:12],
+                model=row.get("model") or "unknown",
+                effort=row.get("reasoning_effort") or "unknown",
+                fast=_human(row.get("observed_fast_mode"), text),
+                requests=_human(row["requests"], text),
+                standard=_human(row["standard_scenario_credits"], text),
+                fast_credits=_human(row["fast_scenario_credits"], text),
+                status=row["status"],
+            )
         )
     lines.extend(scenarios["limitations"])
-    lines.append("Rate source: " + reference["token_rate_source"])
+    lines.append(text("estimate_rate_source", source=reference["token_rate_source"]))
     return "\n".join(lines)
 
 
-def report_summary(report: dict[str, Any]) -> str:
+def report_summary(report: dict[str, Any], *, locale: str = "en") -> str:
+    text = _observation_text(locale)
     latest = report["latest"]
-    lines = [snapshot_summary(latest)] if latest else ["Codex quota meter: no saved snapshots."]
+    lines = [snapshot_summary(latest, locale=locale)] if latest else [text("report_no_latest")]
     interval = report["interval"]
     if interval is None:
-        lines.append("Record two snapshots around normal work to observe account quota changes.")
+        lines.append(text("report_baseline"))
         return "\n".join(lines)
-    lines.append(f"Interval: {_utc(interval['since'])} → {_utc(interval['until'])}")
+    lines.append(
+        text("report_interval", since=_utc(interval["since"]), until=_utc(interval["until"]))
+    )
     for row in interval["windows"]:
+        issues = ", ".join(_issue(code, text) for code in row["issues"])
         lines.append(
-            f"{row['limit_id']} / {_format(row['duration_minutes'])} min: "
-            f"used delta {_format(row['used_percentage_points'])} percentage points; "
-            f"{row['status']}" + (" (" + ", ".join(row["issues"]) + ")" if row["issues"] else "")
+            text(
+                "report_window",
+                limit=row["limit_id"],
+                duration=_human(row["duration_minutes"], text),
+                delta=_human(row["used_percentage_points"], text),
+                status=row["status"],
+                issues=(" (" + issues + ")") if issues else "",
+            )
         )
     local = report["local_usage"] or {}
-    lines.append("Local model tokens (observed/partial, not model quota allocation):")
-    lines.append("model | requests | input | cached input | output | total | quota pp")
+    lines.append(text("report_local_heading"))
+    lines.append(text("report_local_columns"))
     for row in local.get("models", [])[:20]:
         lines.append(
             " | ".join(
-                str(row[field])
+                _human(row[field], text)
                 for field in (
                     "model",
                     "unique_responses",
@@ -935,10 +1035,10 @@ def report_summary(report: dict[str, Any]) -> str:
                     "total_tokens",
                 )
             )
-            + " | unknown"
+            + " | " + ("unknown" if text.locale == "en" else text("unknown"))
         )
     if not local.get("models"):
-        lines.append("No attributable local request-token observations; model usage unknown.")
+        lines.append(text("report_no_models"))
     lines.extend(interval["limitations"])
-    lines.append(tasks_summary(report))
+    lines.append(tasks_summary(report, locale=locale))
     return "\n".join(lines)

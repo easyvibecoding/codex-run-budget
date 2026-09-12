@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+
+repo=$(git rev-parse --show-toplevel)
+exec python3 "$repo/scripts/check_sensitive_data.py" \
+  --index --fail-on-findings --repo "$repo"
