@@ -75,6 +75,92 @@ class MeterContextTest(unittest.TestCase):
         rows = audit_transcripts([page])["request_context_usage"]
         self.assertEqual({row["plan_type"] for row in rows}, {"pro", None})
 
+    def test_plan_only_comes_from_quota_observation(self):
+        page = write_page(
+            self.root,
+            "plan-source.jsonl",
+            [
+                record("session_meta", {"id": "thread"}, 0),
+                record(
+                    "turn_context",
+                    {
+                        "turn_id": "turn",
+                        "model": "gpt-6-astra",
+                        "plan_type": "enterprise",
+                    },
+                    1,
+                ),
+                record(
+                    "token_usage_record",
+                    {
+                        "response_id": "before",
+                        "usage": usage(),
+                        "plan_type": "plus",
+                    },
+                    2,
+                ),
+                token_count("pro", 3),
+                record(
+                    "token_usage_record",
+                    {
+                        "response_id": "after",
+                        "usage": usage(),
+                        "planType": "enterprise",
+                    },
+                    4,
+                ),
+            ],
+        )
+        rows = audit_transcripts([page])["request_context_usage"]
+        self.assertEqual({row["plan_type"] for row in rows}, {None, "pro"})
+        row = next(row for row in rows if row["plan_type"] == "pro")
+        self.assertEqual(row["context_status"]["plan_type"], "nearby_observation")
+        self.assertEqual(row["context_sources"]["plan_type"], ["token_count.rate_limits.plan_type"])
+
+    def test_explicit_invalid_identity_never_inherits_active_task(self):
+        for field in ("thread_id", "turn_id"):
+            for bad in (None, ""):
+                page = write_page(
+                    self.root,
+                    "invalid-id.jsonl",
+                    [
+                        record("session_meta", {"id": "thread"}, 0),
+                        record("turn_context", {"turn_id": "turn", "model": "gpt-6-astra"}, 1),
+                        record(
+                            "token_usage_record",
+                            {
+                                "response_id": "response",
+                                "usage": usage(),
+                                field: bad,
+                            },
+                            2,
+                        ),
+                    ],
+                )
+                row = audit_transcripts([page])["request_context_usage"][0]
+                self.assertEqual(row["model"], "unknown")
+                self.assertIsNone(row["turn_hash"])
+                if field == "thread_id":
+                    self.assertEqual(row["thread_hash"], "unknown")
+
+    def test_missing_rate_limits_clears_last_plan(self):
+        missing = token_count("pro", 4)
+        missing["payload"].pop("rate_limits")
+        page = write_page(
+            self.root,
+            "missing-quota.jsonl",
+            [
+                record("session_meta", {"id": "thread"}, 0),
+                record("turn_context", {"turn_id": "turn", "model": "gpt-6-astra"}, 1),
+                token_count("pro", 2),
+                record("token_usage_record", {"response_id": "before", "usage": usage()}, 3),
+                missing,
+                record("token_usage_record", {"response_id": "after", "usage": usage()}, 5),
+            ],
+        )
+        rows = audit_transcripts([page])["request_context_usage"]
+        self.assertEqual({row["plan_type"] for row in rows}, {"pro", None})
+
     def test_cross_task_turn_role_effort_fast_and_plan_usage(self) -> None:
         parent = write_page(
             self.root,

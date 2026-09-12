@@ -155,7 +155,7 @@ def _payload_identifier(payload: dict[str, Any], key: str) -> tuple[str | None, 
     so would attribute an item to the wrong thread or turn.
     """
 
-    if key not in payload or payload.get(key) in (None, ""):
+    if key not in payload:
         return None, False
     return _identifier_hash(payload.get(key)), True
 
@@ -454,15 +454,6 @@ def _context_field_observation(
             "service_tier", raw_tier, source, _service_tier_value(raw_tier)
         )
 
-    if "plan_type" in payload or "planType" in payload:
-        key = "plan_type" if "plan_type" in payload else "planType"
-        observe(
-            "plan_type",
-            payload.get(key),
-            f"{source_prefix}.{key}",
-            plan_type(payload.get(key)),
-        )
-
     return result
 
 
@@ -547,7 +538,7 @@ def _token_count_plan_observation(payload: dict[str, Any]) -> tuple[bool, str | 
     """Read a plan only from a token_count rate-limit observation."""
 
     if "rate_limits" not in payload:
-        return False, None, None
+        return True, None, "token_count.missing_rate_limits"
     rate_limits = payload.get("rate_limits")
     if not isinstance(rate_limits, dict):
         return True, None, "token_count.rate_limits"

@@ -2,12 +2,15 @@
 
 ## Cross-task subscription and configuration meter — 2026-09-12, v0.7.0
 
-138 tests passed, including cross-task filtering, within-turn settings changes,
+141 tests passed, including cross-task filtering, within-turn settings changes,
 duplicate metadata conflicts, preceding-only context, missing quota-plan clearing,
 schema-1 snapshot readback, subscription/billing-route conflicts, Fast/default/
 priority separation, privacy and bounded native reads. Ruff and repository,
 plugin and skill validators passed. A separate review found unrecognized quota
 IDs/display labels could pass through unchanged; both now hash before storage.
+Historical plan evidence is restricted to quota observations; absent plan
+snapshots clear prior plan context, and invalid explicit Task/turn IDs cannot
+inherit an active identity. Negative read-back cases cover all three gates.
 
 A real bounded one-day cohort returned 89 identifiable Tasks with model/effort
 and token observations. An exact single-Task filter returned only that Task's
