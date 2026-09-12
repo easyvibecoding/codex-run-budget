@@ -1,5 +1,40 @@
 # Validation evidence
 
+## On-demand workflow observer — 2026-09-13 Asia/Taipei, v0.12.0
+
+194 tests passed. Eight added workflow cases exercise exact scope and overlapping
+root deduplication, native names/parentage, capped trees, explicit cursor binding
+and expiry, unchanged-source reuse, append deltas, gaps/reset/truncation,
+unavailable/wrong-identity/symlink sources, partial records, clock reversal,
+abort/stale/cleared signals, privacy and exclusion of the calling Task from
+native wait targets. Ruff, repository/plugin/changed-skill validators passed.
+
+Two real captures of the current Task's capped eight-entry tree took 0.077 seconds
+combined in one observed run. The first read 2,280,823 bytes; the unchanged second
+read 183,663 bytes and reported no new evidence. Both used no model requests.
+These are local read-cost observations, not measured workflow time/token savings
+or a latency guarantee. The selected tree was explicitly incomplete. A native
+`wait_threads` snapshot of one exact descendant returned `notLoaded` alongside a
+completed latest turn, confirming why load state and turn completion stay separate.
+The native self-wait guard was also observed; the new target adapter excludes self.
+
+Installed `0.12.0+codex.20260912194725` in an isolated Codex home and generated a
+real two-Task named report using that installed CLI. Stable installation matched
+the source tree, preserved byte-identical 0.3.0–0.11.0 caches against the pre-change
+backup, and changed only 11 reviewed hook trust hashes in the main config. All
+plugin hooks and the unrelated Railway hook remained enabled/trusted, with no
+hook warnings/errors. Saved per-turn report preferences were byte-identical.
+Native `skills/list` returned `codex-run-budget:workflow-observe` enabled from
+the stable 0.12.0 cache.
+
+Hook archive comparison against 0.11.0 changed only the package version member;
+no lifecycle or enforcement implementation changed. Runtime SHA-256:
+`603b59b0d7eccce03f4afa27dd65e82f8acd5ea9d3e0b94da06358ff9773861a`.
+No new model canary, recurring automation, background process or intervention
+in the observed workflow was created. Continuous mode remains a skill-guided,
+explicit-user-opt-in route through Codex's native automation tool, not a new
+deterministic scheduler or a zero-token model wakeup.
+
 ## Named, scope-first Task reports — 2026-09-12 UTC, v0.11.0
 
 186 tests passed, including native-name-only display (no prompt-like fallback),

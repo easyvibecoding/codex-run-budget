@@ -1,6 +1,6 @@
 {
   "name": "codex-run-budget",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "Shared token governance, native account quota sensing, and recent-task telemetry for Codex.",
   "author": {
     "name": "EasyVibeCoding",
@@ -20,7 +20,7 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Codex Run Budget",
-    "shortDescription": "Native quotas and deterministic Task reports.",
+    "shortDescription": "Quotas, Task reports and on-demand workflow observations.",
     "longDescription": "Adds shared token governance and lifecycle diagnostics. Reads native quota, subscription and spend controls. Cross-task model/Fast/reasoning observations and dated token-credit scenarios stay separate from backend estimates and actual charges, without inventing per-model quota allocations or changing budgets.",
     "developerName": "EasyVibeCoding",
     "category": "Productivity",
@@ -32,7 +32,8 @@
     "defaultPrompt": [
       "Start a 100k shared run budget for this task.",
       "Show the usage report scope menu without scanning history.",
-      "Report this Task's last 24 hours, with its Codex name and agent ownership."
+      "Report this Task's last 24 hours, with its Codex name and agent ownership.",
+      "Observe this workflow once, with named Task ownership and compact changes; do not schedule monitoring."
     ]
   }
 }

@@ -87,6 +87,10 @@ transcript content. Never bypass that privacy rule when troubleshooting.
 
 ## Audit recent tasks
 
+For on-demand cross-Task workflow progress/efficiency observation, use
+`workflow-observe`: bounded local evidence and explicit cursors, then native
+Task checks only as needed. No background monitor is enabled implicitly.
+
 For a generic usage-analysis request, start with `report` (a no-scan menu), or
 the scoped `usage-task`, `usage-agents`, or `usage-window` skill. Do not run a
 200-page survey, cross-Task meter report, full JSON export or all-window report

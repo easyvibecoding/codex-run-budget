@@ -51,6 +51,28 @@ codex plugin add codex-run-budget@codex-run-budget
 Start a new Codex task after installation. Review and trust the bundled hooks
 when Codex prompts you; untrusted hooks are skipped by design.
 
+### On-demand workflow observations
+
+Use `/skills` → `workflow-observe` to inspect a selected workflow once. It
+resolves native Task/agent names, compares bounded evidence with an explicit
+cursor, and returns changes plus a private report link. Observation is read-only
+with respect to Codex and the workflow; only its separate private evidence store
+is written. It never starts a monitor or intervenes in agents implicitly.
+
+```sh
+python3 plugins/codex-run-budget/scripts/run_budget.py workflow
+python3 plugins/codex-run-budget/scripts/run_budget.py workflow observe --thread TASK_SELECTOR
+# Only if descendants are part of the requested scope:
+python3 plugins/codex-run-budget/scripts/run_budget.py workflow observe \
+  --thread TASK_SELECTOR --include-agents --after PREVIOUS_CURSOR
+```
+
+Default cap is 8 Tasks, with a 256 KiB transcript tail per Task. A cursor is bound
+to the exact roots, descendant option and cap. Local evidence is not native live
+state or workflow acceptance. Use the skill's native status confirmation when
+needed. Recurring observation is opt-in through Codex's automation tool after
+the user explicitly asks to enable it. See [workflow observations](docs/WORKFLOW_OBSERVATIONS.md).
+
 ### Task reports
 
 Start with a no-scan menu, then select one scope without starting a budget:

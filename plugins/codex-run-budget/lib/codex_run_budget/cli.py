@@ -122,6 +122,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--output", type=Path, help="create private report; existing files are refused"
     )
 
+    workflow = sub.add_parser("workflow", help="on-demand, bounded cross-Task observations")
+    workflow.add_argument("action", nargs="?", choices=("observe", "targets"))
+    workflow.add_argument("--thread", action="append", default=[])
+    workflow.add_argument("--include-agents", action="store_true")
+    workflow.add_argument("--limit", type=int, default=8)
+    workflow.add_argument("--after", help="previous observation cursor for the exact same scope")
+    workflow.add_argument("--codex-home", type=Path)
+    workflow.add_argument(
+        "--json", action="store_true", help="explicit full structured observation"
+    )
+
     automatic = sub.add_parser("auto-report", help="configure deterministic Stop-boundary receipts")
     automatic.add_argument("action", choices=("status", "enable", "disable", "list"))
     automatic.add_argument(
@@ -157,6 +168,20 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "workflow":
+        from .workflow import run
+
+        try:
+            args.data_dir = args.data_dir or data_path()
+            run(args)
+            return 0
+        except (OSError, ValueError, TypeError, KeyError, sqlite3.Error, RecursionError):
+            print(
+                "run-budget: invalid workflow scope/cursor or unavailable local evidence; "
+                "no scope expansion or agent action was performed",
+                file=sys.stderr,
+            )
+            return 2
     if args.command == "auto-report":
         from .auto_report import configure, recent, settings
 
