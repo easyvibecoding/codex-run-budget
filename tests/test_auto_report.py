@@ -43,6 +43,10 @@ def counter(total):
 
 class AutoReportTest(unittest.TestCase):
     def setUp(self):
+        locale = patch("codex_run_budget.auto_report.resolve_locale",
+                       return_value={"locale": "zh-Hant", "locale_source": "test"})
+        locale.start()
+        self.addCleanup(locale.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)

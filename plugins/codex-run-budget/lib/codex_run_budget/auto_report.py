@@ -17,6 +17,7 @@ from html import escape
 from pathlib import Path
 from typing import Any
 
+from .report_i18n import ReportText, resolve_locale
 from .task_catalog import task_description
 from .transcript import _usage_from_line
 from .util import stable_hash
@@ -26,22 +27,20 @@ MAX_ROWS = 10_000
 EVENTS = {"UserPromptSubmit", "Stop", "Interrupt", "SessionEnd", "SubagentStop"}
 
 
-def _pending(key: str) -> str:
+def _pending(key: str, locale="zh-Hant") -> str:
+    text = ReportText(locale)
     return (
-        "# Codex 回合用量摘要\n\n"
-        "待結算：本回合尚未產生可用的 Stop 快照，這不是已完成的用量報告。\n\n"
-        "回合結束後由本機程式填入；若關閉報告、中斷、未達時間門檻或 Hook 失敗，"
-        "此頁可能維持待結算。沒有數字不代表零用量。\n\n"
+        f"# {text('title')}\n\n{ text('pending')}\n\n{text('pending_note')}\n\n"
         f"<!-- run-budget-pending:{key} -->\n"
     )
 
 
-def _footer(directory: Path, key: str, payload: dict[str, Any]) -> dict[str, Any]:
+def _footer(directory: Path, key: str, payload: dict[str, Any], locale="zh-Hant") -> dict[str, Any]:
     """Publish a real pending target before asking for one normal-answer link."""
     target = directory / f"{key}.md"
     descriptor = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
     with os.fdopen(descriptor, "w") as output:
-        output.write(_pending(key))
+        output.write(_pending(key, locale))
     digest = getattr(__loader__, "runtime_digest", None)
     runner = (
         directory.parent / "runtimes" / (digest + ".pyz")
@@ -288,69 +287,65 @@ def observed_total(parent: dict | None, children: dict) -> tuple[dict | None, bo
     return total, complete
 
 
-def child_coverage(children: dict) -> str:
+def child_coverage(children: dict, locale="zh-Hant") -> str:
+    text = ReportText(locale)
     if children.get("status") == "none":
-        return "未找到子代理"
+        return text("no_children")
     if children.get("status") == "unavailable":
-        return "子代理資料未完整取得；未知不代表 0"
+        return text("child_unavailable")
     return (
-        f"子代理 {children.get('agents_with_usage', 0)}/{children.get('agents_seen', 0)}"
-        " 位有用量紀錄"
-        + (" · 含未完成或缺漏" if children.get("status") != "observed" else " · 已觀測紀錄")
+        text("child_counts", seen=text.number(children.get('agents_with_usage', 0)),
+             total=text.number(children.get('agents_seen', 0)))
+        + " · " + text("partial" if children.get("status") != "observed" else "observed")
     )
 
 
 def _documents(receipt: dict[str, Any]) -> tuple[str, str]:
+    text = ReportText(receipt.get("locale", "zh-Hant"))
     children = receipt.get("subagents") or {"status": "unavailable"}
     usage, complete = observed_total(receipt["usage"], children)
 
     def number(key: str) -> str:
-        return f"{usage[key]:,}" if usage is not None else "未觀測"
+        return text.number(usage[key] if usage is not None else None)
 
     rows = [
-        ("回合經過時間（含等待）", f"{receipt['elapsed_seconds']:.1f} 秒"),
-        ("已觀測 Token 合計" if complete else "已觀測 Token 小計（含缺漏）", number("total")),
-        ("主代理 Token 前後差額",
-         f"{receipt['usage']['total']:,}" if receipt["usage"] else "未觀測"),
-        ("子代理 Token", "不適用" if children.get("status") == "none" else
-         f"{children['usage']['total']:,}" if children.get("usage") else "未觀測"),
-        ("子代理涵蓋", child_coverage(children)),
-        ("輸入（含快取）", number("input")),
-        ("其中快取輸入", number("cached_input")),
-        ("輸出（含思考）", number("output")),
-        ("其中思考 Token", number("reasoning_output")),
-        ("開始 Hook 模型", receipt["start_model"] or "未知"),
-        ("Stop Hook 模型", receipt["stop_model"] or "未知"),
+        (text("elapsed_wait"), text.duration(receipt['elapsed_seconds'], minutes=False)),
+        (text("total" if complete else "subtotal"), number("total")),
+        (text("parent_delta"),
+         text.number(receipt['usage']['total'] if receipt["usage"] else None)),
+        (text("children"), text("na") if children.get("status") == "none" else
+         text.number(children['usage']['total'] if children.get("usage") else None)),
+        (text("coverage"), child_coverage(children, text.locale)),
+        (text("input"), number("input")),
+        (text("cached"), number("cached_input")),
+        (text("output"), number("output")),
+        (text("reasoning"), number("reasoning_output")),
+        (text("start_model"), receipt["start_model"] or text("unknown")),
+        (text("stop_model"), receipt["stop_model"] or text("unknown")),
     ]
-    notes = [
-        "這是使用者回合的 Stop 邊界快照，不代表整個 Task 的工作已完成；其他 Hook 仍可能續跑。",
-        "主代理採累計計數器前後差額；子代理採本窗口已保存的逐請求紀錄，可能落後；不是額度百分比或帳單。",
-        "計數器重置／切檔時留白。尾端掃描有容量上限，無法證明中間沒有未觀測到的重置。",
-        "輸入已含快取、輸出已含思考，不重複加總。觀測為零不代表本回合免費。",
-        "僅目前 Task 與有親代關係的子代理；按用量紀錄時間歸入窗口，不將子代理歷史總量重複加總。",
-        "子代理未結束、缺少逐請求紀錄或超過讀取上限時保留缺漏；不會等待、強制停止或要求續跑。",
-        "使用固定 Python 排版；不呼叫模型、不要求續跑、不改寫助理回答或原始對話。",
-    ]
+    notes = [text("note_" + key) for key in (
+        "stop", "usage", "counter", "subsets", "scope", "children", "render"
+    )]
     contexts = receipt["stop_contexts"]
     context_lines = []
     for context in contexts:
         fast = (
-            "開啟"
+            text("on")
             if context["fast_mode"] is True
-            else "關閉"
+            else text("off")
             if context["fast_mode"] is False
-            else "未知"
+            else text("unknown")
         )
         context_lines.append(
-            f"{context['model'] or '未知模型'} · 思考 "
-            f"{context['reasoning_effort'] or '未知'} · Fast {fast}"
+            text("context", model=context['model'] or text("unknown_model"),
+                 effort=context['reasoning_effort'] or text("unknown"), fast=fast)
         )
     if not context_lines:
-        context_lines = ["未在尾端觀測到本回合設定；不以目前偏好補值。"]
-    title = "Codex 回合用量摘要"
+        context_lines = [text("context_missing")]
+    title = text("title")
     task = receipt.get("task") or {}
-    label = task.get("display_name") or f"未命名任務 · {receipt['task_hash'][:12]}"
-    identity = f"{label} · 回合 {receipt['turn_hash'][:12]}"
+    label = task.get("display_name") or f"{text('unnamed')} · {receipt['task_hash'][:12]}"
+    identity = label + " · " + text("turn", value=receipt['turn_hash'][:12])
     markdown_identity = escape(identity, quote=False)
     for character, replacement in (
         ("[", "&#91;"),
@@ -369,17 +364,17 @@ def _documents(receipt: dict[str, Any]) -> tuple[str, str]:
             "",
             period,
             "",
-            "| 項目 | 觀測 |",
+            f"| {text('column_item')} | {text('column_observation')} |",
             "| --- | --- |",
             *(f"| {k} | {v} |" for k, v in rows),
             "",
-            "## 本回合設定（尾端觀測，不分攤 Token）",
+            "## " + text("settings_heading"),
             "",
             *context_lines,
             "",
-            f"資料狀態：{receipt['usage_status']}",
+            text("status", value=receipt['usage_status']),
             "",
-            "## 限制",
+            "## " + text("limits"),
             "",
             *(f"- {line}" for line in notes),
             "",
@@ -387,7 +382,7 @@ def _documents(receipt: dict[str, Any]) -> tuple[str, str]:
     )
     body = "".join(f"<tr><th>{escape(k)}</th><td>{escape(v)}</td></tr>" for k, v in rows)
     html = (
-        '<!doctype html><html lang="zh-Hant"><meta charset="utf-8">'
+        f'<!doctype html><html lang="{text.locale}"><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
         '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; '
         "style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'\">"
@@ -399,9 +394,10 @@ def _documents(receipt: dict[str, Any]) -> tuple[str, str]:
         "border-bottom:1px solid light-dark(#d3ded8,#394640)}td{text-align:right;"
         "font-variant-numeric:tabular-nums}li{margin:8px 0}</style><main>"
         f"<h1>{title}</h1><p>{escape(identity)}</p><p>{escape(period)}</p><table>{body}</table>"
-        "<h2>本回合設定（尾端觀測，不分攤 Token）</h2>"
+        f"<h2>{escape(text('settings_heading'))}</h2>"
         + "".join(f"<p>{escape(line)}</p>" for line in context_lines)
-        + f"<p>資料狀態：{escape(receipt['usage_status'])}</p><h2>限制</h2><ul>"
+        + f"<p>{escape(text('status', value=receipt['usage_status']))}</p>"
+        + f"<h2>{escape(text('limits'))}</h2><ul>"
         + "".join(f"<li>{escape(line)}</li>" for line in notes)
         + "</ul></main></html>"
     )
@@ -423,7 +419,7 @@ def _publish(root: Path, key: str, receipt: dict[str, Any]) -> str:
             output.write(content)
     target = directory / f"{key}.md"
     if target.exists() or target.is_symlink():
-        expected = _pending(key).encode()
+        expected = _pending(key, receipt.get("pending_locale", "zh-Hant")).encode()
         descriptor = os.open(target, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         with os.fdopen(descriptor, "rb") as source:
             if (
@@ -483,6 +479,7 @@ def handle(
             if observed["status"] == "subagent":
                 return None
             observed["hook_model"] = _model(payload.get("model"))
+            observed["report_locale"] = resolve_locale(home=home)["locale"]
         connection = _connect(root)
         try:
             connection.execute("BEGIN IMMEDIATE")
@@ -511,7 +508,7 @@ def handle(
                             json.dumps(observed, separators=(",", ":")),
                         ),
                     )
-                    footer = _footer(_directory(root), key, payload)
+                    footer = _footer(_directory(root), key, payload, observed["report_locale"])
                 connection.commit()
                 return footer
             if row is None or row["state"] not in ("started", "short"):
@@ -544,13 +541,16 @@ def handle(
             started = json.loads(row["baseline"])
             stopped = snapshot(payload.get("transcript_path"), turn)
             usage, status = _delta(started, stopped)
+            locale = resolve_locale(home=home)
+            text = ReportText(locale["locale"])
             from .child_usage import collect
-            children = collect(root, session, row["started"], now, home=home)
+            children = collect(root, session, row["started"], now, home=home,
+                               unnamed_label=text("unnamed"))
             receipt = {
                 "schema_version": 2,
                 "scope": "user_turn_stop_boundary",
                 "task_hash": started.get("task_hash") or "unknown",
-                "task": task_description(session, home=home)
+                "task": task_description(session, home=home, unnamed_label=text("unnamed"))
                 if started.get("task_hash") == stable_hash(session)
                 else None,
                 "turn_hash": row["turn_hash"],
@@ -570,6 +570,8 @@ def handle(
                 "subagents_included": children.get("agents_with_usage", 0) > 0,
                 "subagents": children,
                 "final_usage_may_not_yet_be_persisted": True,
+                **locale,
+                "pending_locale": started.get("report_locale", "zh-Hant"),
             }
             try:
                 report = _publish(root, key, receipt)
@@ -580,14 +582,20 @@ def handle(
                 "UPDATE turns SET state='reported',report=? WHERE key=?", (key + ".md", key)
             )
             return {
-                "systemMessage": f"回合 {elapsed / 60:.1f} 分鐘 · "
-                f"[Codex 用量報告](<{report}>)（Stop 快照；非帳單）"
+                "systemMessage": text.duration(elapsed) + " · "
+                + f"[{text('report_link')}](<{report}>) ({text('stop_note')})"
             }
         finally:
             connection.close()
     except Exception:
         # A failed receipt must never HALT, bypass a HALT, or continue the model.
-        return {"systemMessage": "自動用量報告未完成；預算規則與 Task 狀態不受影響。"}
+        try:
+            message = ReportText(resolve_locale(home=home)["locale"])("failed")
+        except Exception:
+            message = (
+                "Automatic usage report unavailable; budget rules and Task state are unchanged."
+            )
+        return {"systemMessage": message}
 
 
 def recent(root: Path, limit: int = 20) -> list[dict[str, Any]]:

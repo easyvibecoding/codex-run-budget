@@ -152,6 +152,11 @@ coverage are shown in the card. Missing counters stay unknown; Stop may precede
 the final persisted usage event. The inline card is explicitly a **pre-final
 snapshot**; it excludes subsequent tools/final text and is not updated by Stop.
 The reference is model-written in the normal answer, not an edit to a sent answer.
+Report labels follow Codex's saved desktop language choice; Auto uses a read-only
+host-language fallback. Bundled languages: English, Traditional/Simplified Chinese,
+Japanese, Korean, German, French, Spanish and Portuguese; unsupported languages
+fall back to English. No model translation or additional report turn is used.
+See [language selection and limits](docs/AUTO_REPORTS.md#report-language).
 An incompatible exact-output request or disabling reports takes precedence;
 model omission and native presentation support are still limitations. Preview
 failure skips the card without retries. Missing observations are unknown, not zero.

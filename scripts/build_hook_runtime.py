@@ -31,7 +31,7 @@ EVENTS = (
 )
 MODULES = (
     "__init__.py", "governor.py", "ledger.py", "transcript.py", "util.py", "hook_adapter.py",
-    "auto_report.py", "auto_preview.py", "task_catalog.py", "child_usage.py",
+    "auto_report.py", "auto_preview.py", "task_catalog.py", "child_usage.py", "report_i18n.py",
 )
 
 
@@ -42,6 +42,8 @@ def artifacts(plugin: Path = PLUGIN) -> dict[Path, bytes]:
     package = plugin / "lib/codex_run_budget"
     for name in (*MODULES, "migrations/002_hardening.sql", "assets/turn-card.html"):
         content["codex_run_budget/" + name] = (package / name).read_bytes()
+    for path in sorted((package / "assets/locales").glob("*.json")):
+        content["codex_run_budget/assets/locales/" + path.name] = path.read_bytes()
     archive = io.BytesIO()
     # Stored members are portable and byte-identical across Python/zlib versions.
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_STORED) as output:

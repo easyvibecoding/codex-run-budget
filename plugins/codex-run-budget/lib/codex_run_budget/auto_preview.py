@@ -20,17 +20,19 @@ from urllib.parse import quote
 
 from .auto_report import _delta, child_coverage, observed_total, settings, snapshot
 from .child_usage import collect
+from .report_i18n import ReportText, resolve_locale
 from .task_catalog import TaskCatalog, _uuid
 from .util import stable_hash
 
 
 def render_card(receipt: dict) -> str:
+    text = ReportText(receipt.get("locale", "zh-Hant"))
     parent = receipt["usage"]
     children = receipt.get("subagents") or {"status": "unavailable"}
     usage, complete = observed_total(parent, children)
 
     def number(key):
-        return f"{usage[key]:,}" if usage is not None else "未觀測"
+        return text.number(usage[key] if usage is not None else None)
 
     contexts = receipt["contexts"]
 
@@ -38,40 +40,47 @@ def render_card(receipt: dict) -> str:
         values = []
         for context in contexts:
             value = context.get(field)
-            label = labels.get(value, "未知") if labels else str(value or "未知")
+            label = labels.get(value, text("unknown")) if labels else str(value or text("unknown"))
             if label not in values:
                 values.append(label)
-        return " / ".join(values) or "未知"
+        return " / ".join(values) or text("unknown")
 
     seconds = receipt["elapsed_seconds"]
-    elapsed = "未知" if seconds is None else f"{seconds / 60:.1f} 分鐘"
+    elapsed = text.duration(seconds)
     template = pkgutil.get_data("codex_run_budget", "assets/turn-card.html")
     if template is None:
         raise ValueError("card template unavailable")
     values = {
         "key": receipt["key"], "task": receipt["task_name"],
         "captured": receipt["captured_at"], "total": number("total"), "elapsed": elapsed,
-        "total_label": "已觀測合計 Token" if complete else "已觀測小計 Token",
-        "usage_label": "主代理＋子代理" if complete else "部分資料缺漏，非完整總量",
-        "parent_total": f"{parent['total']:,}" if parent is not None else "未觀測",
+        "locale": text.locale,
+        "total_label": text("total" if complete else "subtotal"),
+        "usage_label": text("combined" if complete else "incomplete"),
+        "parent_total": text.number(parent['total'] if parent is not None else None),
         "child_total": (
-            "不適用" if children.get("status") == "none" else
-            f"{children['usage']['total']:,}" if children.get("usage") is not None else "未觀測"
+            text("na") if children.get("status") == "none" else
+            text.number(children['usage']['total'] if children.get("usage") is not None else None)
         ),
-        "coverage": child_coverage(children),
+        "coverage": child_coverage(children, text.locale),
         "model": observed("model"), "effort": observed("reasoning_effort"),
-        "fast": observed("fast_mode", {True: "開啟", False: "關閉"}),
+        "fast": observed("fast_mode", {True: text("on"), False: text("off")}),
         "input": number("input"), "cached": number("cached_input"),
         "output": number("output"), "reasoning": number("reasoning_output"),
     }
+    values.update({"label_" + key: text(key) for key in (
+        "card_title", "pre_final", "elapsed", "includes_wait", "parent_model", "parent_effort",
+        "parent_fast", "details", "parent", "child_subtotal", "input", "cached", "output",
+        "reasoning", "card_note",
+    )})
     escaped = {k: escape(str(v)) for k, v in values.items()}
     # Native display names are data. Only this fixed markup is inserted unescaped.
     escaped["agents"] = "".join(
         '<div class="report-agent"><div>' + escape(row["display_name"])
-        + '<div class="text-small">由 ' + escape(row.get("parent_name") or "未知親代")
-        + " 派生 · " + ("收到結束事件" if row.get("terminal_observed") else "結束尚未確認")
+        + '<div class="text-small">'
+        + escape(text("owner", name=row.get("parent_name") or text("unknown_parent")))
+        + " · " + escape(text("terminal" if row.get("terminal_observed") else "pending_end"))
         + '</div></div><div class="tabular-nums">'
-        + (f"{row['usage']['total']:,}" if row.get("usage") is not None else "未觀測")
+        + text.number(row['usage']['total'] if row.get("usage") is not None else None)
         + "</div></div>"
         for row in children.get("rows", [])[:32]
     )
@@ -110,7 +119,9 @@ def preview(root: Path, session: str, turn: str, *, output_dir: Path, home=None)
         seconds = None
     if policy["threshold_seconds"] and (seconds is None or seconds <= policy["threshold_seconds"]):
         return {"status": "below_threshold"}
-    with TaskCatalog(home) as catalog:
+    locale = resolve_locale(home=home)
+    text = ReportText(locale["locale"])
+    with TaskCatalog(home, unnamed_label=text("unnamed")) as catalog:
         task = catalog.get(session)
         if task["role"] != "parent":
             return {"status": "subagent"}
@@ -121,12 +132,14 @@ def preview(root: Path, session: str, turn: str, *, output_dir: Path, home=None)
     if current.get("task_hash") != stable_hash(session):
         return {"status": "source_unavailable"}
     usage, status = _delta(json.loads(row["baseline"]), current)
-    children = collect(root, session, row["started"], captured, home=home)
+    children = collect(root, session, row["started"], captured, home=home,
+                       unnamed_label=text("unnamed"))
     receipt = {
         "key": key, "task_name": task["display_name"], "usage": usage, "usage_status": status,
         "contexts": current["contexts"], "elapsed_seconds": seconds,
         "captured_at": datetime.fromtimestamp(captured).astimezone().strftime("%H:%M:%S %Z"),
         "subagents": children,
+        **locale,
     }
     if not output_dir.is_absolute() or any(
         p.is_symlink() for p in (output_dir, *output_dir.parents)

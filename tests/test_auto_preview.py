@@ -23,6 +23,11 @@ TASK = "12345678-1234-1234-1234-123456789abc"
 
 class AutoPreviewTest(unittest.TestCase):
     def setUp(self):
+        for module in ("auto_preview", "auto_report"):
+            locale = patch("codex_run_budget." + module + ".resolve_locale",
+                           return_value={"locale": "zh-Hant", "locale_source": "test"})
+            locale.start()
+            self.addCleanup(locale.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name).resolve()

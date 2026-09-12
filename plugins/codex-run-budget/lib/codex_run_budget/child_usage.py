@@ -755,7 +755,8 @@ def _in_window(stamp: Any, since: float, until: float) -> bool:
     )
 
 
-def collect(root: Path, session: str, since: float, until: float, *, home=None) -> dict:
+def collect(root: Path, session: str, since: float, until: float, *, home=None,
+            unnamed_label="未命名任務") -> dict:
     """Return a bounded child subtotal for one parent turn window."""
 
     result = _empty()
@@ -773,7 +774,7 @@ def collect(root: Path, session: str, since: float, until: float, *, home=None) 
         ):
             return result
         since, until = float(since), float(until)
-        with TaskCatalog(home) as catalog:
+        with TaskCatalog(home, unnamed_label=unnamed_label) as catalog:
             parent = catalog.get(session)
             family = catalog.family(parent, limit=MAX_DESCENDANTS)
             limited = bool(getattr(catalog, "limited", False))
@@ -932,7 +933,7 @@ def collect(root: Path, session: str, since: float, until: float, *, home=None) 
             description = descriptions.get(child_id) or {}
             rows_out.append(
                 {
-                    "display_name": description.get("display_name") or "未命名任務",
+                    "display_name": description.get("display_name") or unnamed_label,
                     "parent_name": description.get("parent_name"),
                     "usage": child_subtotal,
                     "status": status,

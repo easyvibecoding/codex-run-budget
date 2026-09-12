@@ -37,14 +37,15 @@ def _label(value, limit=160):
     return value.strip()[:limit] or None
 
 
-def unnamed(thread_hash):
-    return "未命名任務 · " + thread_hash[:12]
+def unnamed(thread_hash, label="未命名任務"):
+    return label + " · " + thread_hash[:12]
 
 
 class TaskCatalog:
     """One short-lived snapshot; IDs stay internal, public rows use hashed selectors."""
 
-    def __init__(self, home=None):
+    def __init__(self, home=None, *, unnamed_label="未命名任務"):
+        self.unnamed_label = unnamed_label
         home = Path(home or os.environ.get("CODEX_HOME") or Path.home() / ".codex")
         # Exact current schema file only: never select a similarly named backup.
         path = home / "state_5.sqlite"
@@ -94,7 +95,7 @@ class TaskCatalog:
                 agent_path = None
             name = _label(row["name"])
             thread_hash = stable_hash(identifier)
-            label = name or nickname or unnamed(thread_hash)
+            label = name or nickname or unnamed(thread_hash, self.unnamed_label)
             if not name and agent_path:
                 label += " / " + agent_path.rsplit("/", 1)[-1]
             item = {
@@ -200,12 +201,12 @@ class TaskCatalog:
         return public
 
 
-def task_description(identifier, home=None):
+def task_description(identifier, home=None, *, unnamed_label="未命名任務"):
     """Hook-safe exact lookup; never scans or opens transcript bodies."""
     if not _uuid(identifier):
         return None
     try:
-        with TaskCatalog(home) as catalog:
+        with TaskCatalog(home, unnamed_label=unnamed_label) as catalog:
             return catalog.describe(catalog.get(identifier))
     except (OSError, ValueError, sqlite3.Error):
         return None

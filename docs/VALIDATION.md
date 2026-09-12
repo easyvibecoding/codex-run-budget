@@ -1,5 +1,55 @@
 # Validation evidence
 
+## Automatic report language — 2026-09-13 Asia/Taipei
+
+Verified the installed Codex App's setting adapter, without changing preferences:
+`localeOverride` has default null, configuration storage and the key
+`desktop.localeOverride` in `<codexHome>/config.toml`. The native `locale-info`
+provider returns Electron `app.getLocale()` and `app.getSystemLocale()`; runtime
+flags can affect selection between them. Hooks do not expose this effective
+UI value. This machine had no override, and the exact macOS `AppleLanguages`
+read returned `zh-Hant-TW`, while terminal locale was `C.UTF-8`. The resolver
+therefore selected `zh-Hant` with source `macos_system_language`. Auto fallback
+limitations and unsupported-language English fallback are documented in
+[AUTO_REPORTS.md](AUTO_REPORTS.md#report-language), not hidden behind a claim of
+exact parity on every client/host.
+
+228 tests passed, plus Ruff and repository/plugin validators. All nine bundled
+catalogs have the same 66 keys and matching placeholders. Tests cover regional
+normalization, number separators, escaping, preserved native names/usage,
+unsupported choices, bounded/no-follow config reads, unchanged preferences,
+dynamic rereads, pending-language changes, immutable snapshots and safe failure.
+An independent read-back found that the initial Python 3.10 fallback declined
+valid multiline instructions before the setting. The repaired quote-aware
+scanner passed the 3.10.11 targeted suite, including fake sections inside both
+multiline string forms, unfinished strings and non-root dotted keys. The final
+runtime was rebuilt and byte-verified after that fix.
+
+Nine fixture-only language variants were rendered at 736px and 320px in light
+and dark (36 cases). Every case retained its correct `lang`, a 1px outer border,
+no horizontal overflow, child row and working details expansion. German mobile
+dark and Japanese desktop light screenshots were visually read back. These are
+layout fixtures, not claimed current usage or a native UI language-switch test.
+
+One actual freshly installed Codex CLI turn completed in 16.082 seconds, using
+the unchanged desktop/system language preferences. Its normal answer contained
+one inline reference to an existing Traditional Chinese card, with one Stop
+receipt recording `locale=zh-Hant` / `locale_source=macos_system_language`.
+No report failure or report-driven extra turn occurred. Native reported test
+usage was 46,302 input (29,312 cached) and 464 output (109 reasoning) tokens;
+this includes startup context and is not incremental localization cost. The
+reporter itself calls no translation model or network service. The fresh parent
+still lacks an initial counter baseline, so its usage correctly remains unknown.
+
+Installed `0.13.0+codex.20260912214237` with the official cachebuster and retention
+updater. Source/cache and all retained old-cache identities matched, including
+all nine catalogs inside the pinned archive. All 11 plugin hooks and the existing
+Railway hook read back enabled/trusted without hook warnings/errors. Only the
+11 reviewed trust hashes and the native test workspace trust entry changed;
+desktop preferences and the report switch were unchanged. No observer schedule
+or budget was enabled. Runtime SHA-256:
+`67b26b3fcb15ea6592ec2a9567ee9845eb7ff154331f6b44f9e094bc19a38be1`.
+
 ## Deterministic child receipts and inline subtotal — 2026-09-13 Asia/Taipei
 
 `SubagentStop` now saves already-persisted, explicitly child-owned per-request

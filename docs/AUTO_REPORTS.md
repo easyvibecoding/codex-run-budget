@@ -68,6 +68,46 @@ files are retained, and only fully written outputs are announced.
 
 ## Evidence and cost
 
+### Report language
+
+The inline card, pending page, Stop Markdown/HTML and report messages share
+bundled language catalogs. They prefer Codex's observed `[desktop].localeOverride`
+in `CODEX_HOME/config.toml`, not the language of prompts or model output. No
+Codex preference is changed. Every new output resolves language again; already
+written snapshots are immutable. The pending file's original locale is recorded
+so changing App language during a turn does not bypass no-clobber checks or
+prevent legitimate settlement. Older receipts without locale metadata retain
+their original Traditional Chinese interpretation.
+
+Nine language catalogs are included: `en`, `zh-Hant`, `zh-Hans`, `ja`, `ko`, `de`,
+`fr`, `es`, `pt`. Regional variants map to these language catalogs; Chinese
+script tags take priority, with TW/HK/MO mapped to Traditional and CN/SG to
+Simplified. Spanish and Portuguese regional variants share one catalog each
+(Portuguese copy uses Brazilian usage). Unknown/unsupported choices use English,
+not runtime model translation. This is not coverage of every Codex UI language.
+Task names, agent nicknames, model identifiers, reasoning identifiers, ISO
+timestamps and JSON status codes are retained; labels, durations and number
+separators are localized. No accounting values or budget decisions change.
+
+The desktop key was verified in the installed Codex App's settings adapter.
+The App itself obtains `ideLocale`/`systemLocale` from Electron, and may select
+between them under runtime flags; hooks do not provide that effective UI locale.
+For Auto/missing settings, macOS reads only the App's `AppleLanguages` preference,
+then the global `AppleLanguages` preference, ignoring terminal `C.UTF-8`.
+Windows uses the user UI language; other systems use locale environment signals.
+These fallbacks are host observations, not proof of a remote client's UI language
+or exact parity with every Electron runtime flag. Manually selecting a supported
+language in Codex is the strongest source. Private setting schemas may change.
+
+Config reads are regular-file/no-follow and bounded to 256 KiB; raw settings are
+never persisted or returned. Python 3.11+ uses `tomllib`. The dependency-free
+Python 3.10 adapter accepts the ordinary `[desktop]` scalar or root dotted-key
+form, skips quoted/multiline instruction text and conservatively declines
+unsupported locale expressions. macOS preference reads each time out after 0.25
+seconds. Failures use English or an available host-language fallback; they never
+continue the model or weaken budget enforcement. Catalogs are shipped inside
+the pinned runtime and need no network or additional model requests.
+
 ### Deterministic child receipts and pre-final reconciliation
 
 `SubagentStop` now saves available allowlisted usage evidence to a separate private
