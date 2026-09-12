@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
+from .meter_plan import plan_type
 
 # Keep a single frame and the aggregate stream bounded.  The aggregate cap is
 # intentionally no larger than one ordinary response; notifications cannot be
@@ -35,6 +36,7 @@ SOURCE_INITIALIZE = "initialize"
 SOURCE_RATE_LIMITS = "rate_limits"
 SOURCE_ACCOUNT_USAGE = "account_usage"
 SOURCE_THREAD_USAGE = "thread_usage"
+SOURCE_ACCOUNT = "account"
 SOURCE_TRANSPORT = "transport"
 
 ERR_TIMEOUT = "timeout"
@@ -363,7 +365,36 @@ def _reply_result(
         thread_usage = result.get("threadUsage")
         if thread_usage is not None and not isinstance(thread_usage, dict):
             return None, ERR_MALFORMED_OUTPUT
+    if source == SOURCE_ACCOUNT:
+        account = result.get("account")
+        if account is not None and not isinstance(account, dict):
+            return None, ERR_MALFORMED_OUTPUT
     return result, None
+
+
+_ACCOUNT_TYPES = frozenset({"apiKey", "chatgpt", "amazonBedrock"})
+
+
+def _safe_account_response(result: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep only schema-approved account type/plan fields in memory.
+
+    ``account/read`` includes an email for ChatGPT accounts and may gain other
+    identifiers over time.  The meter has no use for either, so the source
+    boundary discards every field except the two allowlisted values before the
+    response can be observed by a caller.  Unknown values become ``None`` and
+    are never echoed into diagnostics or snapshots.
+    """
+
+    raw_account = result.get("account")
+    if not isinstance(raw_account, Mapping):
+        return {"account": None}
+    account_kind = raw_account.get("type")
+    if not isinstance(account_kind, str) or account_kind not in _ACCOUNT_TYPES:
+        return {"account": None}
+    account: dict[str, Any] = {"type": account_kind}
+    if "planType" in raw_account:
+        account["planType"] = plan_type(raw_account.get("planType"))
+    return {"account": account}
 
 
 def _append_error(result: dict[str, Any], source: str, code: str) -> None:
@@ -447,6 +478,7 @@ def read_meter_sources(
         "finished_at": started_at,
         "rate_limits": None,
         "account_usage": None,
+        "account_response": None,
         "thread_usage": [
             {"thread_id": thread_id, "response": None, "error": None}
             for thread_id in canonical_ids
@@ -543,6 +575,25 @@ def read_meter_sources(
             else:
                 row["error"] = error
                 _set_source_failure(report, SOURCE_THREAD_USAGE, error)
+                if error in FATAL_ERROR_CODES:
+                    fatal_code = error
+
+        # Account identity/plan is a separate optional read.  Keep it after
+        # usage calls so an unsupported endpoint cannot hide otherwise valid
+        # quota or token observations.  The request is explicitly non-
+        # refreshing: sensing must never mutate authentication state.
+        if fatal_code is None:
+            account_response, error = request(
+                4 + len(canonical_ids),
+                "account/read",
+                {"refreshToken": False},
+                SOURCE_ACCOUNT,
+            )
+            if error is None:
+                assert account_response is not None
+                report["account_response"] = _safe_account_response(account_response)
+            else:
+                _set_source_failure(report, SOURCE_ACCOUNT, error)
                 if error in FATAL_ERROR_CODES:
                     fatal_code = error
 

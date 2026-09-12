@@ -75,6 +75,12 @@ class MeterSourceTest(unittest.TestCase):
                     emit({"id": request_id, "result": {
                         "summary": {}, "threadUsage": None,
                     }}, split=True)
+                elif method == "account/read":
+                    emit({"id": request_id, "result": {
+                        "account": {"type": "chatgpt", "planType": "plus",
+                                    "email": "private@example.com"},
+                        "requiresOpenaiAuth": False,
+                    }}, split=True)
             """
         )
         thread_id = str(uuid.uuid4())
@@ -87,6 +93,9 @@ class MeterSourceTest(unittest.TestCase):
         self.assertEqual(result["errors"], [])
         self.assertEqual(result["rate_limits"]["rateLimitsByLimitId"].keys(), {"codex", "spark"})
         self.assertEqual(result["account_usage"]["summary"], {})
+        self.assertEqual(
+            result["account_response"], {"account": {"type": "chatgpt", "planType": "plus"}}
+        )
         self.assertEqual(len(result["thread_usage"]), 1)
         self.assertEqual(result["thread_usage"][0]["thread_id"], thread_id)
         self.assertIsNone(result["thread_usage"][0]["error"])
@@ -113,6 +122,10 @@ class MeterSourceTest(unittest.TestCase):
                         print(json.dumps({"id": request_id, "error": {
                             "code": -32000, "message": "do-not-return-this-secret",
                         }}), flush=True)
+                elif method == "account/read":
+                    print(json.dumps({"id": request_id, "result": {
+                        "account": {"type": "apiKey"},
+                    }}), flush=True)
             """
         )
         thread_id = str(uuid.uuid4())
@@ -138,6 +151,10 @@ class MeterSourceTest(unittest.TestCase):
                 elif request.get("method") == "account/usage/read":
                     print(json.dumps({"id": request["id"], "result": {
                         "summary": {}, "threadUsage": None,
+                    }}), flush=True)
+                elif request.get("method") == "account/read":
+                    print(json.dumps({"id": request["id"], "result": {
+                        "account": None,
                     }}), flush=True)
             """
         )
@@ -238,6 +255,78 @@ class MeterSourceTest(unittest.TestCase):
         )
         result = read_meter_sources(codex_binary=str(recursive), timeout=1)
         self.assertIn({"source": "initialize", "code": ERR_MALFORMED_OUTPUT}, result["errors"])
+
+    def test_account_read_is_non_refreshing_and_allowlisted(self) -> None:
+        fake = self.server(
+            """
+            import json, sys
+            for line in sys.stdin.buffer:
+                request = json.loads(line)
+                method, request_id = request.get("method"), request.get("id")
+                if method == "initialize":
+                    print(json.dumps({"id": request_id, "result": {}}), flush=True)
+                elif method == "account/rateLimits/read":
+                    print(json.dumps({"id": request_id, "result": {
+                        "rateLimits": {"planType": "pro"},
+                    }}), flush=True)
+                elif method == "account/usage/read":
+                    print(json.dumps({"id": request_id, "result": {
+                        "summary": {}, "threadUsage": None,
+                    }}), flush=True)
+                elif method == "account/read":
+                    if request.get("params") != {"refreshToken": False}:
+                        print(json.dumps({"id": request_id, "error": {
+                            "code": -32000, "message": "refresh flag was unsafe",
+                        }}), flush=True)
+                    else:
+                        print(json.dumps({"id": request_id, "result": {
+                            "account": {
+                                "type": "chatgpt", "planType": "plus",
+                                "email": "private@example.com", "accountId": "secret-id",
+                            },
+                            "requiresOpenaiAuth": False,
+                        }}), flush=True)
+            """
+        )
+        result = read_meter_sources(codex_binary=str(fake), timeout=2)
+        self.assertEqual(result["errors"], [])
+        self.assertEqual(
+            result["account_response"], {"account": {"type": "chatgpt", "planType": "plus"}}
+        )
+        self.assertNotIn("private@example.com", json.dumps(result))
+        self.assertNotIn("secret-id", json.dumps(result))
+
+    def test_unsupported_account_read_keeps_quota_observation(self) -> None:
+        fake = self.server(
+            """
+            import json, sys
+            for line in sys.stdin.buffer:
+                request = json.loads(line)
+                method, request_id = request.get("method"), request.get("id")
+                if method == "initialize":
+                    print(json.dumps({"id": request_id, "result": {}}), flush=True)
+                elif method == "account/rateLimits/read":
+                    print(json.dumps({"id": request_id, "result": {
+                        "rateLimitsByLimitId": {"codex": {
+                            "limitId": "codex", "planType": "pro",
+                            "primary": {"usedPercent": 2},
+                        }},
+                    }}), flush=True)
+                elif method == "account/usage/read":
+                    print(json.dumps({"id": request_id, "result": {
+                        "summary": {}, "threadUsage": None,
+                    }}), flush=True)
+                elif method == "account/read":
+                    print(json.dumps({"id": request_id, "error": {
+                        "code": -32601, "message": "private account/read unavailable",
+                    }}), flush=True)
+            """
+        )
+        result = read_meter_sources(codex_binary=str(fake), timeout=2)
+        self.assertIsNotNone(result["rate_limits"])
+        self.assertIsNone(result["account_response"])
+        self.assertIn({"source": "account", "code": ERR_UNSUPPORTED_RPC}, result["errors"])
+        self.assertNotIn("private account/read unavailable", json.dumps(result))
 
     def test_invalid_thread_ids_raise_before_spawn(self) -> None:
         too_many = tuple(str(uuid.uuid4()) for _ in range(9))
