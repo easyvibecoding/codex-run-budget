@@ -106,6 +106,30 @@ class Governor:
         return {"systemMessage": message + " Continuing under fail=open."}
 
     def handle(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        result = self._handle_budget(payload)
+        if payload.get("hook_event_name") in (
+            "UserPromptSubmit", "Stop", "Interrupt", "SessionEnd"
+        ):
+            # Preserve all existing decisions; reporting only adds a UI message.
+            # Rejected prompts do not start a timing interval.
+            if payload.get("hook_event_name") == "UserPromptSubmit" and (
+                result and (result.get("decision") == "block" or result.get("continue") is False)
+            ):
+                return result
+            try:
+                from .auto_report import handle
+                message = handle(payload, self.root)
+            except Exception:
+                message = {"systemMessage": "自動用量報告未完成；原有預算決策不變。"}
+            if message:
+                result = dict(result or {})
+                result["systemMessage"] = "\n".join(
+                    value for value in (result.get("systemMessage"), message["systemMessage"])
+                    if value
+                )
+        return result
+
+    def _handle_budget(self, payload: dict[str, Any]) -> dict[str, Any] | None:
         event = self._text(payload, "hook_event_name", 100)
         run_id = self._text(payload, "session_id", 256)
         if not event or not run_id:

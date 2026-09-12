@@ -68,6 +68,33 @@ and print/save-as-PDF; JSON preserves the evidence schema. Exact `--thread`
 filters are repeatable. Output never overwrites an existing file. See
 [report semantics and coverage](docs/REPORTS.md) before interpreting totals.
 
+### Automatic zero-model-call receipts (v0.10)
+
+Opt in once for future user turns, independently of token budgets:
+
+```sh
+python3 plugins/codex-run-budget/scripts/run_budget.py auto-report enable
+python3 plugins/codex-run-budget/scripts/run_budget.py auto-report status
+python3 plugins/codex-run-budget/scripts/run_budget.py auto-report list
+```
+
+Each main user turn's first eligible `Stop` writes private Markdown, HTML and
+JSON files and emits a short UI `systemMessage` with the Markdown path. The
+default threshold is **zero**: elapsed time is information, not a cost gate.
+This is a turn-stop receipt, not proof the whole Task is complete. It makes no
+model/API requests, injects no model context and never requests continuation.
+Local CPU, disk and storage still have a cost; asking a model to read the result
+later uses normal tokens. Disable with `auto-report disable`; existing files
+remain. For an explicitly desired duration filter, use
+`auto-report enable --threshold-seconds 300` (strictly greater than 300 seconds).
+
+These bounded receipts are lighter than the manual multi-window report above:
+current transcript boundary counters only, no native-quota refresh or other
+Task/subagent aggregation. Missing counters stay unknown; Stop may precede
+the final persisted usage event. Codex controls the UI message presentation;
+this does not append to an already-sent answer or automatically open HTML.
+See [automatic receipt boundaries](docs/AUTO_REPORTS.md).
+
 ### Updating an installed version
 
 With other Codex tasks idle, run from this checkout:

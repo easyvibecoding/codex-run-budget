@@ -1,0 +1,487 @@
+"""Opt-in, bounded per-turn receipts. Reporting never controls the agent loop."""
+
+from __future__ import annotations
+
+import json
+import math
+import os
+import re
+import sqlite3
+import stat
+import tempfile
+import time
+from dataclasses import asdict
+from datetime import datetime, timezone
+from html import escape
+from pathlib import Path
+from typing import Any
+
+from .transcript import _usage_from_line
+from .util import stable_hash
+
+SCAN_BYTES = 8 * 1024 * 1024
+MAX_ROWS = 10_000
+EVENTS = {"UserPromptSubmit", "Stop", "Interrupt", "SessionEnd"}
+
+
+def _directory(root: Path) -> Path:
+    if root.is_symlink():
+        raise ValueError("report root is a symlink")
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    target = root / "auto-reports"
+    if target.is_symlink():
+        raise ValueError("report directory is a symlink")
+    target.mkdir(exist_ok=True, mode=0o700)
+    return target
+
+
+def settings(root: Path) -> dict[str, Any]:
+    path = root / "auto-report.json"
+    if not path.exists() and not path.is_symlink():
+        return {"enabled": False, "threshold_seconds": 0}
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(descriptor, "rb") as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            raise ValueError("nonregular auto-report settings")
+        raw = stream.read(2049)
+    value = json.loads(raw) if len(raw) <= 2048 else None
+    if (
+        not isinstance(value, dict)
+        or type(value.get("enabled")) is not bool
+        or type(value.get("threshold_seconds")) not in (int, float)
+        or not 0 <= value["threshold_seconds"] <= 86400
+    ):
+        raise ValueError("invalid auto-report settings")
+    return {"enabled": value["enabled"], "threshold_seconds": value["threshold_seconds"]}
+
+
+def configure(root: Path, *, enabled: bool, threshold_seconds: float = 0) -> dict[str, Any]:
+    if (
+        type(enabled) is not bool
+        or type(threshold_seconds) not in (int, float)
+        or not 0 <= threshold_seconds <= 86400
+    ):
+        raise ValueError("invalid report configuration")
+    _directory(root)
+    target = root / "auto-report.json"
+    if target.is_symlink():
+        raise ValueError("settings target is a symlink")
+    descriptor, temporary = tempfile.mkstemp(prefix="auto-report-", dir=root)
+    try:
+        with os.fdopen(descriptor, "w") as output:
+            json.dump({"enabled": enabled, "threshold_seconds": threshold_seconds}, output)
+        os.replace(temporary, target)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+    return settings(root)
+
+
+def _connect(root: Path) -> sqlite3.Connection:
+    directory = _directory(root)
+    path = directory / "timing.sqlite3"
+    if path.is_symlink():
+        raise ValueError("timing store is a symlink")
+    if not path.exists():
+        try:
+            descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+        except FileExistsError:
+            pass  # Another Task may initialize the shared store simultaneously.
+        else:
+            os.close(descriptor)
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("timing store is not a regular file")
+    connection = sqlite3.connect(path, timeout=0.4, isolation_level=None)
+    connection.row_factory = sqlite3.Row
+    try:
+        connection.execute(
+            "CREATE TABLE IF NOT EXISTS turns ("
+            "key TEXT PRIMARY KEY, session_hash TEXT NOT NULL, turn_hash TEXT NOT NULL, "
+            "started REAL NOT NULL, monotonic REAL NOT NULL, baseline TEXT NOT NULL, "
+            "state TEXT NOT NULL, elapsed REAL, report TEXT)"
+        )
+    except Exception:
+        connection.close()
+        raise
+    return connection
+
+
+def _model(value: Any) -> str | None:
+    return (
+        value
+        if isinstance(value, str) and re.fullmatch(r"[a-z0-9][-a-z0-9.]{0,79}", value)
+        else None
+    )
+
+
+def snapshot(path_value: Any, turn_id: str) -> dict[str, Any]:
+    """Only header identity and a bounded tail are read; no text is persisted."""
+    result: dict[str, Any] = {"status": "unavailable", "usage": None, "contexts": []}
+    if not isinstance(path_value, str) or not path_value:
+        return result
+    path = Path(path_value)
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(descriptor, "rb") as stream:
+            info = os.fstat(stream.fileno())
+            if not stat.S_ISREG(info.st_mode):
+                return result
+            header = stream.readline(128 * 1024)
+            metadata = json.loads(header)
+            if metadata.get("type") != "session_meta":
+                return result
+            payload = metadata.get("payload") or {}
+            identity = payload.get("id")
+            if not isinstance(identity, str) or not 0 < len(identity) <= 256:
+                return result
+            source = payload.get("source")
+            if isinstance(source, dict) and source.get("subagent") is not None:
+                return {**result, "status": "subagent"}
+            offset = max(0, info.st_size - SCAN_BYTES)
+            stream.seek(offset)
+            raw = stream.read(info.st_size - offset)
+            current = os.fstat(stream.fileno())
+            if len(raw) != info.st_size - offset or current.st_size < info.st_size:
+                return result
+        result.update(
+            status="observed",
+            task_hash=stable_hash(identity),
+            source_hash=stable_hash(str(path.absolute())),
+            device=info.st_dev,
+            inode=info.st_ino,
+            size=info.st_size,
+            scan_bytes=len(header) + len(raw),
+            tail_limited=bool(offset),
+        )
+        lines = raw.split(b"\n")
+        # Incomplete first/last records never establish a counter value.
+        if offset:
+            lines = lines[1:]
+        if lines[-1]:
+            try:
+                json.loads(lines[-1])
+            except (ValueError, RecursionError):
+                lines.pop()
+        contexts = []
+        usage_seen = False
+        for line in reversed(lines):
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+            except (ValueError, RecursionError):
+                result["invalid_records"] = True
+                continue
+            if not isinstance(record, dict):
+                continue
+            payload = record.get("payload") or {}
+            if not isinstance(payload, dict):
+                continue
+            if record.get("type") == "event_msg" and payload.get("type") == "token_count":
+                if not usage_seen:
+                    usage_seen = True
+                    usage = _usage_from_line(record)
+                    result["usage"] = asdict(usage) if usage is not None else None
+            if (
+                record.get("type") == "turn_context"
+                and payload.get("turn_id") == turn_id
+                and len(contexts) < 16
+            ):
+                effort = payload.get("effort", payload.get("reasoning_effort"))
+                tier = payload.get("service_tier")
+                contexts.append(
+                    {
+                        "model": _model(payload.get("model")),
+                        "reasoning_effort": effort
+                        if effort
+                        in ("none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra")
+                        else None,
+                        "fast_mode": True
+                        if tier == "fast"
+                        else False
+                        if tier == "standard"
+                        else None,
+                    }
+                )
+        result["contexts"] = contexts
+        return result
+    except (OSError, ValueError, TypeError, AttributeError, RecursionError):
+        return {"status": "unavailable", "usage": None, "contexts": []}
+
+
+def _delta(before: dict[str, Any], after: dict[str, Any]) -> tuple[dict[str, int] | None, str]:
+    if before.get("status") != "observed" or after.get("status") != "observed":
+        return None, "snapshot_unavailable"
+    if any(before.get(k) != after.get(k) for k in ("task_hash", "source_hash", "device", "inode")):
+        return None, "source_changed"
+    if after["size"] < before["size"]:
+        return None, "source_truncated"
+    first, last = before.get("usage"), after.get("usage")
+    if not first or not last:
+        return None, "counter_unavailable"
+    delta = {k: last[k] - first[k] for k in first}
+    if (
+        any(v < 0 for v in delta.values())
+        or delta["total"] != delta["input"] + delta["output"]
+        or delta["cached_input"] > delta["input"]
+        or delta["reasoning_output"] > delta["output"]
+    ):
+        return None, "counter_reset_or_inconsistent"
+    return delta, "boundary_counter_difference"
+
+
+def _documents(receipt: dict[str, Any]) -> tuple[str, str]:
+    usage = receipt["usage"]
+
+    def number(key: str) -> str:
+        return f"{usage[key]:,}" if usage is not None else "未觀測"
+
+    rows = [
+        ("回合經過時間（含等待）", f"{receipt['elapsed_seconds']:.1f} 秒"),
+        ("Token 前後差額", number("total")),
+        ("輸入（含快取）", number("input")),
+        ("其中快取輸入", number("cached_input")),
+        ("輸出（含思考）", number("output")),
+        ("其中思考 Token", number("reasoning_output")),
+        ("開始 Hook 模型", receipt["start_model"] or "未知"),
+        ("Stop Hook 模型", receipt["stop_model"] or "未知"),
+    ]
+    notes = [
+        "這是使用者回合的 Stop 邊界快照，不代表整個 Task 的工作已完成；其他 Hook 仍可能續跑。",
+        "Token 是同一紀錄檔的累計計數器前後差額，可能落後；不是逐請求總和、額度百分比或帳單。",
+        "計數器重置／切檔時留白。尾端掃描有容量上限，無法證明中間沒有未觀測到的重置。",
+        "輸入已含快取、輸出已含思考，不重複加總。觀測為零不代表本回合免費。",
+        "僅目前 Task 紀錄檔；不加總子代理，不回溯其他 Task，不刷新原生額度。",
+        "使用固定 Python 排版；不呼叫模型、不要求續跑、不改寫助理回答或原始對話。",
+    ]
+    contexts = receipt["stop_contexts"]
+    context_lines = []
+    for context in contexts:
+        fast = (
+            "開啟"
+            if context["fast_mode"] is True
+            else "關閉"
+            if context["fast_mode"] is False
+            else "未知"
+        )
+        context_lines.append(
+            f"{context['model'] or '未知模型'} · 思考 "
+            f"{context['reasoning_effort'] or '未知'} · Fast {fast}"
+        )
+    if not context_lines:
+        context_lines = ["未在尾端觀測到本回合設定；不以目前偏好補值。"]
+    title = "Codex 回合用量摘要"
+    identity = f"Task {receipt['task_hash'][:12]} · 回合 {receipt['turn_hash'][:12]}"
+    period = f"{receipt['started_at']} → {receipt['stopped_at']}"
+    markdown = "\n".join(
+        [
+            f"# {title}",
+            "",
+            identity,
+            "",
+            period,
+            "",
+            "| 項目 | 觀測 |",
+            "| --- | --- |",
+            *(f"| {k} | {v} |" for k, v in rows),
+            "",
+            "## 本回合設定（尾端觀測，不分攤 Token）",
+            "",
+            *context_lines,
+            "",
+            f"資料狀態：{receipt['usage_status']}",
+            "",
+            "## 限制",
+            "",
+            *(f"- {line}" for line in notes),
+            "",
+        ]
+    )
+    body = "".join(f"<tr><th>{escape(k)}</th><td>{escape(v)}</td></tr>" for k, v in rows)
+    html = (
+        '<!doctype html><html lang="zh-Hant"><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; '
+        "style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'\">"
+        f"<title>{title}</title><style>:root{{color-scheme:light dark}}"
+        "body{font:15px/1.7 system-ui;max-width:850px;margin:auto;padding:28px;"
+        "color:light-dark(#19332f,#e1ebe7);background:light-dark(#fcfcfa,#141918)}"
+        "h1{font-size:30px}h2{font-size:18px;margin-top:30px}p{overflow-wrap:anywhere}"
+        "table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:10px 0;"
+        "border-bottom:1px solid light-dark(#d3ded8,#394640)}td{text-align:right;"
+        "font-variant-numeric:tabular-nums}li{margin:8px 0}</style><main>"
+        f"<h1>{title}</h1><p>{escape(identity)}</p><p>{escape(period)}</p><table>{body}</table>"
+        "<h2>本回合設定（尾端觀測，不分攤 Token）</h2>"
+        + "".join(f"<p>{escape(line)}</p>" for line in context_lines)
+        + f"<p>資料狀態：{escape(receipt['usage_status'])}</p><h2>限制</h2><ul>"
+        + "".join(f"<li>{escape(line)}</li>" for line in notes)
+        + "</ul></main></html>"
+    )
+    return markdown, html
+
+
+def _publish(root: Path, key: str, receipt: dict[str, Any]) -> str:
+    directory = _directory(root)
+    markdown, html = _documents(receipt)
+    # Deterministic keys plus exclusive creation make retries no-clobber.
+    for extension, content in (
+        ("md", markdown),
+        ("html", html),
+        ("json", json.dumps(receipt, ensure_ascii=True, indent=2)),
+    ):
+        target = directory / f"{key}.{extension}"
+        descriptor = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(descriptor, "w") as output:
+            output.write(content)
+    return str((directory / f"{key}.md").absolute())
+
+
+def handle(
+    payload: dict[str, Any],
+    root: Path,
+    *,
+    wall: float | None = None,
+    monotonic: float | None = None,
+) -> dict[str, Any] | None:
+    """Informational hook output only. No context injection or continuation."""
+    event = payload.get("hook_event_name")
+    if event not in EVENTS or payload.get("agent_id"):
+        return None
+    try:
+        if not settings(root)["enabled"]:
+            return None
+        session, turn = payload.get("session_id"), payload.get("turn_id")
+        if not isinstance(session, str) or not session or len(session) > 256:
+            return None
+        if event != "SessionEnd" and (not isinstance(turn, str) or not turn or len(turn) > 256):
+            return None
+        now = time.time() if wall is None else wall
+        ticks = time.monotonic() if monotonic is None else monotonic
+        key = stable_hash([session, turn])
+        observed = None
+        if event == "UserPromptSubmit":
+            # Keep bounded transcript I/O outside the cross-Task write lock.
+            observed = snapshot(payload.get("transcript_path"), turn)
+            if observed["status"] == "subagent":
+                return None
+            observed["hook_model"] = _model(payload.get("model"))
+        connection = _connect(root)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            if event == "SessionEnd":
+                connection.execute(
+                    "UPDATE turns SET state='session_ended' "
+                    "WHERE session_hash=? AND state IN ('started','short')",
+                    (stable_hash(session),),
+                )
+                connection.commit()
+                return None
+            row = connection.execute("SELECT * FROM turns WHERE key=?", (key,)).fetchone()
+            if event == "UserPromptSubmit":
+                if row is None:
+                    if connection.execute("SELECT count(*) FROM turns").fetchone()[0] >= MAX_ROWS:
+                        raise ValueError("auto-report timing index is full")
+                    connection.execute(
+                        "INSERT INTO turns VALUES (?,?,?,?,?,?,'started',NULL,NULL)",
+                        (
+                            key,
+                            stable_hash(session),
+                            stable_hash(turn),
+                            now,
+                            ticks,
+                            json.dumps(observed, separators=(",", ":")),
+                        ),
+                    )
+                connection.commit()
+                return None
+            if row is None or row["state"] not in ("started", "short"):
+                return None
+            if event == "Interrupt":
+                connection.execute("UPDATE turns SET state='interrupted' WHERE key=?", (key,))
+                connection.commit()
+                return None
+            elapsed = ticks - row["monotonic"]
+            if (
+                not math.isfinite(elapsed)
+                or elapsed < 0
+                or abs((now - row["started"]) - elapsed) > 10
+            ):
+                state = "clock_discontinuity"
+            elif (
+                settings(root)["threshold_seconds"] > 0
+                and elapsed <= settings(root)["threshold_seconds"]
+            ):
+                state = "short"
+            else:
+                state = "generating"
+            connection.execute(
+                "UPDATE turns SET state=?,elapsed=? WHERE key=?", (state, elapsed, key)
+            )
+            # Claim before file generation: a crash or timeout cannot start a retry loop.
+            connection.commit()
+            if state != "generating":
+                return None
+            started = json.loads(row["baseline"])
+            stopped = snapshot(payload.get("transcript_path"), turn)
+            usage, status = _delta(started, stopped)
+            receipt = {
+                "schema_version": 1,
+                "scope": "user_turn_stop_boundary",
+                "task_hash": started.get("task_hash") or "unknown",
+                "turn_hash": row["turn_hash"],
+                "elapsed_seconds": round(elapsed, 3),
+                "started_at": datetime.fromtimestamp(row["started"], timezone.utc).isoformat(),
+                "stopped_at": datetime.fromtimestamp(now, timezone.utc).isoformat(),
+                "usage": usage,
+                "usage_status": status,
+                "start_model": started.get("hook_model"),
+                "stop_model": _model(payload.get("model")),
+                "stop_contexts": stopped["contexts"],
+                "snapshot_scan_bytes": started.get("scan_bytes", 0) + stopped.get("scan_bytes", 0),
+                "stop_tail_limited": stopped.get("tail_limited"),
+                "stop_hook_active": payload.get("stop_hook_active") is True,
+                "model_requests_for_report": 0,
+                "native_quota_refreshed": False,
+                "subagents_included": False,
+                "final_usage_may_not_yet_be_persisted": True,
+            }
+            try:
+                report = _publish(root, key, receipt)
+            except Exception:
+                connection.execute("UPDATE turns SET state='failed' WHERE key=?", (key,))
+                raise
+            connection.execute(
+                "UPDATE turns SET state='reported',report=? WHERE key=?", (key + ".md", key)
+            )
+            return {
+                "systemMessage": f"回合 {elapsed / 60:.1f} 分鐘 · "
+                f"[Codex 用量報告](<{report}>)（Stop 快照；非帳單）"
+            }
+        finally:
+            connection.close()
+    except Exception:
+        # A failed receipt must never HALT, bypass a HALT, or continue the model.
+        return {"systemMessage": "自動用量報告未完成；預算規則與 Task 狀態不受影響。"}
+
+
+def recent(root: Path, limit: int = 20) -> list[dict[str, Any]]:
+    path = root / "auto-reports/timing.sqlite3"
+    if not path.exists():
+        return []
+    if path.is_symlink():
+        raise ValueError("timing store is a symlink")
+    from urllib.parse import quote
+
+    connection = sqlite3.connect("file:" + quote(str(path.absolute())) + "?mode=ro", uri=True)
+    connection.row_factory = sqlite3.Row
+    try:
+        return [
+            dict(row)
+            for row in connection.execute(
+                "SELECT key,turn_hash,started,state,elapsed,report FROM turns "
+                "ORDER BY started DESC LIMIT ?",
+                (limit,),
+            )
+        ]
+    finally:
+        connection.close()

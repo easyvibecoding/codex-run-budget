@@ -29,7 +29,10 @@ EVENTS = (
     "SessionEnd",
     "Interrupt",
 )
-MODULES = ("__init__.py", "governor.py", "ledger.py", "transcript.py", "util.py", "hook_adapter.py")
+MODULES = (
+    "__init__.py", "governor.py", "ledger.py", "transcript.py", "util.py", "hook_adapter.py",
+    "auto_report.py",
+)
 
 
 def artifacts(plugin: Path = PLUGIN) -> dict[Path, bytes]:

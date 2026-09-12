@@ -218,6 +218,40 @@ built-in quota widget. A conversation visualization is optional when supported
 and useful, not a dependency. Use new filenames: report output refuses overwrites
 and symlink paths. Task/turn IDs are hashed; never add prompt-derived names.
 
+## Automatic turn-stop receipts
+
+When the user asks to enable automatic zero-model-call reports, run:
+
+```sh
+python3 "$PLUGIN_ROOT/scripts/run_budget.py" auto-report enable
+python3 "$PLUGIN_ROOT/scripts/run_budget.py" auto-report status
+```
+
+The distributed default is off; enabling defaults to threshold 0, so every
+eligible main user turn can report. Do not add a five-minute gate unless the
+user requests one (`--threshold-seconds 300`). `auto-report list` reads recent
+receipt state, and `auto-report disable` preserves existing files. These
+commands are independent of budget enforcement; do not start a budget for them.
+
+UserPromptSubmit records a baseline; the first eligible Stop generates private
+Markdown/HTML/JSON and a short UI `systemMessage`. No model/network requests,
+additionalContext, continuation or full cross-Task scan are used. Local CPU,
+disk and later model reading still cost resources. Do not add a model follow-up
+just to produce, decorate or announce these automatic receipts.
+
+Call them user-turn Stop snapshots, not proof the whole Task has completed.
+Missing starts, interrupted turns and subagents are excluded; duplicate Stops
+are not regenerated. Other hooks may continue after the snapshot. Boundary
+counter differences can be missing or lag final persistence, and do not include
+descendants, actual quota shares or billing. Historical settings are observed,
+not inferred or used to allocate token totals. The bounded index keeps at most
+10,000 turns; report failures are informational and never change governance.
+
+Codex owns presentation of `systemMessage`; do not claim hooks append to the
+assistant's final answer or auto-open HTML. Use the Markdown report path if the
+user asks to open a receipt, respecting native file/browser restrictions. After
+upgrading, use a new Task for the updated pinned runtime.
+
 ## Update safely
 
 From a source checkout, use `python3 scripts/update_plugin.py` to retain old

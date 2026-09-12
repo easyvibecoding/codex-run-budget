@@ -1,5 +1,47 @@
 # Validation evidence
 
+## Automatic deterministic Stop receipts — 2026-09-12 UTC, v0.10.0
+
+180 tests passed, including concurrent Task initialization and duplicate Stops,
+strict optional thresholds, zero-threshold immediate reporting, interrupted and
+missing-start turns, counter resets/replacement/truncation, bounded scans,
+privacy, symlinks, failure isolation, preserved HALT decisions and execution of
+the bundled auto-reporter after plugin cache eviction. Ruff and repository,
+plugin and skill validators passed. Hook runtime SHA-256:
+`ef734ea39e4640078df96ba0be5c3dff2cf9509f0edff324b17ba9b2e384e688`.
+
+Installed `0.10.0+codex.20260912170543` through Codex in an isolated home, then
+installed and trusted the reviewed stable-version hooks in the real home. The
+automatic marketplace refresh had cached an earlier development snapshot under
+the same version. The retention-aware updater rejected its replacement, kept
+recovery copies, and succeeded after the development cache was moved aside.
+Read-back matched the complete installed plugin tree to source, verified retained
+0.3.0–0.9.0 caches, and found only the 11 reviewed hook trust-hash changes in
+the main config. A CLI-created trust entry for the temporary test directory was
+removed; unrelated enabled states and configuration remained unchanged.
+
+Two real Codex CLI 0.154.0 invocations (a fresh test Task and one resume) used
+isolated report storage and the existing configured Sol/medium model. Each
+invocation produced exactly one `turn.completed`, one literal assistant reply,
+no tool calls, and one automatic Markdown/HTML/JSON receipt. No report-driven
+continuation occurred. The fresh Task correctly left usage unknown without a
+starting counter. The resumed turn measured 22,485 boundary-delta tokens:
+22,478 input (including 22,144 cached), 7 output, 0 reasoning. Fast stayed unknown.
+The resumed receipt covered 1.729 seconds, scanned 241,159 bytes and occupied
+4,521 bytes across its three files. These are observed test values, not a latency
+or billing guarantee; the test model turns themselves consumed tokens.
+
+The JSON CLI emitted an `error`-typed startup item; the diagnostic captured on
+resume was the existing `chronicle` unstable-feature warning, not a report
+failure. The CLI did **not** expose the informational report message in its
+captured output. Hook unit/runtime tests verify the `systemMessage` contract;
+visible native UI delivery remains unverified. Opening the generated Markdown
+through the app file-viewer tool returned `queued`, not proof it was visible.
+No native HTML auto-open or modification of the final assistant answer is claimed.
+
+The user's global auto-report setting was enabled with threshold 0 and read back.
+New Tasks load the new pinned runtime; already initialized Tasks retain old code.
+
 ## Documented credit scenarios and native controls — 2026-09-12, v0.8.0
 
 154 tests passed, including offline estimate selection, Decimal credit arithmetic,
