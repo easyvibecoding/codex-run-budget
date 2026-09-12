@@ -99,16 +99,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     report = sub.add_parser("report", help="export read-only multi-window Task reports")
+    report.add_argument(
+        "view", nargs="?", choices=("help", "tasks", "task", "agents", "tree", "window")
+    )
     report.add_argument("--thread", action="append", default=[], help="exact Task UUID; repeatable")
+    report.add_argument(
+        "--all-tasks", action="store_true", help="explicit cross-Task window opt-in"
+    )
+    report.add_argument(
+        "--full", action="store_true", help="print full artifact to stdout instead of saving"
+    )
+    report.add_argument("--codex-home", type=Path, help="local native Task metadata directory")
     report.add_argument("--windows", help="comma-separated: 5h,24h,7d,30d,today,week,month")
     report.add_argument("--timezone", default="UTC", help="IANA timezone, e.g. Asia/Taipei")
     report.add_argument("--since", help="custom start; ISO timestamp with explicit UTC offset")
     report.add_argument("--until", help="report end; ISO timestamp with explicit UTC offset")
     report.add_argument("--directory", type=Path, help="local sessions directory")
-    report.add_argument("--limit", type=int, default=200, help="maximum transcript pages")
-    report.add_argument(
-        "--detail-limit", type=int, default=200, help="turn/context rows per window"
-    )
+    report.add_argument("--limit", type=int, help="maximum pages/agents (20), or list rows (10)")
+    report.add_argument("--detail-limit", type=int, default=20, help="turn/context rows per window")
     report.add_argument("--format", choices=("markdown", "html", "json"), default="markdown")
     report.add_argument(
         "--output", type=Path, help="create private report; existing files are refused"
@@ -116,8 +124,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     automatic = sub.add_parser("auto-report", help="configure deterministic Stop-boundary receipts")
     automatic.add_argument("action", choices=("status", "enable", "disable", "list"))
-    automatic.add_argument("--threshold-seconds", type=float, default=0,
-                           help="optional minimum elapsed time; default 0 reports every turn")
+    automatic.add_argument(
+        "--threshold-seconds",
+        type=float,
+        default=0,
+        help="optional minimum elapsed time; default 0 reports every turn",
+    )
 
     listing = sub.add_parser("list", help="list recent governed runs")
     listing.add_argument("--limit", type=int, default=20)
@@ -147,11 +159,13 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "auto-report":
         from .auto_report import configure, recent, settings
+
         try:
             root = args.data_dir or data_path()
             if args.action in ("enable", "disable"):
-                result = configure(root, enabled=args.action == "enable",
-                                   threshold_seconds=args.threshold_seconds)
+                result = configure(
+                    root, enabled=args.action == "enable", threshold_seconds=args.threshold_seconds
+                )
             else:
                 result = recent(root) if args.action == "list" else settings(root)
             print(json.dumps(result, indent=2, ensure_ascii=False))
@@ -160,25 +174,17 @@ def main(argv: list[str] | None = None) -> int:
             print("run-budget: cannot configure/read auto reports", file=sys.stderr)
             return 2
     if args.command == "report":
-        from .report import build_report, render_report, write_report
+        from .report_commands import run
 
         try:
-            report = build_report(
-                sessions=args.directory, directory=args.data_dir or data_path(),
-                windows=args.windows.split(",") if args.windows is not None else None,
-                timezone_name=args.timezone, since=args.since, until=args.until,
-                thread_ids=args.thread, limit=args.limit, detail_limit=args.detail_limit,
-            )
-            rendered = render_report(report, args.format)
-            if args.output is not None:
-                write_report(args.output, rendered)
-                print(f"Report created: {args.output.absolute()}")
-            else:
-                print(rendered, end="")
+            run(args)
             return 0
         except (OSError, ValueError, sqlite3.Error, KeyError, TypeError, RecursionError):
-            print("run-budget: cannot create report (invalid range, source or output; "
-                  "existing files are never overwritten)", file=sys.stderr)
+            print(
+                "run-budget: cannot create report (invalid range, source or output; "
+                "existing files are never overwritten)",
+                file=sys.stderr,
+            )
             return 2
     if args.command == "meter":
         # Keep native reads and meter storage out of the enforcement runtime.

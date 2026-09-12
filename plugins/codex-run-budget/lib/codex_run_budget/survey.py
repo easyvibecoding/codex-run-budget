@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import heapq
+import json
 import math
 import os
+import re
 import time
 from collections import Counter
 from datetime import datetime, timezone
@@ -18,6 +20,25 @@ from .util import stable_hash
 MAX_SURVEY_BYTES = 4 * 1024 * 1024 * 1024
 MAX_DISCOVERY_ENTRIES = 100_000
 MAX_SURVEY_FILES = 1000
+
+
+def _matches_task(path: Path, hashes: set[str]) -> bool:
+    match = re.search(r"-([0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})\.jsonl$", path.name)
+    if match:
+        return stable_hash(match[1].lower()) in hashes
+    # Alternate filenames may require a bounded metadata header, never the body.
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(descriptor, "rb") as source:
+            row = json.loads(source.readline(128 * 1024))
+        identity = row.get("payload", {}).get("id")
+        return (
+            row.get("type") == "session_meta"
+            and isinstance(identity, str)
+            and stable_hash(identity) in hashes
+        )
+    except (OSError, ValueError, TypeError, AttributeError, RecursionError):
+        return False
 
 
 def sessions_dir() -> Path:
@@ -37,6 +58,7 @@ def survey_transcripts(
     now: float | None = None,
     since: float | None = None,
     include_requests: bool = False,
+    thread_hashes: set[str] | None = None,
 ) -> dict[str, Any]:
     """Select recent regular JSONL pages, then analyze one bounded time window.
 
@@ -48,6 +70,11 @@ def survey_transcripts(
         raise ValueError("days must be positive and no greater than 365")
     if type(limit) is not int or not 1 <= limit <= MAX_SURVEY_FILES:
         raise ValueError("limit must be between 1 and 1000")
+    if thread_hashes is not None and (
+        not thread_hashes
+        or any(not re.fullmatch(r"[0-9a-f]{64}", value) for value in thread_hashes)
+    ):
+        raise ValueError("invalid exact Task filter")
     until = time.time() if now is None else now
     if not math.isfinite(until):
         raise ValueError("invalid survey timestamp")
@@ -96,6 +123,11 @@ def survey_transcripts(
                         continue
                     if stat.st_mtime > until:
                         counts["future_mtime_files"] += 1
+                    if thread_hashes is not None and not _matches_task(
+                        Path(item.path), thread_hashes
+                    ):
+                        counts["outside_task_scope"] += 1
+                        continue
                     counts["matching_files"] += 1
                     if stat.st_size > MAX_TRANSCRIPT_BYTES:
                         counts["oversized_files"] += 1
@@ -128,9 +160,7 @@ def survey_transcripts(
             "byte_limit_skips",
         )
     )
-    audit = audit_transcripts(
-        selected, since=since, until=until, include_requests=include_requests
-    )
+    audit = audit_transcripts(selected, since=since, until=until, include_requests=include_requests)
     evidence_issues = _evidence_issues(audit)
     evidence_available = _has_evidence(audit)
     return {

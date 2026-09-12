@@ -1,5 +1,40 @@
 # Validation evidence
 
+## Named, scope-first Task reports — 2026-09-12 UTC, v0.11.0
+
+186 tests passed, including native-name-only display (no prompt-like fallback),
+nested immediate-parent/root ownership, cycle and traversal limits, exact Task
+filtering before transcript audit, output escaping, metadata-only commands,
+compact artifact output and rejection of implicit cross-Task scans. Ruff and
+repository/plugin/four-skill validators and runtime reproducibility checks passed.
+
+The native current Task name was cross-checked with the app's Task read API.
+A real single-Task report selected only one transcript page and returned a short
+summary/link. A five-entry agent query read metadata only and displayed agent
+aliases, immediate parents and root Task names. A five-entry tree report marked
+its descendant selection as incomplete and named Tasks without request evidence;
+it did not infer zero usage or silently expand the selection.
+
+An isolated `0.11.0+codex.20260912173629` plugin install succeeded. After stable
+installation, Codex CLI 0.154.0 app-server `skills/list` returned all three new
+skills enabled: `codex-run-budget:usage-task`, `codex-run-budget:usage-agents`
+and `codex-run-budget:usage-window`. These use the supported `/skills` picker,
+not a custom native slash-command parser.
+
+Direct execution of the installed pinned UserPromptSubmit and Stop hooks against
+the real Task metadata/transcript, using isolated report storage, produced one
+receipt with the matching native Task name. This observed run took 0.101 and
+0.093 seconds respectively and invoked no model. This is a runtime smoke test,
+not a new model turn, a performance guarantee, or proof of visible native UI
+delivery. Actual model-turn lifecycle evidence remains the v0.10.0 test below.
+
+Stable installation matched the complete source tree and retained byte-identical
+0.3.0–0.10.1 caches against the pre-change backup. All 11 reviewed plugin hooks
+were enabled and trusted; only their trust hashes changed in the main config.
+The report preference remained byte-identical (enabled, threshold 0), and the
+unrelated Railway hook remained enabled/trusted. Runtime SHA-256:
+`82cc742570ddeca9181364fa5b8cb436dd3dea4c441baea8f81ca3d65e039057`.
+
 ## Default-on report switch — 2026-09-12 UTC, v0.10.1
 
 182 tests passed. The added cases establish that missing preferences default

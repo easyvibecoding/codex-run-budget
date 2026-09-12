@@ -16,6 +16,7 @@ from html import escape
 from pathlib import Path
 from typing import Any
 
+from .task_catalog import task_description
 from .transcript import _usage_from_line
 from .util import stable_hash
 
@@ -271,13 +272,24 @@ def _documents(receipt: dict[str, Any]) -> tuple[str, str]:
     if not context_lines:
         context_lines = ["未在尾端觀測到本回合設定；不以目前偏好補值。"]
     title = "Codex 回合用量摘要"
-    identity = f"Task {receipt['task_hash'][:12]} · 回合 {receipt['turn_hash'][:12]}"
+    task = receipt.get("task") or {}
+    label = task.get("display_name") or f"未命名任務 · {receipt['task_hash'][:12]}"
+    identity = f"{label} · 回合 {receipt['turn_hash'][:12]}"
+    markdown_identity = escape(identity, quote=False)
+    for character, replacement in (
+        ("[", "&#91;"),
+        ("]", "&#93;"),
+        ("*", "&#42;"),
+        ("_", "&#95;"),
+        ("`", "&#96;"),
+    ):
+        markdown_identity = markdown_identity.replace(character, replacement)
     period = f"{receipt['started_at']} → {receipt['stopped_at']}"
     markdown = "\n".join(
         [
             f"# {title}",
             "",
-            identity,
+            markdown_identity,
             "",
             period,
             "",
@@ -428,6 +440,9 @@ def handle(
                 "schema_version": 1,
                 "scope": "user_turn_stop_boundary",
                 "task_hash": started.get("task_hash") or "unknown",
+                "task": task_description(session)
+                if started.get("task_hash") == stable_hash(session)
+                else None,
                 "turn_hash": row["turn_hash"],
                 "elapsed_seconds": round(elapsed, 3),
                 "started_at": datetime.fromtimestamp(row["started"], timezone.utc).isoformat(),

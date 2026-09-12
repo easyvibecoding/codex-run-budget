@@ -6,27 +6,58 @@ Python 3.10+ and the standard library are sufficient; IANA calendar zones use
 the host's timezone database.
 
 ```sh
-# Recent observed Tasks; private Markdown output suitable for Codex's file viewer.
-python3 plugins/codex-run-budget/scripts/run_budget.py report \
-  --timezone Asia/Taipei --output usage.md
+# No-scan menu; metadata-only names and ownership.
+python3 plugins/codex-run-budget/scripts/run_budget.py report
+python3 plugins/codex-run-budget/scripts/run_budget.py report tasks --limit 10
+python3 plugins/codex-run-budget/scripts/run_budget.py report agents
 
-# Interactive, offline HTML: window and detail-Task selectors; print/save as PDF.
-python3 plugins/codex-run-budget/scripts/run_budget.py report \
-  --windows 5h,24h,7d,30d,today,week,month --timezone Asia/Taipei \
+# Current Task only; artifact saved, compact summary/link returned.
+python3 plugins/codex-run-budget/scripts/run_budget.py report task \
+  --windows 24h --timezone Asia/Taipei \
   --format html --output usage.html
 
-# Exact Task selection; repeat --thread for multiple Tasks, not automatic tree expansion.
-python3 plugins/codex-run-budget/scripts/run_budget.py report \
-  --thread 12345678-1234-1234-1234-123456789abc --windows 24h,7d --format json
+# Explicit descendant usage (unlike metadata-only report agents).
+python3 plugins/codex-run-budget/scripts/run_budget.py report tree \
+  --thread 12345678-1234-1234-1234-123456789abc --windows 24h
 
-# Historical interval; timestamp offsets are mandatory.
-python3 plugins/codex-run-budget/scripts/run_budget.py report \
+# Explicit cross-Task historical interval; never an implicit default.
+python3 plugins/codex-run-budget/scripts/run_budget.py report window --all-tasks \
   --since 2026-09-11T00:00:00+08:00 --until 2026-09-12T00:00:00+08:00
 ```
 
+## Scope-first invocation and names (v0.11)
+
+Codex's supported [slash entry point is `/skills`](https://learn.chatgpt.com/docs/developer-commands#use-skills-with-skills).
+Select `usage-task`, `usage-agents`, or `usage-window`; `$skill-name` also invokes
+the corresponding skill. These three small instructions do not load a full
+report or every analysis mode. No native `/usage-task` parser is claimed.
+
+Bare `report` is a menu with no Task or transcript reads. `report task/window`
+defaults to `CODEX_THREAD_ID`; missing identity errors instead of expanding.
+`--thread` accepts an exact UUID or unambiguous 12–64 character hash selector
+from `report tasks`. A cross-Task window requires both `--all-tasks` and an
+explicit time range. Library callers must also provide exact `thread_ids` or
+explicit `all_tasks=True`. Exact scope filters run before file selection and
+audit; ordinary Codex UUID filenames exclude unrelated bodies without opening
+them. Alternate filenames may require only a 128 KiB metadata header.
+
+Private reports use native `threads.name`, agent nickname and logical agent path
+from Codex's read-only `state_5.sqlite`, never the prompt-like `title`, preview or
+first-user-message columns. These are observed current names, not a historical
+name reconstruction. Display names are not unique identities; hashes still join
+the evidence. Missing names remain unnamed, without model-generated guesses.
+
+Agent ownership follows `source.subagent.thread_spawn.parent_thread_id`, not
+similar titles or timestamps. Immediate parent and root Task are separate.
+Trees default to 20 entries (at most 64 for usage); traversal has a depth cap of
+12 and reports truncation/cycles. Catalog reads have a 0.8-second query deadline
+and bounded strings; the local schema is not a public contract, so unavailable
+or conflicting metadata remains explicit. The catalog does not modify Codex.
+Names can reveal work topics: keep exports private and review before sharing.
+
 ## Window and evidence semantics
 
-- Default: `5h,24h,7d,30d`. Positive integer `Nh` and `Nd` rolling windows use
+- Default: one `24h` window. Positive integer `Nh` and `Nd` rolling windows use
   elapsed seconds. `today`, `week` (Monday start), and `month` use calendar
   boundaries in `--timezone`, including DST. Default timezone is UTC.
 - Every window is `[since, until)`, ending at the same captured instant or an
@@ -38,7 +69,7 @@ python3 plugins/codex-run-budget/scripts/run_budget.py report \
   Deduplicate response IDs before grouping. Disagreeing duplicate timestamps
   are excluded with a visible counter, including attribution-conflicted replays.
   Unplaceable-time counts describe selected pages, not an allocated time window.
-- Discovery is bounded to the newest 200 matching local pages, up to 4 GiB,
+- CLI discovery is bounded to the newest 20 matching local pages, up to 4 GiB,
   using existing survey limits. `--limit` supports 1–1000. This can make a
   30-day and 7-day cohort identical: it does not prove there was no older usage.
   Coverage carries discovery skips and audit evidence issues. Missing observations
@@ -48,7 +79,7 @@ python3 plugins/codex-run-budget/scripts/run_budget.py report \
   fills historical gaps. Turn rows are observed request groups, not proof of
   running, completed or aborted work. Missing turn IDs remain unidentified.
 - Context details show the highest-token groups; turn details show the latest
-  groups. Each is limited by `--detail-limit` (default 200, range 1–2000).
+  groups. Each is limited by `--detail-limit` (CLI default 20, range 1–2000).
   Counts and truncation flags are explicit; totals and credit scenario coverage
   are calculated before detail truncation. A Task filter in HTML affects only
   detail rows, not the top-level comparison. A truncated view can have no
@@ -78,11 +109,14 @@ transcript observations.
 Markdown, HTML and JSON share one report schema. `--output` creates a new file
 with mode `0600`, refuses existing files and symlink paths, and caps exports at
 16 MiB. Use a new output filename on each capture. Parent directories must
-already exist. Without `--output`, the selected format goes to stdout.
+already exist for an explicit output path. Without `--output`, a new private
+artifact is created under the budget data directory's `reports/`. Stdout is only
+a bounded summary and file link. `--full` explicitly prints the entire artifact
+instead; skills must not do this or read the saved full artifact by default.
 The renderer escapes untrusted values; standalone HTML has a restrictive CSP,
 no network dependency and no remote telemetry. Reports retain only allowlisted
-numeric/context observations and hashed identities—not titles, prompts or raw
-transcript paths. Keep exported reports private because aggregates can still
+numeric/context observations, native display names/aliases and hashed identities,
+not prompt/title/preview fallback or raw transcript paths. Keep reports private because they
 describe work patterns.
 
 Codex's [official changelog](https://learn.chatgpt.com/docs/changelog) documents
@@ -101,7 +135,7 @@ PDF saving uses the browser's print dialog, not a bundled PDF dependency.
 The report never creates a budget, changes hooks/settings, resumes Tasks,
 polls, resets quota, or submits extra model work.
 
-## Validation — 2026-09-13 (Asia/Taipei)
+## Historical v0.9 validation — 2026-09-13 (Asia/Taipei)
 
 - Full suite: 167 tests; Ruff and repository/plugin/skill validation passed.
   New report tests exercise single capture, half-open boundaries, DST/calendar

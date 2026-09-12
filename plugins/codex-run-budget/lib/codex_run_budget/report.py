@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from .meter import _selected_threads, compare_snapshots, load_snapshots
 from .meter_policy import credit_scenarios, pricing_context
 from .survey import survey_transcripts
+from .task_catalog import unnamed
 
 TOKEN_FIELDS = (
     "unique_responses",
@@ -27,7 +28,7 @@ TOKEN_FIELDS = (
     "reasoning_output_tokens",
     "total_tokens",
 )
-DEFAULT_WINDOWS = ("5h", "24h", "7d", "30d")
+DEFAULT_WINDOWS = ("24h",)
 MAX_REPORT_BYTES = 16 * 1024 * 1024
 
 
@@ -189,16 +190,22 @@ def build_report(
     limit: int = 200,
     detail_limit: int = 200,
     now: float | None = None,
+    all_tasks: bool = False,
+    task_metadata: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Capture once, deduplicate once, then filter exact request timestamps.
 
     Task filters are exact identities, not tree expansion. Public output uses
-    hashes; it contains neither prompt-derived names nor transcript paths.
+    hashes; optional native names are display metadata, never prompt fallbacks.
     """
     captured = time.time() if now is None else now
     if type(detail_limit) is not int or not 1 <= detail_limit <= 2000:
         raise ValueError("detail limit must be between 1 and 2000")
     selected = _selected_threads(thread_ids)
+    if not selected and not all_tasks:
+        raise ValueError("select a Task or explicitly request all_tasks")
+    if selected and all_tasks:
+        raise ValueError("select Tasks or all_tasks, not both")
     ranges = resolve_windows(
         windows,
         timezone_name=timezone_name,
@@ -215,8 +222,63 @@ def build_report(
         now=end,
         limit=limit,
         include_requests=True,
+        thread_hashes=selected or None,
     )
     audit = survey["audit"]
+    identities = {}
+    for row in audit.get("threads", []):
+        key = row["thread_hash"]
+        if key in identities and any(
+            row.get(field) != identities[key].get(field) for field in ("parent_hash", "role")
+        ):
+            identities[key] = {"parent_hash": None, "role": "unknown", "conflict": True}
+        elif key not in identities:
+            identities[key] = row
+    catalog = {}
+    for thread_hash, row in identities.items():
+        if selected and thread_hash not in selected:
+            continue
+        observed = dict((task_metadata or {}).get(thread_hash, {}))
+        parent_hash = row.get("parent_hash")
+        conflict = bool(
+            row.get("conflict")
+            or observed
+            and (
+                parent_hash != observed.get("parent_hash")
+                or row.get("role") != observed.get("role")
+            )
+        )
+        catalog[thread_hash] = {
+            **observed,
+            "thread_hash": thread_hash,
+            "role": row.get("role"),
+            "display_name": observed.get("display_name") or unnamed(thread_hash),
+            "name_source": observed.get("name_source", "unavailable"),
+            "parent_hash": None if conflict else parent_hash,
+            "parent_name": None if conflict else observed.get("parent_name"),
+            "root_hash": None if conflict else observed.get("root_hash"),
+            "root_name": None if conflict else observed.get("root_name"),
+            "lineage_status": "conflicting_parent_sources"
+            if conflict
+            else observed.get("lineage_status", "transcript_only"),
+        }
+    for thread_hash, item in catalog.items():
+        if item["lineage_status"] != "transcript_only":
+            continue
+        current, seen = thread_hash, set()
+        while current in identities and current not in seen and len(seen) < 12:
+            seen.add(current)
+            parent = identities[current].get("parent_hash")
+            if parent is None:
+                if identities[current].get("role") == "parent":
+                    item.update(
+                        root_hash=current,
+                        root_name=catalog.get(current, {}).get("display_name", unnamed(current)),
+                    )
+                break
+            if current == thread_hash:
+                item["parent_name"] = catalog.get(parent, {}).get("display_name", unnamed(parent))
+            current = parent
     observations = [
         row
         for row in audit["request_observations"]
@@ -313,6 +375,7 @@ def build_report(
         "schema_version": 1,
         "generated_at": _iso(captured),
         "timezone": timezone_name,
+        "task_catalog": catalog,
         "scope": {
             "kind": "selected_tasks" if selected else "all_observed_tasks",
             "thread_hashes": sorted(selected),
@@ -347,7 +410,9 @@ def build_report(
             "Windows use [since, until); overlapping windows must not be added.",
             "Requests belong to their recorded usage timestamp, not a prorated execution duration.",
             "Missing or conflicting request times are excluded with visible coverage diagnostics.",
-            "Task and turn IDs are hashed. No prompts, titles or transcript content are exported.",
+            "Task names and agent aliases are native display metadata; they may be sensitive.",
+            "Task and turn IDs are hashed. No prompt/title/preview fallback "
+            "or transcript content is exported.",
             "Input includes cached input; output includes reasoning. Do not double-count subsets.",
             "Unknown Fast, effort and plans are not backfilled from current settings.",
             "Native quota is saved account data; observed subintervals are not entire windows.",

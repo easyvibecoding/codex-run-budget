@@ -112,6 +112,7 @@ class ReportTest(unittest.TestCase):
         os.utime(target, (self.end, self.end))
 
     def report(self, **kwargs):
+        kwargs.setdefault("all_tasks", not bool(kwargs.get("thread_ids")))
         return build_report(sessions=self.sessions, windows=["1h", "24h"], now=self.end, **kwargs)
 
     def test_exact_windows_single_capture_and_subsets(self):
@@ -255,9 +256,14 @@ class ReportTest(unittest.TestCase):
             since=iso(self.end - 6000),
             until=iso(self.end - 3600),
             now=self.end,
+            all_tasks=True,
         )
         b = build_report(
-            sessions=self.sessions, since=iso(self.end - 3600), until=iso(self.end), now=self.end
+            sessions=self.sessions,
+            since=iso(self.end - 3600),
+            until=iso(self.end),
+            now=self.end,
+            all_tasks=True,
         )
         self.assertEqual(a["windows"][0]["usage"]["unique_responses"], 1)
         self.assertEqual(b["windows"][0]["usage"]["unique_responses"], 2)
@@ -271,7 +277,7 @@ class ReportTest(unittest.TestCase):
             {"until": iso(self.end + 1)},
         ):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
-                build_report(sessions=self.sessions, now=self.end, **kwargs)
+                build_report(sessions=self.sessions, now=self.end, all_tasks=True, **kwargs)
 
     def test_private_no_clobber_symlink_and_injection_escape(self):
         report = self.report()
@@ -300,7 +306,9 @@ class ReportTest(unittest.TestCase):
 
     def test_empty_calendar_and_cli_no_store_write(self):
         midnight = datetime.fromisoformat("2026-01-01T00:00:00+00:00").timestamp()
-        report = build_report(sessions=self.sessions, windows=["today"], now=midnight)
+        report = build_report(
+            sessions=self.sessions, windows=["today"], now=midnight, all_tasks=True
+        )
         self.assertIsNone(report["windows"][0]["usage"])
         self.assertIn("沒有已保存的原生快照", render_report(report))
         native_report = self.report()
@@ -318,6 +326,10 @@ class ReportTest(unittest.TestCase):
                         "--data-dir",
                         str(self.root / "no-store"),
                         "report",
+                        "window",
+                        "--all-tasks",
+                        "--windows",
+                        "24h",
                         "--directory",
                         str(self.sessions),
                         "--format",

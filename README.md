@@ -53,19 +53,31 @@ when Codex prompts you; untrusted hooks are skipped by design.
 
 ### Task reports
 
-Generate a private report without starting a budget:
+Start with a no-scan menu, then select one scope without starting a budget:
 
 ```sh
-python3 plugins/codex-run-budget/scripts/run_budget.py report \
-  --timezone Asia/Taipei --windows 5h,24h,7d,30d,today,week,month \
-  --format html --output usage-report.html
+python3 plugins/codex-run-budget/scripts/run_budget.py report
+python3 plugins/codex-run-budget/scripts/run_budget.py report task --windows 24h
+python3 plugins/codex-run-budget/scripts/run_budget.py report agents
+python3 plugins/codex-run-budget/scripts/run_budget.py report window --windows 5h
 ```
+
+In Codex, use `/skills` and select `usage-task`, `usage-agents`, or `usage-window`.
+The Task/window commands default to the current Task, 20 pages and 20 details;
+they save the report and return only a short summary/link. `report tasks` lists
+10 native names/selectors without reading token transcripts. `report agents`
+shows immediate parents and root Tasks using native names and agent aliases.
+`report tree` explicitly includes descendants in usage analysis. Cross-Task
+analysis requires `report window --all-tasks --windows WINDOW`; it is never an
+implicit fallback. `--full` explicitly opts into full stdout output.
 
 Includes Task/turn and model/Fast/reasoning evidence, independent time windows,
 saved native account quota, and clearly separated Standard/Fast credit scenarios.
 Markdown (the default) works in Codex's file viewer; HTML adds offline filtering
 and print/save-as-PDF; JSON preserves the evidence schema. Exact `--thread`
-filters are repeatable. Output never overwrites an existing file. See
+filters accept exact UUIDs or listed selectors and run before transcript analysis.
+Native names may be sensitive; they are not prompt/title/preview fallbacks.
+Output never overwrites an existing file. See
 [report semantics and coverage](docs/REPORTS.md) before interpreting totals.
 
 ### Automatic zero-model-call receipts (v0.10.1)

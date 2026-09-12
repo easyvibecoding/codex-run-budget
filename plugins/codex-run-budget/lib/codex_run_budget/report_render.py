@@ -23,6 +23,22 @@ def _short(value: Any) -> str:
     return str(value)[:12] if value else "未識別"
 
 
+def _task(report, thread_hash):
+    return report.get("task_catalog", {}).get(thread_hash, {}).get(
+        "display_name"
+    ) or "未命名任務 · " + _short(thread_hash)
+
+
+def _parent(report, thread_hash):
+    row = report.get("task_catalog", {}).get(thread_hash, {})
+    if row.get("lineage_status") == "conflicting_parent_sources":
+        return "父系資料衝突，未歸屬"
+    if row.get("parent_hash"):
+        parent = row.get("parent_name") or _task(report, row["parent_hash"])
+        return "直屬 " + parent + "；主 Task " + (row.get("root_name") or "未觀測")
+    return "主代理" if row.get("root_hash") == thread_hash else "未觀測"
+
+
 def _time(value: Any) -> str:
     return (
         datetime.fromtimestamp(value, timezone.utc).isoformat() if value is not None else "未觀測"
@@ -45,6 +61,8 @@ def _coverage(report: dict[str, Any]) -> str:
     coverage = report["coverage"]
     selection = coverage["selection"]
     flags = []
+    if report["scope"].get("tree_selection_limited"):
+        flags.append("代理樹已達數量／深度上限，非完整後代用量")
     if coverage["selection_limited"]:
         flags.append("已達選檔／容量上限")
     if coverage["evidence_limited"]:
@@ -55,7 +73,7 @@ def _coverage(report: dict[str, Any]) -> str:
         flags.append("原生快照僅取最新 1,000 筆")
     missing = report["scope"]["selected_tasks_without_observations"]
     if missing:
-        flags.append("指定 Task 無請求觀測：" + ", ".join(_short(h) for h in missing))
+        flags.append("指定 Task 無請求觀測：" + ", ".join(_task(report, h) for h in missing))
     return f"{selection['selected_files']} 個本機紀錄頁；僅代表已觀測範圍，非全帳號完整帳單。" + (
         "／".join(flags) + "。" if flags else ""
     )
@@ -112,6 +130,10 @@ def _md(value: Any) -> str:
         escape(_text(value), quote=False)
         .replace("|", "&#124;")
         .replace("`", "&#96;")
+        .replace("[", "&#91;")
+        .replace("]", "&#93;")
+        .replace("*", "&#42;")
+        .replace("_", "&#95;")
         .replace("\n", " ")
     )
 
@@ -152,7 +174,7 @@ def render_markdown(report: dict[str, Any]) -> str:
             if report["scope"]["thread_hashes"]
             else "近期本機所有已觀測 Task"
         )
-        + "。Task ID 為雜湊縮寫。",
+        + "。優先顯示 Codex 任務名稱／代理暱稱；缺漏不以提示詞補值。",
         "",
         _coverage(report),
         "",
@@ -187,10 +209,20 @@ def render_markdown(report: dict[str, Any]) -> str:
             f"{window['since']} → {window['until']}",
             "",
             _md_table(
-                ["Task", "角色", "請求", "Token", "未快取輸入", "快取輸入", "輸出"],
+                [
+                    "Task / 代理",
+                    "所屬主 Task / 直屬代理",
+                    "角色",
+                    "請求",
+                    "Token",
+                    "未快取輸入",
+                    "快取輸入",
+                    "輸出",
+                ],
                 [
                     [
-                        _short(r["thread_hash"]),
+                        _task(report, r["thread_hash"]),
+                        _parent(report, r["thread_hash"]),
                         r["role"],
                         _number(r["unique_responses"]),
                         _number(r["total_tokens"]),
@@ -210,7 +242,7 @@ def render_markdown(report: dict[str, Any]) -> str:
                 ["Task", "當時設定與證據狀態", "請求", "Token"],
                 [
                     [
-                        _short(r["thread_hash"]),
+                        _task(report, r["thread_hash"]),
                         _config(r),
                         _number(r["unique_responses"]),
                         _number(r["total_tokens"]),
@@ -228,7 +260,7 @@ def render_markdown(report: dict[str, Any]) -> str:
                 ["Task / 回合", "最後請求 UTC", "請求", "Token", "當時設定"],
                 [
                     [
-                        _short(r["thread_hash"]) + " / " + _short(r["turn_hash"]),
+                        _task(report, r["thread_hash"]) + " / 回合 " + _short(r["turn_hash"]),
                         _time(r["last_observed_at"]),
                         _number(r["unique_responses"]),
                         _number(r["total_tokens"]),
@@ -276,13 +308,17 @@ def _table(headers: list[str], rows: list[tuple[str | None, list[Any]]]) -> str:
         (f'<tr data-task="{escape(task, quote=True)}">' if task else "<tr>")
         + "".join(
             ('<td class="value">' if re.fullmatch(r"[0-9][0-9,.]*", _text(v)) else "<td>")
-            + escape(_text(v)) + "</td>" for v in values
+            + escape(_text(v))
+            + "</td>"
+            for v in values
         )
         + "</tr>"
         for task, values in rows
     )
-    return (f'<div class="table-scroll"><table><thead><tr>{head}</tr></thead>'
-            f'<tbody>{body}</tbody></table></div>')
+    return (
+        f'<div class="table-scroll"><table><thead><tr>{head}</tr></thead>'
+        f"<tbody>{body}</tbody></table></div>"
+    )
 
 
 def render_html(report: dict[str, Any]) -> str:
@@ -310,7 +346,7 @@ def render_html(report: dict[str, Any]) -> str:
         '<section aria-labelledby="comparison"><h2 id="comparison">時間窗口比較</h2>',
         "<p>依請求紀錄時間計量 · 重疊窗口不可加總 · 未觀測 ≠ 零用量</p>",
         '<div class="legend"><span>未快取輸入</span><span>快取輸入</span>'
-        '<span>輸出（含思考）</span></div>',
+        "<span>輸出（含思考）</span></div>",
     ]
     maximum = max(((w["usage"] or {}).get("total_tokens", 0) for w in report["windows"]), default=0)
     for window in report["windows"]:
@@ -334,7 +370,7 @@ def render_html(report: dict[str, Any]) -> str:
             [(None, _window_summary(w)) for w in report["windows"]],
         ),
         '<p class="caption">* 同一批 Token 的費率情境，'
-        '不是實際扣款或訂閱額度百分比。</p></section>',
+        "不是實際扣款或訂閱額度百分比。</p></section>",
         '<section><h2>原生額度與訂閱</h2><p class="eyebrow">全帳號共享 · 保存快照</p>',
         *(f"<p>{escape(v)}</p>" for v in _native_lines(report)),
         "</section>",
@@ -348,7 +384,9 @@ def render_html(report: dict[str, Any]) -> str:
         '<option value="">全部</option>',
     ]
     tasks = sorted({row["thread_hash"] for w in report["windows"] for row in w["tasks"]})
-    pieces += [f'<option value="{escape(task)}">{escape(_short(task))}</option>' for task in tasks]
+    pieces += [
+        f'<option value="{escape(task)}">{escape(_task(report, task))}</option>' for task in tasks
+    ]
     pieces += [
         '</select></label><button id="print-report" type="button">列印 / 存為 PDF</button>',
         '</div><p id="selection-status" role="status" aria-live="polite"></p>',
@@ -359,12 +397,22 @@ def render_html(report: dict[str, Any]) -> str:
             f'<article data-window="{i}"><h3>{escape(window["name"])} · '
             f"{escape(window['since'])} → {escape(window['until'])}</h3>",
             _table(
-                ["Task 雜湊", "角色", "請求", "Token", "未快取輸入", "快取輸入", "輸出"],
+                [
+                    "Task / 代理",
+                    "所屬主 Task / 直屬代理",
+                    "角色",
+                    "請求",
+                    "Token",
+                    "未快取輸入",
+                    "快取輸入",
+                    "輸出",
+                ],
                 [
                     (
                         r["thread_hash"],
                         [
-                            _short(r["thread_hash"]),
+                            _task(report, r["thread_hash"]),
+                            _parent(report, r["thread_hash"]),
                             r["role"],
                             _number(r["unique_responses"]),
                             _number(r["total_tokens"]),
@@ -386,7 +434,7 @@ def render_html(report: dict[str, Any]) -> str:
                     (
                         r["thread_hash"],
                         [
-                            _short(r["thread_hash"]),
+                            _task(report, r["thread_hash"]),
                             _config(r),
                             _number(r["unique_responses"]),
                             _number(r["total_tokens"]),
@@ -404,7 +452,7 @@ def render_html(report: dict[str, Any]) -> str:
                     (
                         r["thread_hash"],
                         [
-                            _short(r["thread_hash"]) + " / " + _short(r["turn_hash"]),
+                            _task(report, r["thread_hash"]) + " / 回合 " + _short(r["turn_hash"]),
                             _time(r["last_observed_at"]),
                             _number(r["unique_responses"]),
                             _number(r["total_tokens"]),
@@ -417,7 +465,7 @@ def render_html(report: dict[str, Any]) -> str:
             "</details>",
             *(f'<p class="caption">{escape(v)}</p>' for v in _delta_lines(window)),
             '<p class="caption">情境估算覆蓋 '
-            f'{window["credit_scenarios"]["coverage"]["priced_requests"]} 筆請求，'
+            f"{window['credit_scenarios']['coverage']['priced_requests']} 筆請求，"
             f"排除 {window['credit_scenarios']['coverage']['excluded_requests']} 筆。"
             "排除不代表免費。</p>",
             "</article>",
@@ -426,7 +474,8 @@ def render_html(report: dict[str, Any]) -> str:
         "</section><footer><h2>如何讀這份報告</h2>",
         "<p>輸入包含快取；輸出包含思考，不能重複加總。歷史設定不以目前設定補值。"
         "Token 份額不能用來分攤帳號額度；Standard / Fast 情境沒有證明當時的實際扣款。</p>",
-        "<p>Task 與回合 ID 已雜湊；不包含標題、提示詞或對話內容。報告不連網、"
+        "<p>任務名稱與代理暱稱來自原生中繼資料，可能含敏感資訊，分享前請檢查。"
+        "ID 已雜湊；不使用提示詞、預覽或對話內容補名。報告不連網、"
         "不變更預算、Hook、Task 狀態或額度。</p>",
         "<p>費率查核日期："
         + escape(_text(report["pricing_reference"]["verified_on"]))

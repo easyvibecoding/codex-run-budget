@@ -87,8 +87,11 @@ transcript content. Never bypass that privacy rule when troubleshooting.
 
 ## Audit recent tasks
 
-For retrospective task-efficiency questions, start with the read-only survey;
-it also covers tasks that never enabled a budget:
+For a generic usage-analysis request, start with `report` (a no-scan menu), or
+the scoped `usage-task`, `usage-agents`, or `usage-window` skill. Do not run a
+200-page survey, cross-Task meter report, full JSON export or all-window report
+by default. The following survey is only for explicitly requested retrospective
+cross-Task diagnostics; it also covers Tasks without a budget:
 
 ```sh
 python3 "$PLUGIN_ROOT/scripts/run_budget.py" survey
@@ -147,7 +150,7 @@ run extra model workloads just to force the percentage meter to move.
 
 ## Compare tasks, subscription and Fast/effort
 
-Use `meter tasks --days 1` for recent cross-task history without needing two quota
+Only for an explicit cross-Task request, use `meter tasks --days 1` without needing two quota
 snapshots. `--thread UUID` filters exact Task identities in `tasks` and `report`;
 it does not restrict the account quota to those Tasks. JSON contains per-turn
 configuration rows and each field's evidence source/status; check these before
@@ -187,24 +190,30 @@ Reasoning levels have no fixed consumption multiplier in this meter.
 
 ## Produce a Task usage report
 
-Use the read-only `report` command for saved, presentable reports. It is distinct
-from `meter report`, which compares native quota snapshots:
+Use `report` with no arguments to display the scope menu without scanning.
+Choose one scoped command; it is distinct from `meter report` (native snapshots):
 
 ```sh
-python3 "$PLUGIN_ROOT/scripts/run_budget.py" report \
-  --timezone Asia/Taipei --windows 5h,24h,7d,30d,today,week,month \
-  --format html --output usage-report.html
+python3 "$PLUGIN_ROOT/scripts/run_budget.py" report task --windows 24h
+python3 "$PLUGIN_ROOT/scripts/run_budget.py" report agents
+python3 "$PLUGIN_ROOT/scripts/run_budget.py" report window --windows 5h
 ```
 
 Choose the user's timezone, or leave the UTC default explicit. Formats are
 `markdown` (default), `html` and `json`. `--thread UUID` selects exact Tasks and
-is repeatable; absent a filter, the report covers recently observed local Tasks.
-It does not implicitly include descendants. `--since` and `--until` accept ISO
+is repeatable and accepts UUIDs or listed selectors. Absent a filter, scoped
+commands use the current Task; missing identity is an error, never all Tasks.
+Only explicit cross-Task requests may use `report window --all-tasks` with a
+specified window. `report tree` explicitly includes descendants; `report agents`
+is metadata-only. `--since` and `--until` accept ISO
 timestamps with offsets for historical intervals. `week` starts Monday; windows
 are `[since, until)` and overlap, so do not add their totals.
 
-Check coverage: default discovery is 200 pages, not all account history. Detail
-rows can be truncated independently from totals (`--detail-limit`, default 200).
+Check coverage: default analysis is 20 pages, not all account history. Detail
+rows can be truncated independently from totals (`--detail-limit`, default 20).
+Selection occurs before transcript analysis. Default output is a small summary
+and a saved artifact link, not the whole report. Do not read the full artifact
+back into context merely to deliver it; use `--full` only when explicitly needed.
 Reports preserve unknown historical settings, separate saved account quota from
 local tokens, and label Standard/Fast credits as scenarios. Native snapshots are
 read from history, not refreshed; capture separately only when requested. The
@@ -216,7 +225,9 @@ file/browser opening tool after creating the report when helpful. Do not assume
 raw HTML will render inline in a Markdown message or claim this modifies the
 built-in quota widget. A conversation visualization is optional when supported
 and useful, not a dependency. Use new filenames: report output refuses overwrites
-and symlink paths. Task/turn IDs are hashed; never add prompt-derived names.
+and symlink paths. Task/turn IDs remain hashed; display names and agent aliases
+come from Codex metadata. Never fall back to prompt/title/preview text or invent
+names. Names may be sensitive: keep reports private unless sharing is requested.
 
 ## Automatic turn-stop receipts
 

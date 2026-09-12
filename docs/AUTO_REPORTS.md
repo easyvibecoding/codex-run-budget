@@ -16,6 +16,14 @@ JSON files under the budget data directory's `auto-reports/`. Files are mode
 persisted. The Stop output contains only an informational `systemMessage`.
 Existing budget decisions and enforcement fields are preserved.
 
+From v0.11, the receipt heading uses an exact, bounded read of Codex's native
+Task `name` when available. It never reads the prompt-like `title`, preview or
+first-message fields and never calls a model to invent a name. The catalog read
+is read-only, has a 0.8-second query deadline and at most 12 parent hops; missing
+or changed schemas retain the unnamed fallback. Display metadata is stored only
+in private report artifacts, not the timing baseline or governance ledger. Names
+may be sensitive and are current-at-report-time, not historical names.
+
 This follows the [official Stop interface](https://learn.chatgpt.com/docs/hooks#stop)
 and [common output contract](https://learn.chatgpt.com/docs/hooks#common-output-fields).
 Codex decides how it displays that UI message and whether it linkifies the path.

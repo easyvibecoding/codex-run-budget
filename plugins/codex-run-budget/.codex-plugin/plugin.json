@@ -1,6 +1,6 @@
 {
   "name": "codex-run-budget",
-  "version": "0.10.1",
+  "version": "0.11.0",
   "description": "Shared token governance, native account quota sensing, and recent-task telemetry for Codex.",
   "author": {
     "name": "EasyVibeCoding",
@@ -31,8 +31,8 @@
     "websiteURL": "https://github.com/easyvibecoding/codex-run-budget",
     "defaultPrompt": [
       "Start a 100k shared run budget for this task.",
-      "Survey recent tasks for model tokens and lifecycle evidence.",
-      "Compare native quota, subscription and cross-task model, Fast and reasoning token evidence."
+      "Show the usage report scope menu without scanning history.",
+      "Report this Task's last 24 hours, with its Codex name and agent ownership."
     ]
   }
 }
