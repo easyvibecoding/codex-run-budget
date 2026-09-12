@@ -1,5 +1,36 @@
 # Validation evidence
 
+## Bordered card and child-scope clarification — 2026-09-13 Asia/Taipei
+
+The user's desktop screenshot confirms that the preceding v0.13 inline fragment
+painted in the actual final answer. This follow-up adds a theme-aware 1px outer
+border, 16px corners and responsive padding, and labels the total as parent-agent
+tokens. Child aggregation and hook lifecycle semantics are unchanged.
+
+204 tests passed, plus Ruff and repository/plugin validators. The official
+visualize wrapper was checked at 736px and 320px in both light and dark themes:
+all four cases had a computed 1px border, no horizontal overflow and a working
+details expansion. Desktop-light and mobile-dark screenshots were visually read
+back. The preview displayed for this turn reuses the preceding immutable
+snapshot's values/time with only the new styling and scope labels; it is not a
+new usage measurement. This older desktop Task had no active start baseline for
+the current turn, and the preview command correctly returned `no_active_start`.
+
+A bounded read-only check of two direct child agents found a persisted
+`task_complete` and readable cumulative token data in each. This supports reading
+saved child data after completion, not a universal claim about event reliability.
+The automatic reporter explicitly excludes children; the separate governed-budget
+handler consumes `SubagentStop`. No stop mechanism or child aggregation was changed.
+
+Installed `0.13.0+codex.20260912203442` using the official cachebuster and retention
+updater. Source/cache identity and retained prior-cache identities matched. All
+11 plugin hooks and the unrelated Railway hook read back enabled/trusted. Only
+the 11 plugin hook trust hashes changed in config; saved report preferences were
+byte-identical. The archive differs from the preceding installed build only in
+the card template and package version member. No new model canary was needed for
+this presentation-only change. Runtime SHA-256:
+`27dfab9ac356db863214de5951dfbedfba64f71886dc3cb7df80cacf3f1b6c34`.
+
 ## Inline pre-final usage card — 2026-09-13 Asia/Taipei, v0.13.0
 
 The reported desktop failure was reproduced from local evidence: the preceding

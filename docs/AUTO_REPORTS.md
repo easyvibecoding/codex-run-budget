@@ -66,6 +66,25 @@ files are retained, and only fully written outputs are announced.
 
 ## Evidence and cost
 
+### Why subagents are not in the inline total
+
+The current automatic reporter deliberately excludes `agent_id` payloads and
+subagent transcripts. It never subscribes to `SubagentStop` for receipts, and
+the preview reads only the selected parent's transcript. Thus "not included"
+is a selection policy, not a detected `SubagentStop` failure. The separate budget
+governor handles that event and reads `agent_transcript_path` for a governed run.
+Persisted child transcripts can remain readable after a child completes.
+
+The official [SubagentStop contract](https://learn.chatgpt.com/docs/hooks#subagentstop)
+permits a missing transcript path and a continuation decision. A parent Stop
+is not a documented guarantee that every child counter has been flushed. An
+expanded report should reconcile saved per-agent observations with parent/turn
+lineage and the requested time window, deduplicate sources, and preserve unknown
+or pending data; it should not add each child's lifetime total to each parent turn.
+This is a future aggregation design, not implemented automatic child inclusion.
+
+### Counter interpretation
+
 - Numeric usage is the difference of cumulative counters at the two observed
   boundaries, not an aggregation of individual requests. Missing baselines,
   changed/truncated sources, negative deltas and inconsistent subsets stay

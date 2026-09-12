@@ -1,6 +1,9 @@
 <section id="run-budget-$key" aria-label="本回合 Codex 用量">
   <style>
-    #run-budget-$key { color: var(--foreground); overflow-wrap: anywhere; }
+    #run-budget-$key {
+      color: var(--foreground); overflow-wrap: anywhere; box-sizing: border-box;
+      border: 1px solid var(--border); border-radius: 16px; padding: clamp(16px, 3vw, 24px);
+    }
     #run-budget-$key .report-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; }
     #run-budget-$key .report-head h2 { margin: 0; }
     #run-budget-$key .report-config { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
@@ -17,7 +20,7 @@
   <p>$task</p>
   <div class="viz-grid">
     <div class="card viz-stat">
-      <div>觀測 Token</div>
+      <div>主代理 Token</div>
       <div class="viz-stat-value tabular-nums">$total</div>
       <div class="text-small">$usage_label</div>
     </div>
@@ -40,7 +43,8 @@
       <dt>輸出（含思考）</dt><dd>$output</dd>
       <dt>其中思考 Token</dt><dd>$reasoning</dd>
     </dl>
-    <p class="text-small">僅目前 Task；不含子代理。計數器可能落後，不含之後的工具與結論。
+    <p class="text-small">僅目前主代理；子代理尚未納入本卡統計，不代表資料收集失敗。
+      計數器可能落後，不含之後的工具與結論。
       這不是訂閱額度百分比或帳單。未知不代表 0；Stop 結算另存，不會回寫這張快照。</p>
   </details>
 </section>
