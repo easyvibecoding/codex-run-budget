@@ -1,4 +1,6 @@
 {
+  "pending_usage": "En attente des données",
+  "pending_usage_note": "L’usage de la première requête n’est pas encore enregistré ; Stop comptabilisera les données disponibles.",
   "title": "Rapport d’utilisation du tour Codex",
   "card_title": "Utilisation de ce tour",
   "pre_final": "Instantané avant la réponse finale",

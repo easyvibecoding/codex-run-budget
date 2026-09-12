@@ -1,4 +1,6 @@
 {
+  "pending_usage": "Warten auf Nutzungsdaten",
+  "pending_usage_note": "Die erste Anfrage ist noch nicht gespeichert; Stop erfasst die verfügbaren Nutzungsdaten.",
   "title": "Codex-Nutzungsbericht für den Turn",
   "card_title": "Nutzung dieses Turns",
   "pre_final": "Snapshot vor dem Abschluss",

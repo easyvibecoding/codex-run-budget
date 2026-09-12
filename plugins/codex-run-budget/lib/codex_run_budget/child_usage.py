@@ -103,6 +103,36 @@ def _stamp(value: Any) -> float | None:
     return number if math.isfinite(number) else None
 
 
+def _native_stamp(value: Any) -> float | None:
+    """Parse native lifecycle timestamps, which are usually milliseconds."""
+
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        try:
+            number = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if not math.isfinite(number):
+            return None
+        # Codex lifecycle payloads use Unix milliseconds.  Keep support for
+        # second-resolution fixtures and older payloads without accepting an
+        # unbounded integer as a timestamp.
+        if abs(number) >= 1e11:
+            number /= 1000.0
+        return number if math.isfinite(number) else None
+    return _stamp(value)
+
+
+def _lifecycle_stamp(record: dict[str, Any], payload: dict[str, Any], kind: str) -> float | None:
+    """Prefer native lifecycle fields and fall back to the record timestamp."""
+
+    fields = ("started_at",) if kind == "started" else ("completed_at", "ended_at")
+    for field in fields:
+        stamp = _native_stamp(payload.get(field))
+        if stamp is not None:
+            return stamp
+    return _stamp(record.get("timestamp"))
+
+
 def _contract_usage(value: dict[str, Any]) -> dict[str, int]:
     return {
         "total": value["total_tokens"],
@@ -219,8 +249,14 @@ def _scan(
         "scan_bytes": 0,
         "tail_limited": False,
         "malformed": False,
+        "lifecycle_malformed": False,
         "identity_ambiguous": False,
         "terminal_reset": False,
+        # Lifecycle evidence is retained in memory only.  It lets collection
+        # distinguish a child that finished before the parent window from a
+        # child that was reused or remained active across it.
+        "lifecycle": [],
+        "lifecycle_suffix_observed": False,
     }
     path = Path(path_value) if isinstance(path_value, str) and path_value else None
     if path is None:
@@ -240,8 +276,10 @@ def _scan(
         after = os.fstat(descriptor)
         if after.st_size != size or len(header) != header_size or len(tail) != size - tail_offset:
             result["malformed"] = True
+            result["lifecycle_malformed"] = True
         result["scan_bytes"] = len(header) + len(tail)
         result["tail_limited"] = size > TAIL_BYTES
+        result["lifecycle_suffix_observed"] = not bool(tail_offset)
     except (OSError, ValueError):
         return result
     finally:
@@ -257,19 +295,26 @@ def _scan(
     # mistake that artificial cut for malformed source or replay lifecycle
     # events by parsing the same prefix twice.
     result["malformed"] |= tail_bad or (bool(tail_offset) and header_bad)
+    # A header ending in the middle of a line is expected for a bounded read
+    # of a large source.  The suffix remains a complete lifecycle boundary as
+    # long as its own final line parsed cleanly; keep that distinction for
+    # window-scope filtering while preserving the public partial status.
+    result["lifecycle_malformed"] |= tail_bad
     records = header_records + tail_records if tail_offset else tail_records
     if len(records) > MAX_SCAN_RECORDS:
         # Header and tail are each bounded independently; their concatenation
         # can still exceed the per-page record cap (and therefore has unknown
         # coverage even when every individual line parsed successfully).
         result["malformed"] = True
+        result["lifecycle_malformed"] = True
     child_id = expected_child
     parent_id = expected_parent
     matched_metadata = False
     active_thread: str | None = None
     child_turns: set[str] = set()
     observations: dict[str, dict[str, Any]] = {}
-    for record in records[:MAX_SCAN_RECORDS]:
+    header_count = len(header_records)
+    for index, record in enumerate(records[:MAX_SCAN_RECORDS]):
         payload = _payload(record)
         record_type = record.get("type")
         payload_type = payload.get("type")
@@ -282,19 +327,35 @@ def _scan(
             raw_id = _bounded_text(payload.get("id"))
             active_thread = raw_id
         if record_type != "token_usage_record":
-            if record_type == "event_msg" and payload_type in ("task_started", "task_complete"):
+            if record_type == "event_msg" and payload_type in (
+                "task_started",
+                "task_complete",
+                "turn_aborted",
+            ):
                 explicit = _bounded_text(payload.get("thread_id"))
                 event_turn = _bounded_text(payload.get("turn_id"))
                 belongs = explicit == child_id or (
                     explicit is None
                     and (active_thread == child_id or event_turn in child_turns)
                 )
-                if belongs and payload_type == "task_complete":
-                    result["terminal_observed"] = True
-                    result["terminal_reset"] = False
-                elif belongs and payload_type == "task_started":
-                    result["terminal_observed"] = False
-                    result["terminal_reset"] = True
+                if belongs:
+                    kind = "started" if payload_type == "task_started" else "terminal"
+                    lifecycle_stamp = _lifecycle_stamp(record, payload, kind)
+                    result["lifecycle"].append(
+                        {"kind": kind, "stamp": lifecycle_stamp}
+                    )
+                    # An event in the suffix is enough to establish the final
+                    # lifecycle state even when the middle of a large source
+                    # was outside the bounded scan.  If there is no suffix
+                    # event, collection must retain unknown coverage.
+                    if index >= header_count:
+                        result["lifecycle_suffix_observed"] = True
+                    if payload_type in ("task_complete", "turn_aborted"):
+                        result["terminal_observed"] = True
+                        result["terminal_reset"] = False
+                    else:
+                        result["terminal_observed"] = False
+                        result["terminal_reset"] = True
             continue
         # Parent records copied into a fork can share the file.  A request is
         # accepted only with an explicit child thread and bounded turn id.
@@ -603,8 +664,11 @@ def _empty_scan() -> dict[str, Any]:
         "scan_bytes": 0,
         "tail_limited": False,
         "malformed": False,
+        "lifecycle_malformed": False,
         "identity_ambiguous": False,
         "terminal_reset": False,
+        "lifecycle": [],
+        "lifecycle_suffix_observed": False,
     }
 
 
@@ -755,6 +819,136 @@ def _in_window(stamp: Any, since: float, until: float) -> bool:
     )
 
 
+def _created_at(catalog: TaskCatalog, rows: list[dict[str, Any]]) -> dict[str, float]:
+    """Read native creation evidence when the catalog exposes it.
+
+    Creation is useful for excluding a child that did not exist until after a
+    historical report window.  It is deliberately not used as an end-time
+    or idle-time signal; a child created before the window still needs
+    lifecycle evidence (or remains unknown).
+    """
+
+    connection = getattr(catalog, "connection", None)
+    if connection is None:
+        return {}
+    try:
+        columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(threads)").fetchall()
+        }
+        candidates = [
+            name for name in ("created_at_ms", "created_at") if name in columns
+        ]
+        if not candidates:
+            return {}
+        selected = [row.get("id") for row in rows[:MAX_ROWS] if isinstance(row.get("id"), str)]
+        if not selected:
+            return {}
+        placeholders = ",".join("?" for _ in selected)
+        fields = ",".join(candidates)
+        result: dict[str, float] = {}
+        for native in connection.execute(
+            "SELECT id," + fields + " FROM threads WHERE id IN (" + placeholders + ")",
+            tuple(selected),
+        ).fetchall():
+            stamp = None
+            for field in candidates:
+                stamp = _native_stamp(native[field])
+                if stamp is not None:
+                    break
+            if stamp is not None:
+                result[native["id"]] = stamp
+        return result
+    except (sqlite3.Error, TypeError, ValueError, OverflowError):
+        return {}
+
+
+def _scope_intersects(
+    scan: dict[str, Any] | None,
+    items: list[dict[str, Any]],
+    since: float,
+    until: float,
+    *,
+    created_at: float | None = None,
+) -> bool:
+    """Return whether reliable child activity intersects ``[since, until)``.
+
+    A complete lifecycle timeline can prove that an old child finished before
+    the window, or that a child was created after it.  Every missing or
+    incomplete piece of evidence stays in scope so it is reported as
+    unknown/partial rather than silently treated as zero.
+    """
+
+    if created_at is not None and created_at >= until:
+        return False
+    if any(_in_window(item.get("stamp"), since, until) for item in items):
+        return True
+    if not scan:
+        return True
+    # A scan without matching metadata cannot prove which lifecycle belongs
+    # to this child.  Keep the row in the denominator and expose its unknown
+    # state to the caller.
+    if scan.get("child_id") is None:
+        return True
+    lifecycle = scan.get("lifecycle")
+    if not isinstance(lifecycle, list) or not lifecycle:
+        return True
+    if (
+        scan.get("lifecycle_malformed")
+        or scan.get("identity_ambiguous")
+        or not scan.get("lifecycle_suffix_observed")
+    ):
+        return True
+
+    timeline: list[tuple[str, float]] = []
+    previous: float | None = None
+    for event in lifecycle:
+        if not isinstance(event, dict) or event.get("kind") not in ("started", "terminal"):
+            return True
+        stamp = event.get("stamp")
+        if (
+            not isinstance(stamp, (int, float))
+            or isinstance(stamp, bool)
+            or not math.isfinite(float(stamp))
+        ):
+            return True
+        stamp = float(stamp)
+        # Native event order and timestamps should agree.  A disagreement is
+        # safer as unknown than as evidence that an interval missed the
+        # requested window.
+        if previous is not None and stamp < previous:
+            return True
+        previous = stamp
+        timeline.append((event["kind"], stamp))
+
+    if any(since <= stamp < until for _, stamp in timeline):
+        return True
+
+    active_start: float | None = None
+    for kind, stamp in timeline:
+        if kind == "started":
+            # Nested starts without a terminal boundary cannot establish a
+            # closed interval; fail closed for the scope denominator.
+            if active_start is not None:
+                return True
+            active_start = stamp
+            continue
+        if active_start is None:
+            # A start may be outside the bounded prefix of a large source.
+            # A terminal strictly before the window still proves that this
+            # observed lifecycle had ended; a terminal at/after the window
+            # cannot prove that it did not overlap the window.
+            if stamp < since:
+                continue
+            return True
+        if active_start < until and stamp > since:
+            return True
+        active_start = None
+
+    if active_start is not None and active_start < until:
+        return True
+    return False
+
+
 def collect(root: Path, session: str, since: float, until: float, *, home=None,
             unnamed_label="未命名任務") -> dict:
     """Return a bounded child subtotal for one parent turn window."""
@@ -794,6 +988,7 @@ def collect(root: Path, session: str, since: float, until: float, *, home=None,
                 return empty
             descendants = descendants[:MAX_ROWS]
             paths = _paths(catalog, descendants)
+            created_at = _created_at(catalog, descendants)
             descriptions: dict[str, dict[str, Any]] = {}
             for row in descendants:
                 try:
@@ -809,6 +1004,7 @@ def collect(root: Path, session: str, since: float, until: float, *, home=None,
         all_items: dict[str, list[dict[str, Any]]] = defaultdict(list)
         statuses: dict[str, str] = {}
         terminals: dict[str, bool] = {}
+        scans: dict[str, dict[str, Any]] = {}
         scan_bytes = 0
         for row in descendants:
             child_id = row.get("id")
@@ -819,6 +1015,11 @@ def collect(root: Path, session: str, since: float, until: float, *, home=None,
             cached_agent = agent_cache.get(child_hash)
             statuses[child_hash] = cached_agent["status"] if cached_agent else "unavailable"
             terminals[child_hash] = bool(cached_agent and cached_agent["terminal_observed"])
+            # A native creation timestamp is a safe lower-boundary signal:
+            # this child did not exist during the requested window.  Skip its
+            # transcript entirely to avoid scanning a future child.
+            if created_at.get(child_id) is not None and created_at[child_id] >= until:
+                continue
             path = paths.get(child_id)
             if path:
                 scan = _scan(
@@ -826,6 +1027,7 @@ def collect(root: Path, session: str, since: float, until: float, *, home=None,
                     expected_child=child_id,
                     expected_parent=row.get("parent_id"),
                 )
+                scans[child_hash] = scan
                 scan_bytes += int(scan.get("scan_bytes", 0) or 0)
                 if scan.get("child_id") == child_id:
                     all_items[child_hash].extend(scan.get("requests", []))
@@ -897,6 +1099,17 @@ def collect(root: Path, session: str, since: float, until: float, *, home=None,
                 continue
             child_hash = stable_hash(child_id)
             child_items = merged_by_child.get(child_hash, [])
+            if not _scope_intersects(
+                scans.get(child_hash),
+                child_items,
+                since,
+                until,
+                created_at=created_at.get(child_id),
+            ):
+                # The child has reliable lifecycle evidence entirely outside
+                # this parent turn.  It must not inflate missing/pending
+                # counts for the current window.
+                continue
             valid_items = [
                 item
                 for item in child_items
@@ -960,6 +1173,8 @@ def collect(root: Path, session: str, since: float, until: float, *, home=None,
             overall_status = (
                 "partial"
                 if limited or any(item["status"] == "partial" for item in rows_out)
+                else "none"
+                if not rows_out
                 else "unavailable"
             )
         result.update(

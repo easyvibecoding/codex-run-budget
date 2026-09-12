@@ -159,6 +159,78 @@ class AutoReportTest(unittest.TestCase):
         self.assertIn("'" + str(self.data) + "'", context)
         self.assertNotIn("\n", context)
 
+    def test_footer_has_bounded_instruction_and_no_report_body_task(self):
+        from codex_run_budget.auto_report import _footer
+        from codex_run_budget.report_i18n import ReportText
+
+        directory = self.root / "footer"
+        directory.mkdir()
+        specific = _footer(directory, "example", self.payload)["hookSpecificOutput"]
+        context = specific["additionalContext"]
+        self.assertLess(len(context.split("--output-dir", 1)[-1]), 240)
+        self.assertIn("Do not read", context)
+        self.assertIn("no retries", context)
+        self.assertNotIn(ReportText("zh-Hant")("card_note"), context)
+
+    def fresh_page(self, *, prefix=(), extra_meta=None):
+        meta = {"type": "session_meta", "payload": {
+            "id": self.payload["session_id"], **(extra_meta or {})
+        }}
+        records = [meta, *prefix, {"type": "event_msg", "payload": {
+            "type": "task_started", "turn_id": self.payload["turn_id"]
+        }}, {"type": "turn_context", "payload": {"turn_id": self.payload["turn_id"]}}]
+        self.page.write_text("\n".join(map(json.dumps, records)) + "\n")
+
+    def test_verified_first_turn_settles_without_inventing_missing_counter(self):
+        self.fresh_page()
+        initial = snapshot(str(self.page), self.payload["turn_id"])
+        self.assertIsNone(initial["usage"])
+        self.assertTrue(initial["fresh_turn_start"])
+        self.start()
+        self.append(counter(1200))
+        self.event("Stop", 1)
+        self.assertEqual(self.report()["usage"]["total"], 1200)
+        self.assertEqual(self.report()["usage_status"], "verified_first_turn_counter")
+
+    def test_first_turn_proof_rejects_history_forks_reset_and_incomplete_prefix(self):
+        cases = {
+            "inherited": {"prefix": ({"type": "response_item", "payload": {
+                "type": "message", "role": "assistant", "content": []
+            }},)},
+            "forked": {"extra_meta": {"forked_from_id": "example-parent"}},
+            "prior_turn": {"prefix": ({"type": "event_msg", "payload": {
+                "type": "task_started", "turn_id": "earlier-turn"
+            }},)},
+            "reset": {}, "malformed": {}, "partial": {}, "another_turn": {},
+            "nonobject": {}, "missing_type": {}, "null_payload": {}, "unknown_record": {},
+        }
+        from codex_run_budget.auto_report import _delta
+
+        for case, options in cases.items():
+            with self.subTest(case=case):
+                self.fresh_page(**options)
+                if case == "malformed":
+                    with self.page.open("a") as stream:
+                        stream.write("invalid record\n")
+                if case == "partial":
+                    with self.page.open("a") as stream:
+                        stream.write('{"type":')
+                invalid = {"nonobject": [], "missing_type": {"payload": {}},
+                           "null_payload": {"type": "event_msg", "payload": None},
+                           "unknown_record": {"type": "compacted", "payload": {}}}
+                if case in invalid:
+                    self.append(invalid[case])
+                before = snapshot(str(self.page), self.payload["turn_id"])
+                self.append(counter(1200))
+                if case == "reset":
+                    self.append(counter(500))
+                if case == "another_turn":
+                    self.append({"type": "event_msg", "payload": {
+                        "type": "task_started", "turn_id": "later-turn"
+                    }})
+                after = snapshot(str(self.page), self.payload["turn_id"])
+                self.assertIsNone(_delta(before, after)[0])
+
     def test_pending_file_does_not_claim_report_after_failure_or_disable(self):
         self.start()
         target = next((self.data / "auto-reports").glob("*.md"))

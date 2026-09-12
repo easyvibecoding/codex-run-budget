@@ -1,4 +1,6 @@
 {
+  "pending_usage": "等待用量寫入",
+  "pending_usage_note": "首筆請求用量尚未寫入；Stop 時另行結算可取得的數據。",
   "title": "Codex 回合用量摘要",
   "card_title": "本回合用量",
   "pre_final": "結論前快照",

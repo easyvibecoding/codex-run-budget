@@ -42,6 +42,12 @@ def usage(total: int = 12) -> dict[str, int]:
     }
 
 
+def synthetic_child(number: int) -> str:
+    """Stable UUIDs for bounded scope fixtures; never a native Task id."""
+
+    return f"{number:08x}-1111-2222-3333-444444444444"
+
+
 def metadata(identifier: str, parent: str, second: int = 0) -> dict:
     return {
         "type": "session_meta",
@@ -218,6 +224,108 @@ class ChildUsageTest(unittest.TestCase):
         result = collect(self.root, PARENT, 20 + 1_700_000_000, 21 + 1_700_000_000, home=self.home)
         self.assertEqual(result["usage"]["total"], 30)
         self.assertEqual(result["request_count"], 1)
+
+    def test_completed_historical_children_do_not_fill_current_window_denominator(self) -> None:
+        for number in range(1, 30):
+            child = synthetic_child(number)
+            self._page(
+                child,
+                PARENT,
+                [
+                    metadata(child, PARENT, 0),
+                    request(child, f"old-{number}", 1, 20),
+                    complete(2),
+                ],
+                name=f"historical-{number}",
+            )
+
+        result = collect(
+            self.root,
+            PARENT,
+            WINDOW_START + 10,
+            WINDOW_START + 20,
+            home=self.home,
+        )
+        self.assertEqual(result["status"], "none")
+        self.assertIsNone(result["usage"])
+        self.assertEqual(result["agents_seen"], 0)
+        self.assertEqual(result["agents_with_usage"], 0)
+        self.assertEqual(result["pending_agents"], 0)
+        self.assertEqual(result["missing_agents"], 0)
+        self.assertEqual(result["rows"], [])
+
+    def test_active_and_reused_children_still_intersect_the_window(self) -> None:
+        active = synthetic_child(40)
+        reused = synthetic_child(41)
+        self._page(
+            active,
+            PARENT,
+            [metadata(active, PARENT, 0), {"type": "event_msg", "timestamp": stamp(3),
+             "payload": {"type": "task_started", "turn_id": "active-turn"}}],
+            name="active",
+        )
+        self._page(
+            reused,
+            PARENT,
+            [
+                metadata(reused, PARENT, 0),
+                request(reused, "before", 1, 20),
+                complete(2),
+                {"type": "event_msg", "timestamp": stamp(12),
+                 "payload": {"type": "task_started", "turn_id": "reused-turn"}},
+                request(reused, "inside", 14, 30),
+                complete(15),
+            ],
+            name="reused",
+        )
+
+        result = collect(
+            self.root,
+            PARENT,
+            WINDOW_START + 10,
+            WINDOW_START + 20,
+            home=self.home,
+        )
+        self.assertEqual(result["agents_seen"], 2)
+        self.assertEqual(result["agents_with_usage"], 1)
+        self.assertEqual(result["pending_agents"], 1)
+        self.assertEqual(result["missing_agents"], 1)
+        self.assertEqual(result["usage"]["total"], 30)
+        self.assertEqual(result["request_count"], 1)
+        self.assertEqual(
+            {row["display_name"] for row in result["rows"]}, {"active", "reused"}
+        )
+
+    def test_missing_metadata_is_unknown_not_historical_exclusion(self) -> None:
+        path = Path(self.temp.name) / f"{CHILD_A}-missing-metadata.jsonl"
+        path.write_text(
+            "".join(
+                json.dumps(record) + "\n"
+                for record in [
+                    request(CHILD_A, "unknown", 1, 20),
+                    complete(2),
+                ]
+            )
+        )
+        self._insert(
+            CHILD_A,
+            "missing-metadata",
+            PARENT,
+            {"subagent": {"thread_spawn": {"parent_thread_id": PARENT}}},
+            path,
+        )
+        result = collect(
+            self.root,
+            PARENT,
+            WINDOW_START + 10,
+            WINDOW_START + 20,
+            home=self.home,
+        )
+        self.assertEqual(result["status"], "unavailable")
+        self.assertEqual(result["agents_seen"], 1)
+        self.assertEqual(result["agents_with_usage"], 0)
+        self.assertEqual(result["pending_agents"], 1)
+        self.assertEqual(result["missing_agents"], 1)
 
     def test_non_stop_capture_is_disabled_without_creating_storage(self) -> None:
         capture(

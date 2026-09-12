@@ -1,4 +1,6 @@
 {
+  "pending_usage": "使用量の記録待ち",
+  "pending_usage_note": "最初のリクエスト使用量は未保存です。Stop 時に取得可能な数値を集計します。",
   "title": "Codex ターン使用量レポート",
   "card_title": "このターンの使用量",
   "pre_final": "最終回答前のスナップショット",

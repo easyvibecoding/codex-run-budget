@@ -19,6 +19,9 @@ usage records in this turn's observation window, and renders a bundled HTML
 fragment into a task-owned writable visualization directory selected by the caller.
 Its output is only status/reference, not the report body. The numeric card is a
 pre-final snapshot, excluding subsequent work; it is not overwritten by Stop.
+If a verified fresh first turn has not persisted its first usage counter yet,
+the card says it is awaiting the usage write. It does not display zero or request
+another tool call. Stop independently settles whatever counters are then available.
 Disabling reports or an incompatible
 exact-output request takes precedence. The same persistent switch controls both
 generation and this presentation instruction; an explicit off is not overridden.
@@ -127,6 +130,11 @@ This is observation-window attribution, not proof the parent caused every reques
 in that interval. Reused children contribute only records in this window. Names
 and parent labels come from current native metadata in the private report, never
 from prompts or the numeric child store. Unrelated Task transcripts are not read.
+The missing/pending denominator uses this same window: verified old children whose
+native lifecycle ended before it, and children created after it, are excluded.
+Active cross-window children, reused children and unknown or conflicting lifecycle
+evidence remain in scope. File modification time is not treated as a Stop event.
+Bounded selection or scan limits still prevent a complete-coverage claim.
 
 The official [SubagentStop contract](https://learn.chatgpt.com/docs/hooks#subagentstop)
 permits a missing transcript path and a continuation decision. Capture can precede
@@ -139,9 +147,14 @@ turn is added. A completed child does not need to remain running to be counted.
 ### Counter interpretation
 
 - Parent usage is the difference of cumulative counters at the two observed
-  boundaries, not an aggregation of individual requests. Missing baselines,
+  boundaries, not an aggregation of individual requests. A fresh original first
+  turn may use its first cumulative counter only when the complete bounded
+  prefix proves the matching start without inherited history or earlier model
+  work, and the ending prefix has no other turn or observed counter reset.
+  Forked, malformed, incomplete or tail-limited evidence cannot establish that
+  exception. Other missing baselines,
   changed/truncated sources, negative deltas and inconsistent subsets stay
-  unknown. A brand-new Task often has no starting counter. Child usage instead
+  unknown. A brand-new Task often has no persisted counter at preview time. Child usage instead
   uses deduplicated request records, not cumulative differences; missing request
   evidence is unknown. The card separates parent, child and known subtotal, and
   labels incomplete coverage rather than treating it as a complete total.

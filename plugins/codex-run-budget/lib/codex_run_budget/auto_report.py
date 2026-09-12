@@ -53,13 +53,11 @@ def _footer(directory: Path, key: str, payload: dict[str, Any], locale="zh-Hant"
     return {"hookSpecificOutput": {
         "hookEventName": "UserPromptSubmit",
         "additionalContext": (
-            "Automatic Codex usage card, this turn only: before your normal final answer, "
-            "run once: " + command + " --output-dir <task-owned writable visualization directory>. "
-            "Use an absolute directory from this task's writable roots. The deterministic tool "
-            "returns a visualize reference; put that reference on its own line at the end of "
-            "your final answer so the card renders inline, not as a Markdown link. Do not read "
-            "the report body, analyze it, invent numbers or start another turn. If skipped/failed, "
-            "omit the card without retrying. Omit on user disable or incompatible exact format."
+            "Before final, run once: " + command
+            + " --output-dir <absolute task-owned writable dir>. "
+            "Append its visualize reference unchanged on a final-answer line. "
+            "Do not read/analyze the card or load skills for it; no retries. "
+            "Skip if disabled or the answer format conflicts."
         ),
     }}
 
@@ -154,6 +152,53 @@ def _model(value: Any) -> str | None:
     )
 
 
+def _first_turn_proof(records, turn: str) -> tuple[bool, bool]:
+    """Prove a full, original first-turn prefix; absence alone is never zero."""
+    if not records or records[0].get("type") != "session_meta":
+        return False, False
+    metadata = records[0]["payload"]
+    if any(value for key, value in metadata.items()
+           if key.startswith("fork") or key == "parent_thread_id"):
+        return False, False
+    began = model_seen = usage_seen = False
+    previous = None
+    for record in records[1:]:
+        kind, payload = record["type"], record["payload"]
+        event = payload.get("type")
+        if kind not in ("event_msg", "response_item", "turn_context", "world_state",
+                        "token_usage_record"):
+            return False, False
+        if kind == "session_meta" or payload.get("turn_id") not in (None, turn):
+            return False, False
+        if payload.get("thread_id") not in (None, metadata.get("id")):
+            return False, False
+        if kind == "event_msg" and event == "task_started":
+            if began or payload.get("turn_id") != turn:
+                return False, False
+            began = True
+        elif not began:
+            # Copied conversation, a prior turn, or an incomplete prefix.
+            return False, False
+        if kind == "response_item":
+            model_seen |= event != "message" or payload.get("role") not in (
+                "user", "developer", "system"
+            )
+        if kind == "event_msg":
+            model_seen |= event in ("agent_message", "agent_reasoning")
+            if event == "token_count":
+                usage_seen = True
+                usage = _usage_from_line(record)
+                if usage is None:
+                    return False, False
+                values = asdict(usage)
+                if previous and any(values[key] < previous[key] for key in values):
+                    return False, False
+                previous = values
+        if kind == "token_usage_record":
+            model_seen = True
+    return began, began and not model_seen and not usage_seen
+
+
 def snapshot(path_value: Any, turn_id: str) -> dict[str, Any]:
     """Only header identity and a bounded tail are read; no text is persisted."""
     result: dict[str, Any] = {"status": "unavailable", "usage": None, "contexts": []}
@@ -202,8 +247,10 @@ def snapshot(path_value: Any, turn_id: str) -> dict[str, Any]:
                 json.loads(lines[-1])
             except (ValueError, RecursionError):
                 lines.pop()
+                result["invalid_records"] = True
         contexts = []
         usage_seen = False
+        records = []
         for line in reversed(lines):
             if not line.strip():
                 continue
@@ -213,10 +260,14 @@ def snapshot(path_value: Any, turn_id: str) -> dict[str, Any]:
                 result["invalid_records"] = True
                 continue
             if not isinstance(record, dict):
+                result["invalid_records"] = True
                 continue
-            payload = record.get("payload") or {}
-            if not isinstance(payload, dict):
+            payload = record.get("payload")
+            if not isinstance(record.get("type"), str) or not isinstance(payload, dict):
+                result["invalid_records"] = True
                 continue
+            if not offset:
+                records.append(record)
             if record.get("type") == "event_msg" and payload.get("type") == "token_count":
                 if not usage_seen:
                     usage_seen = True
@@ -244,6 +295,11 @@ def snapshot(path_value: Any, turn_id: str) -> dict[str, Any]:
                     }
                 )
         result["contexts"] = contexts
+        result["requested_turn_hash"] = stable_hash(turn_id)
+        first, fresh = (False, False)
+        if not offset and not result.get("invalid_records"):
+            first, fresh = _first_turn_proof(list(reversed(records)), turn_id)
+        result.update(first_turn_only=first, fresh_turn_start=fresh)
         return result
     except (OSError, ValueError, TypeError, AttributeError, RecursionError):
         return {"status": "unavailable", "usage": None, "contexts": []}
@@ -257,6 +313,13 @@ def _delta(before: dict[str, Any], after: dict[str, Any]) -> tuple[dict[str, int
     if after["size"] < before["size"]:
         return None, "source_truncated"
     first, last = before.get("usage"), after.get("usage")
+    verified_first = (
+        first is None and before.get("fresh_turn_start") is True
+        and after.get("first_turn_only") is True
+        and before.get("requested_turn_hash") == after.get("requested_turn_hash")
+    )
+    if verified_first and last is not None:
+        first = {key: 0 for key in last}
     if not first or not last:
         return None, "counter_unavailable"
     delta = {k: last[k] - first[k] for k in first}
@@ -267,7 +330,7 @@ def _delta(before: dict[str, Any], after: dict[str, Any]) -> tuple[dict[str, int
         or delta["reasoning_output"] > delta["output"]
     ):
         return None, "counter_reset_or_inconsistent"
-    return delta, "boundary_counter_difference"
+    return delta, "verified_first_turn_counter" if verified_first else "boundary_counter_difference"
 
 
 def observed_total(parent: dict | None, children: dict) -> tuple[dict | None, bool]:
@@ -478,6 +541,8 @@ def handle(
             observed = snapshot(payload.get("transcript_path"), turn)
             if observed["status"] == "subagent":
                 return None
+            if observed.get("task_hash") != stable_hash(session):
+                observed["fresh_turn_start"] = False
             observed["hook_model"] = _model(payload.get("model"))
             observed["report_locale"] = resolve_locale(home=home)["locale"]
         connection = _connect(root)

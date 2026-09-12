@@ -1,5 +1,46 @@
 # Validation evidence
 
+## First-turn settlement and bounded inline flow — 2026-09-13 Asia/Taipei
+
+272 tests passed, plus Ruff, repository/plugin validators and the sensitive-data
+worktree gate. Regression cases cover proof-backed original first turns, inherited
+history, forks, malformed/incomplete records, later turns and counter resets.
+The nine automatic-card catalogs now each have 68 matching keys, including the
+explicit first-usage-write pending state. Existing border and switch behavior
+remain unchanged; unknown counters are not converted to zero.
+
+A scoped read-only replay of the original fresh-turn incident recovered 65,121
+observed tokens from the valid first-turn ending counter. For the separate
+historical child-scope incident, 28 children with terminal evidence before the
+window were excluded; one child remained partial/unknown because its bounded
+large-source scan lacked lifecycle evidence. A child created after that window
+was skipped. This does not assert that the unknown child was still running or
+that native stopping failed. Synthetic tests preserve active/reused children,
+unknown metadata and strict request-window deduplication.
+
+Installed `0.13.0+codex.20260912231053`, reviewed the changed hashes, and read back
+all 11 plugin hooks as enabled/trusted without hook errors. A real fresh Codex
+CLI turn completed in 18.213 seconds with exactly one command (the pre-final
+preview), one inline reference in the normal answer, and one Stop receipt.
+The native injected instruction was 620 bytes and contained no HTML body. There
+was no report continuation or retry. The preview truthfully awaited its first
+usage write; the independent Stop receipt reported `verified_first_turn_counter`
+with 46,582 total tokens: 46,050 input (29,056 cached) and 532 output (144 reasoning).
+These totals matched that native test turn, include startup context, and are not
+incremental report cost. Child scope was `none`, not an unknown zero. The saved
+card retained its border, Traditional Chinese locale and immutable snapshot.
+CLI reference emission is verified; this is not a new desktop paint test.
+
+An initial install found a previously cached intermediate copy at the same
+cachebuster and correctly rejected the changed identity, quarantining it and
+preserving the old copy. A fresh official cachebuster followed by immediate
+build/install succeeded. All 22 versions backed up before edits were restored
+after cache pruning and matched their captured hashes; final source/cache trees
+also matched. Configuration outside the reviewed trust hashes and optional test
+workspace trust, plus the report switch, was unchanged. Runtime SHA-256:
+`eefc167f81631e7b2c0bb2aed6bff80e8482c2b1f4062f816fe5c48a4d999996`.
+Existing Tasks keep their pinned hooks; new Tasks load this fixed runtime.
+
 ## Human-output localization and repository data guard — 2026-09-13 Asia/Taipei
 
 265 tests passed, plus Ruff and repository/plugin validators. The four bundled

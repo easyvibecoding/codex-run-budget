@@ -30,6 +30,7 @@ def render_card(receipt: dict) -> str:
     parent = receipt["usage"]
     children = receipt.get("subagents") or {"status": "unavailable"}
     usage, complete = observed_total(parent, children)
+    pending = receipt.get("usage_status") == "first_turn_usage_pending"
 
     def number(key):
         return text.number(usage[key] if usage is not None else None)
@@ -52,11 +53,15 @@ def render_card(receipt: dict) -> str:
         raise ValueError("card template unavailable")
     values = {
         "key": receipt["key"], "task": receipt["task_name"],
-        "captured": receipt["captured_at"], "total": number("total"), "elapsed": elapsed,
+        "captured": receipt["captured_at"],
+        "total": text("pending_usage") if pending and usage is None else number("total"),
+        "elapsed": elapsed,
         "locale": text.locale,
         "total_label": text("total" if complete else "subtotal"),
-        "usage_label": text("combined" if complete else "incomplete"),
-        "parent_total": text.number(parent['total'] if parent is not None else None),
+        "usage_label": text("pending_usage_note" if pending else
+                            "combined" if complete else "incomplete"),
+        "parent_total": text("pending_usage") if pending else
+        text.number(parent['total'] if parent is not None else None),
         "child_total": (
             text("na") if children.get("status") == "none" else
             text.number(children['usage']['total'] if children.get("usage") is not None else None)
@@ -131,7 +136,11 @@ def preview(root: Path, session: str, turn: str, *, output_dir: Path, home=None)
         current = snapshot(native[0] if native else None, turn)
     if current.get("task_hash") != stable_hash(session):
         return {"status": "source_unavailable"}
-    usage, status = _delta(json.loads(row["baseline"]), current)
+    baseline = json.loads(row["baseline"])
+    usage, status = _delta(baseline, current)
+    if (status == "counter_unavailable" and baseline.get("fresh_turn_start")
+            and current.get("first_turn_only") and current.get("usage") is None):
+        status = "first_turn_usage_pending"
     children = collect(root, session, row["started"], captured, home=home,
                        unnamed_label=text("unnamed"))
     receipt = {

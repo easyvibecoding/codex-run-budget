@@ -113,6 +113,30 @@ class AutoPreviewTest(unittest.TestCase):
             self.assertFalse(observed_total(zero, {"status": "observed", "usage": zero,
                                                   issue: 1})[1])
 
+    def test_first_turn_pending_preview_and_separate_stop_settlement(self):
+        turn = "fresh-turn"
+        self.transcript.write_text("".join(json.dumps(row) + "\n" for row in (
+            self.meta,
+            {"type": "event_msg", "payload": {"type": "task_started", "turn_id": turn}},
+            {"type": "turn_context", "payload": {"turn_id": turn}},
+        )))
+        payload = {**self.payload, "turn_id": turn}
+        handle(payload, self.data)
+        result = preview(self.data, TASK, turn, output_dir=self.output, home=self.root)
+        self.assertEqual(result["status"], "preview")
+        card_path = next(self.output.glob("*.html"))
+        card = card_path.read_text()
+        self.assertIn('class="viz-stat-value tabular-nums">等待用量寫入</div>', card)
+        self.assertIn("首筆請求用量尚未寫入", card)
+        self.assertNotIn('class="viz-stat-value tabular-nums">0</div>', card)
+        with self.transcript.open("a") as output:
+            output.write(json.dumps(counter(1200)) + "\n")
+        handle({**payload, "hook_event_name": "Stop"}, self.data, home=self.root)
+        receipt = json.loads(next((self.data / "auto-reports").glob("*.json")).read_text())
+        self.assertEqual(receipt["usage"]["total"], 1200)
+        self.assertEqual(receipt["usage_status"], "verified_first_turn_counter")
+        self.assertEqual(card_path.read_text(), card)
+
     def test_child_stop_and_final_card_merge_without_model_self_report(self):
         child = "aaaaaaaa-1234-1234-1234-123456789abc"
         source = {"subagent": {"thread_spawn": {"parent_thread_id": TASK}}}

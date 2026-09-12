@@ -1,4 +1,6 @@
 {
+  "pending_usage": "Aguardando dados de uso",
+  "pending_usage_note": "O uso da primeira solicitação ainda não foi salvo; Stop contabilizará os dados disponíveis.",
   "title": "Relatório de uso do turno do Codex",
   "card_title": "Uso deste turno",
   "pre_final": "Instantâneo antes da resposta final",

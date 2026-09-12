@@ -1,4 +1,6 @@
 {
+  "pending_usage": "Awaiting usage write",
+  "pending_usage_note": "The first request has not been persisted yet; Stop will settle available usage.",
   "title": "Codex turn usage report",
   "card_title": "This turn's usage",
   "pre_final": "Pre-final snapshot",

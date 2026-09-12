@@ -1,4 +1,6 @@
 {
+  "pending_usage": "사용량 기록 대기",
+  "pending_usage_note": "첫 요청의 사용량이 아직 저장되지 않았습니다. Stop 시 확인 가능한 사용량을 집계합니다.",
   "title": "Codex 턴 사용량 보고서",
   "card_title": "이 턴의 사용량",
   "pre_final": "최종 답변 전 스냅샷",
