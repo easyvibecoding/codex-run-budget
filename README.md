@@ -227,12 +227,19 @@ python3 plugins/codex-run-budget/scripts/run_budget.py meter --no-save
 python3 plugins/codex-run-budget/scripts/run_budget.py meter snapshot
 # After ordinary work, record another snapshot, then:
 python3 plugins/codex-run-budget/scripts/run_budget.py meter report
+# Cross-task model / reasoning / Fast observations, no baseline needed:
+python3 plugins/codex-run-budget/scripts/run_budget.py meter tasks --days 1
 ```
 
 The meter preserves each native bucket's actual duration, used/remaining
 percentage and reset time. Saved snapshots live in a separate local database;
 no budget or hook setting is changed. `--thread <UUID>` requests optional
 backend-estimated model credits and tokens; `--json` retains all bounded detail.
+Snapshots also detect the native subscription plan and billing route. `tasks`
+and `report` accept `--thread` as an exact local Task filter; account percentages
+remain account-wide. Historical Fast/effort/plan come only from contemporaneous
+metadata, and omitted values remain unknown. `meter rates` shows a dated official
+Fast/plan reference, not measured charges or a detected Pro allowance multiplier.
 
 Account percentage-point changes and local model-token observations are shown
 side by side, **not allocated proportionally**. Missing official thread usage

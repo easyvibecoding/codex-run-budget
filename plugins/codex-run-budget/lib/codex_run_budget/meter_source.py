@@ -392,7 +392,7 @@ def _safe_account_response(result: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(account_kind, str) or account_kind not in _ACCOUNT_TYPES:
         return {"account": None}
     account: dict[str, Any] = {"type": account_kind}
-    if "planType" in raw_account:
+    if account_kind == "chatgpt" and "planType" in raw_account:
         account["planType"] = plan_type(raw_account.get("planType"))
     return {"account": account}
 

@@ -1,5 +1,32 @@
 # Validation evidence
 
+## Cross-task subscription and configuration meter — 2026-09-12, v0.7.0
+
+138 tests passed, including cross-task filtering, within-turn settings changes,
+duplicate metadata conflicts, preceding-only context, missing quota-plan clearing,
+schema-1 snapshot readback, subscription/billing-route conflicts, Fast/default/
+priority separation, privacy and bounded native reads. Ruff and repository,
+plugin and skill validators passed. A separate review found unrecognized quota
+IDs/display labels could pass through unchanged; both now hash before storage.
+
+A real bounded one-day cohort returned 89 identifiable Tasks with model/effort
+and token observations. An exact single-Task filter returned only that Task's
+requests. Across the older saved quota interval, it reported Astra/low and
+1,760,856 local tokens while preserving the same account-wide +1 percentage
+point; it did not assign that increase to the selected Task. Historical plan
+observations were Pro; service tier was absent or default in the inspected
+rows, so Fast remained unknown instead of being labelled off.
+
+The isolated installed cachebuster read the actual signed-in Codex account at
+13:05:40 UTC: ChatGPT/Pro, main weekly quota 12% used and 88% remaining. Native
+thread usage was unavailable. The account read used `refreshToken:false`, and
+only allowlisted type/plan crossed the account source seam. Existing schema-1
+snapshots remained readable without backfilling current subscription metadata.
+
+The hook archive differs from v0.6.0 only in the package version member; no
+governance, transcript enforcement reader, ledger or hook policy changed.
+SHA-256: `12b1399dcda56d4e2ccc0a4e273d9678a4b8b0b56bde61e838400c84247516ee`.
+
 ## Native account quota meter — 2026-09-12, v0.6.0
 
 The suite passed 114 tests, plus Ruff and repository/plugin/skill validators.

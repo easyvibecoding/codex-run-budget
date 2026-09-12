@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from .lifecycle import aggregate_lifecycle
+from .meter_plan import plan_type
 from .transcript import MAX_TRANSCRIPT_BYTES, _usage_from_line
 from .util import stable_hash
 
@@ -42,6 +43,32 @@ KNOWN_MODELS = frozenset(
         "gpt-5.3-codex-spark",
     }
 )
+
+# These values are deliberately narrower than the free-form fields accepted by
+# the app-server.  A historical transcript is evidence, not a place to echo
+# arbitrary values (which could contain prompts, account data, or other
+# private strings).  ``fast_mode`` is derived only from the three speed values
+# below; ``priority`` is a service tier, not ChatGPT Fast.
+KNOWN_REASONING_EFFORTS = frozenset(
+    {"none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"}
+)
+KNOWN_SERVICE_TIERS = frozenset({"fast", "normal", "standard", "default", "priority"})
+_CONTEXT_DIMENSIONS = (
+    "model",
+    "reasoning_effort",
+    "service_tier",
+    "fast_mode",
+    "plan_type",
+)
+_CONTEXT_STATUS_RANK = {
+    "conflict": 0,
+    "unknown": 1,
+    "default_unresolved": 2,
+    "priority_unresolved": 2,
+    "observed": 3,
+    "nearby_observation": 3,
+    "missing": 4,
+}
 
 _DIAGNOSTIC_KEYS = (
     "records",
@@ -248,6 +275,297 @@ def _model_label(value: Any) -> str:
     return f"hash:{stable_hash(value)}"
 
 
+def _context_value(value: Any, allowlist: frozenset[str]) -> str | None:
+    """Normalize one bounded string-valued context dimension."""
+
+    if not isinstance(value, str):
+        return None
+    value = value.strip().lower()
+    return value if value in allowlist else None
+
+
+def _blank_context() -> dict[str, Any]:
+    """Return a fresh context state with no inherited evidence."""
+
+    return {
+        "model": "unknown",
+        "reasoning_effort": None,
+        "service_tier": None,
+        "fast_mode": None,
+        "plan_type": None,
+        "status": {dimension: "missing" for dimension in _CONTEXT_DIMENSIONS},
+        "sources": {dimension: [] for dimension in _CONTEXT_DIMENSIONS},
+    }
+
+
+def _copy_context(context: dict[str, Any]) -> dict[str, Any]:
+    """Copy only the bounded context fields retained in an event snapshot."""
+
+    return {
+        "model": context.get("model", "unknown"),
+        "reasoning_effort": context.get("reasoning_effort"),
+        "service_tier": context.get("service_tier"),
+        "fast_mode": context.get("fast_mode"),
+        "plan_type": context.get("plan_type"),
+        "status": {
+            dimension: context.get("status", {}).get(dimension, "missing")
+            for dimension in _CONTEXT_DIMENSIONS
+        },
+        "sources": {
+            dimension: list(context.get("sources", {}).get(dimension, []))
+            for dimension in _CONTEXT_DIMENSIONS
+        },
+    }
+
+
+def _source_list(*values: str | None) -> list[str]:
+    return sorted({value for value in values if value})
+
+
+def _context_thread_matches(
+    page: dict[str, Any],
+    thread_hash: str | None,
+    turn_hash: str | None,
+    *,
+    event_stamp: float | None = None,
+    event_sequence: int | None = None,
+) -> bool:
+    """Whether active context can safely be used for this request.
+
+    Context is page-local and preceding-only.  An explicit event ID for a
+    different thread/turn must not inherit the active context, even when the
+    page later contains a matching context record.
+    """
+
+    if not (
+        thread_hash is not None
+        and turn_hash is not None
+        and thread_hash == page.get("active_thread_hash")
+        and turn_hash == page.get("active_turn_hash")
+    ):
+        return False
+    context_stamp = page.get("active_context_stamp")
+    if event_stamp is not None and context_stamp is not None and context_stamp > event_stamp:
+        return False
+    context_sequence = page.get("active_context_sequence")
+    if (
+        event_sequence is not None
+        and context_sequence is not None
+        and context_sequence > event_sequence
+    ):
+        return False
+    return True
+
+
+def _service_tier_value(value: Any) -> str | None:
+    return _context_value(value, KNOWN_SERVICE_TIERS)
+
+
+def _fast_mode_for_tier(value: str | None) -> tuple[bool | None, str]:
+    """Map only explicit Fast/normal/standard values to a Fast boolean."""
+
+    if value == "fast":
+        return True, "observed"
+    if value in {"normal", "standard"}:
+        return False, "observed"
+    if value == "default":
+        return None, "default_unresolved"
+    if value == "priority":
+        # Priority and ChatGPT Fast are separate controls.  Do not infer one
+        # from the other even if both affect account allowance in practice.
+        return None, "priority_unresolved"
+    return None, "missing"
+
+
+def _context_field_observation(
+    payload: dict[str, Any], *, source_prefix: str
+) -> dict[str, Any]:
+    """Read explicit context dimensions from one allowlisted payload.
+
+    The result keeps explicitness and source labels so duplicate response IDs
+    can distinguish an explicit conflict from a missing/inherited field.
+    """
+
+    result = {
+        "values": {},
+        "status": {},
+        "sources": {},
+        "explicit": set(),
+    }
+
+    def observe(
+        dimension: str,
+        raw: Any,
+        source: str,
+        normalized: Any,
+        *,
+        present: bool = True,
+    ) -> None:
+        if not present:
+            return
+        result["explicit"].add(dimension)
+        result["sources"].setdefault(dimension, []).append(source)
+        result["values"].setdefault(dimension, []).append(normalized)
+        result["status"].setdefault(dimension, []).append(
+            "observed" if normalized is not None else "unknown"
+        )
+
+    if "model" in payload:
+        raw_model = payload.get("model")
+        normalized_model = _model_label(raw_model)
+        observe(
+            "model",
+            raw_model,
+            f"{source_prefix}.model",
+            normalized_model if normalized_model != "unknown" else None,
+        )
+
+    effort_values: list[tuple[str, Any]] = []
+    if "effort" in payload:
+        effort_values.append((f"{source_prefix}.effort", payload.get("effort")))
+    if "reasoning_effort" in payload:
+        effort_values.append(
+            (f"{source_prefix}.reasoning_effort", payload.get("reasoning_effort"))
+        )
+    collaboration = payload.get("collaboration_mode")
+    if isinstance(collaboration, dict):
+        settings = collaboration.get("settings")
+        if isinstance(settings, dict) and "reasoning_effort" in settings:
+            effort_values.append(
+                (
+                    f"{source_prefix}.collaboration_mode.settings.reasoning_effort",
+                    settings.get("reasoning_effort"),
+                )
+            )
+    for source, raw_effort in effort_values:
+        observe(
+            "reasoning_effort",
+            raw_effort,
+            source,
+            _context_value(raw_effort, KNOWN_REASONING_EFFORTS),
+        )
+
+    tier_values: list[tuple[str, Any]] = []
+    for key in ("service_tier", "serviceTier", "speed"):
+        if key in payload:
+            tier_values.append((f"{source_prefix}.{key}", payload.get(key)))
+    for source, raw_tier in tier_values:
+        observe(
+            "service_tier", raw_tier, source, _service_tier_value(raw_tier)
+        )
+
+    if "plan_type" in payload or "planType" in payload:
+        key = "plan_type" if "plan_type" in payload else "planType"
+        observe(
+            "plan_type",
+            payload.get(key),
+            f"{source_prefix}.{key}",
+            plan_type(payload.get(key)),
+        )
+
+    return result
+
+
+def _merge_explicit_observations(
+    context: dict[str, Any], observation: dict[str, Any]
+) -> None:
+    """Merge explicit values into active context, marking same-record clashes."""
+
+    for dimension, values in observation["values"].items():
+        sources = observation["sources"].get(dimension, [])
+        distinct = {value for value in values if value is not None}
+        statuses = observation["status"].get(dimension, [])
+        if len(distinct) > 1:
+            context[dimension] = None if dimension != "model" else "unknown"
+            context["status"][dimension] = "conflict"
+            context["sources"][dimension] = _source_list(*sources)
+            continue
+        if len(distinct) == 1 and all(status == "observed" for status in statuses):
+            value = next(iter(distinct))
+            context[dimension] = value
+            context["status"][dimension] = "observed"
+        else:
+            # An explicitly present but invalid value is evidence of an
+            # unknown field, not permission to retain a stale prior value.
+            context[dimension] = None if dimension != "model" else "unknown"
+            context["status"][dimension] = "unknown"
+        context["sources"][dimension] = _source_list(*sources)
+
+    tier = context.get("service_tier")
+    if "service_tier" in observation["values"]:
+        fast_mode, fast_status = _fast_mode_for_tier(tier)
+        context["fast_mode"] = fast_mode
+        context["status"]["fast_mode"] = (
+            "conflict"
+            if context["status"].get("service_tier") == "conflict"
+            else fast_status
+        )
+        context["sources"]["fast_mode"] = list(context["sources"].get("service_tier", []))
+
+
+def _context_snapshot_for_request(
+    page: dict[str, Any],
+    payload: dict[str, Any],
+    thread_hash: str | None,
+    turn_hash: str | None,
+    *,
+    event_stamp: float | None = None,
+    event_sequence: int | None = None,
+) -> tuple[dict[str, Any], set[str]]:
+    """Capture request context at its source position, never retroactively."""
+
+    if _context_thread_matches(
+        page,
+        thread_hash,
+        turn_hash,
+        event_stamp=event_stamp,
+        event_sequence=event_sequence,
+    ):
+        context = _copy_context(page["active_context"])
+    else:
+        context = _blank_context()
+    explicit = _context_field_observation(payload, source_prefix="request")
+    _merge_explicit_observations(context, explicit)
+    return context, set(explicit["explicit"])
+
+
+def _update_context_from_payload(
+    page: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    source_prefix: str,
+    stamp: float | None = None,
+    sequence: int | None = None,
+) -> None:
+    observation = _context_field_observation(payload, source_prefix=source_prefix)
+    _merge_explicit_observations(page["active_context"], observation)
+    page["active_context_stamp"] = stamp
+    page["active_context_sequence"] = sequence
+
+
+def _token_count_plan_observation(payload: dict[str, Any]) -> tuple[bool, str | None, str | None]:
+    """Read a plan only from a token_count rate-limit observation."""
+
+    if "rate_limits" not in payload:
+        return False, None, None
+    rate_limits = payload.get("rate_limits")
+    if not isinstance(rate_limits, dict):
+        return True, None, "token_count.rate_limits"
+    key = (
+        "plan_type"
+        if "plan_type" in rate_limits
+        else "planType"
+        if "planType" in rate_limits
+        else None
+    )
+    if key is None:
+        return True, None, "token_count.rate_limits"
+    value = plan_type(rate_limits.get(key))
+    # A plan observed in a preceding token_count is useful nearby evidence,
+    # not a billing assertion about the specific request that follows.
+    return True, value, f"token_count.rate_limits.{key}"
+
+
 def _usage(value: Any) -> dict[str, int] | None:
     """Validate one request-level usage object.
 
@@ -420,6 +738,9 @@ def _new_page(source_hash: str, snapshot_bytes: int | None) -> dict[str, Any]:
         "generation": 0,
         "active_thread_hash": None,
         "active_turn_hash": None,
+        "active_context": _blank_context(),
+        "active_context_stamp": None,
+        "active_context_sequence": None,
     }
 
 
@@ -470,6 +791,9 @@ def _parse_line(state: dict[str, Any], page: dict[str, Any], record: Any, sequen
         # could not identify.
         page["active_thread_hash"] = None
         page["active_turn_hash"] = None
+        page["active_context"] = _blank_context()
+        page["active_context_stamp"] = None
+        page["active_context_sequence"] = None
         thread_hash = _identifier_hash(payload.get("id"))
         if thread_hash is None:
             _diag(state, page, "missing_thread_metadata")
@@ -488,6 +812,9 @@ def _parse_line(state: dict[str, Any], page: dict[str, Any], record: Any, sequen
             # inherit this active session until the next metadata boundary.
             page["active_thread_hash"] = thread_hash
             page["active_turn_hash"] = None
+            page["active_context"] = _blank_context()
+            page["active_context_stamp"] = stamp
+            page["active_context_sequence"] = sequence
             started_at = _timestamp_value(payload.get("timestamp"))
             page["metadata"].append(
                 {
@@ -508,10 +835,25 @@ def _parse_line(state: dict[str, Any], page: dict[str, Any], record: Any, sequen
         model = _model_label(payload.get("model"))
         if model == "unknown":
             _diag(state, page, "missing_model_context")
-        # Every turn_context starts a new active turn, including malformed
-        # contexts.  Otherwise a missing turn_id could inherit an old model.
+        # A new turn starts with no inherited dimensions; repeated context for
+        # the same turn is a point-in-time update (for example a speed change).
+        # Otherwise a missing turn_id could inherit an old model.
+        same_turn = (
+            turn_hash is not None
+            and turn_hash == page.get("active_turn_hash")
+            and thread_hash == page.get("active_thread_hash")
+        )
         page["active_turn_hash"] = turn_hash
         page["active_thread_hash"] = thread_hash
+        if not same_turn:
+            page["active_context"] = _blank_context()
+        _update_context_from_payload(
+            page,
+            payload,
+            source_prefix="turn_context",
+            stamp=stamp,
+            sequence=sequence,
+        )
         page["contexts"].append(
             {
                 "thread_hash": thread_hash,
@@ -521,6 +863,41 @@ def _parse_line(state: dict[str, Any], page: dict[str, Any], record: Any, sequen
                 "stamp": stamp,
             }
         )
+        return
+
+    if record_type == "thread_settings_applied" or (
+        record_type == "event_msg" and payload_type == "thread_settings_applied"
+    ):
+        # Settings notifications are optional.  They can refine the current
+        # turn, but never establish a turn/thread on their own.
+        explicit_thread, has_thread = _payload_identifier(payload, "thread_id")
+        thread_hash = explicit_thread if has_thread else page.get("active_thread_hash")
+        turn_hash, has_turn = _payload_identifier(payload, "turn_id")
+        if not has_turn:
+            turn_hash = page.get("active_turn_hash")
+        if _context_thread_matches(
+            page,
+            thread_hash,
+            turn_hash,
+            event_stamp=stamp,
+            event_sequence=sequence,
+        ):
+            settings = payload.get("thread_settings")
+            if isinstance(settings, dict):
+                _update_context_from_payload(
+                    page,
+                    settings,
+                    source_prefix="thread_settings_applied.thread_settings",
+                    stamp=stamp,
+                    sequence=sequence,
+                )
+            _update_context_from_payload(
+                page,
+                payload,
+                source_prefix="thread_settings_applied",
+                stamp=stamp,
+                sequence=sequence,
+            )
         return
 
     if record_type == "compacted":
@@ -540,6 +917,14 @@ def _parse_line(state: dict[str, Any], page: dict[str, Any], record: Any, sequen
                 _diag(state, page, "invalid_usage_records")
             return
         thread_hash, turn_hash = _event_context(payload, page)
+        request_context, explicit_context = _context_snapshot_for_request(
+            page,
+            payload,
+            thread_hash,
+            turn_hash,
+            event_stamp=stamp,
+            event_sequence=sequence,
+        )
         page["events"].append(
             {
                 "kind": "request",
@@ -551,11 +936,31 @@ def _parse_line(state: dict[str, Any], page: dict[str, Any], record: Any, sequen
                 "thread_hash": thread_hash,
                 "turn_hash": turn_hash,
                 "context_bound": thread_hash is not None,
+                "request_context": request_context,
+                "explicit_context": explicit_context,
             }
         )
         return
 
     if record_type == "event_msg" and payload_type == "token_count":
+        plan_present, observed_plan, plan_source = _token_count_plan_observation(payload)
+        token_thread_hash, token_turn_hash = _event_context(payload, page)
+        if plan_present and _context_thread_matches(
+            page,
+            token_thread_hash,
+            token_turn_hash,
+            event_stamp=stamp,
+            event_sequence=sequence,
+        ):
+            page["active_context"]["plan_type"] = observed_plan
+            page["active_context"]["status"]["plan_type"] = (
+                "nearby_observation" if observed_plan is not None else "unknown"
+            )
+            page["active_context"]["sources"]["plan_type"] = (
+                [plan_source] if plan_source else []
+            )
+            page["active_context_stamp"] = stamp
+            page["active_context_sequence"] = sequence
         observed = _usage_from_line(record)
         if observed is None:
             if in_scope:
@@ -930,6 +1335,21 @@ def _aggregate_requests(
                 canonical_event.get("context_bound"),
             ),
         }
+        # Retain only bounded context snapshots for the independent context
+        # aggregate.  They are removed from the public request row below;
+        # keeping them here lets duplicate response IDs merge explicit
+        # evidence deterministically without changing the legacy request API.
+        item["_context_observations"] = [
+            {
+                "context": event.get("request_context", _blank_context()),
+                "explicit": set(event.get("explicit_context", set())),
+                "ref": _event_ref(page, event.get("thread_hash"), event.get("context_bound")),
+                "turn_hash": event.get("turn_hash"),
+                "stamp": event.get("stamp"),
+                "in_scope": event.get("in_scope", False),
+            }
+            for page, event in group
+        ]
         if scoped and len(group) > 1:
             state["counters"]["duplicate_usage_records"] += len(group) - 1
             if any(event["usage"] != canonical_event["usage"] for _page, event in group[1:]):
@@ -945,6 +1365,18 @@ def _aggregate_requests(
                 state["counters"]["conflicting_response_attribution"] += 1
                 item["ref"] = "conflict:response"
                 item["turn_hash"] = None
+                item["request_context"] = _blank_context()
+                item["_context_observations"] = [
+                    {
+                        "context": _blank_context(),
+                        "explicit": set(),
+                        "ref": "conflict:response",
+                        "turn_hash": None,
+                        "stamp": canonical_event.get("stamp"),
+                        "in_scope": True,
+                    }
+                ]
+        item["request_context"] = item.get("request_context", _blank_context())
         item["in_scope"] = scoped
         requests[response_hash] = item
 
@@ -963,6 +1395,211 @@ def _aggregate_requests(
     totals["uncached_input_tokens"] = totals["input_tokens"] - totals["cached_input_tokens"]
     largest = max(item["usage"]["total_tokens"] for item in scoped_requests)
     return {"unique_responses": len(scoped_requests), **totals}, largest, requests
+
+
+def _merge_request_context(item: dict[str, Any]) -> dict[str, Any]:
+    """Merge duplicate-response context observations without guessing values."""
+
+    observations = [
+        observation
+        for observation in (item.get("_context_observations") or [])
+        if observation.get("in_scope", False)
+    ]
+    if not observations:
+        return _blank_context()
+    merged = _blank_context()
+    for dimension in _CONTEXT_DIMENSIONS:
+        values: list[Any] = []
+        explicit_values: list[Any] = []
+        statuses: list[str] = []
+        sources: list[str] = []
+        explicit_count = 0
+        for observation in observations:
+            context = observation.get("context") or _blank_context()
+            value = context.get(dimension)
+            if value is not None and not (dimension == "model" and value == "unknown"):
+                values.append(value)
+            status = context.get("status", {}).get(dimension, "missing")
+            statuses.append(status)
+            sources.extend(context.get("sources", {}).get(dimension, []))
+            if dimension in observation.get("explicit", set()):
+                explicit_count += 1
+                if value is not None and not (dimension == "model" and value == "unknown"):
+                    explicit_values.append(value)
+
+        distinct_values = set(values)
+        distinct_explicit = set(explicit_values)
+        conflict = "conflict" in statuses or len(distinct_explicit) > 1
+        # Two independently observed values for a response ID are also not
+        # safely attributable, even when one came from inferred page context.
+        # Missing/unknown observations alone do not erase one valid value.
+        if not conflict and len(distinct_values) > 1:
+            conflict = True
+        if conflict:
+            merged[dimension] = "unknown" if dimension == "model" else None
+            merged["status"][dimension] = "conflict"
+        elif distinct_explicit:
+            if explicit_count > len(explicit_values):
+                merged[dimension] = "unknown" if dimension == "model" else None
+                merged["status"][dimension] = "conflict"
+            else:
+                merged[dimension] = sorted(distinct_explicit, key=str)[0]
+                merged["status"][dimension] = "observed"
+        elif distinct_values:
+            merged[dimension] = sorted(distinct_values, key=str)[0]
+            # Keep an explicit unresolved status such as default_unresolved
+            # when the value itself is intentionally null.
+            merged["status"][dimension] = (
+                "observed"
+                if any(status == "observed" for status in statuses)
+                else min(
+                    (status for status in statuses if status != "missing"),
+                    key=lambda status: (_CONTEXT_STATUS_RANK.get(status, 1), status),
+                    default="unknown",
+                )
+            )
+        else:
+            merged[dimension] = "unknown" if dimension == "model" else None
+            merged["status"][dimension] = (
+                min(
+                    (status for status in statuses if status != "missing"),
+                    key=lambda status: (_CONTEXT_STATUS_RANK.get(status, 1), status),
+                    default="missing",
+                )
+            )
+        merged["sources"][dimension] = _source_list(*sources)
+
+    # ``fast_mode`` follows the merged service tier and is never inferred from
+    # priority/default as an affirmative or negative boolean.
+    if merged["status"]["service_tier"] == "conflict":
+        merged["fast_mode"] = None
+        merged["status"]["fast_mode"] = "conflict"
+    else:
+        fast_value, fast_status = _fast_mode_for_tier(merged.get("service_tier"))
+        merged["fast_mode"] = fast_value
+        # Preserve a directly observed fast-mode conflict if a future schema
+        # starts recording it, while currently deriving only from tier values.
+        if merged["status"].get("fast_mode") != "conflict":
+            merged["status"]["fast_mode"] = fast_status
+    merged["sources"]["fast_mode"] = list(merged["sources"].get("service_tier", []))
+    return merged
+
+
+def _aggregate_request_context(
+    state: dict[str, Any], requests: dict[str, dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Aggregate deduplicated request tokens by contemporaneous context.
+
+    This list is intentionally separate from ``model_usage``.  The latter is
+    a legacy turn/model view whose context resolver may combine page metadata;
+    this aggregate uses the request snapshot captured at parse time, so a
+    later turn or page can never fill an earlier request.
+    """
+
+    thread_meta = _thread_metadata(state)
+
+    def role_for(ref: str) -> str:
+        row = thread_meta.get(ref)
+        if row is None or not row.get("known"):
+            return "unknown"
+        parents = row.get("parents", set())
+        if len(parents) > 1:
+            return "unknown"
+        return _role_for(next(iter(parents)) if parents else None)
+
+    grouped: defaultdict[tuple[Any, ...], dict[str, Any]] = defaultdict(
+        lambda: {
+            "items": [],
+            "context": None,
+            "ref": None,
+            "turn_hash": None,
+            "role": "unknown",
+        }
+    )
+    for item in requests.values():
+        if not item.get("in_scope"):
+            continue
+        context = _merge_request_context(item)
+        ref = item.get("ref") or "page:unknown"
+        turn_hash = item.get("turn_hash")
+        role = role_for(ref)
+        # Include status values in the key so unresolved/default/conflict rows
+        # are not silently collapsed into observed rows with the same null.
+        key = (
+            ref,
+            turn_hash or "",
+            context.get("model"),
+            context.get("reasoning_effort"),
+            context.get("service_tier"),
+            context.get("fast_mode"),
+            context.get("plan_type"),
+            tuple(
+                (dimension, context["status"].get(dimension))
+                for dimension in _CONTEXT_DIMENSIONS
+            ),
+        )
+        grouped[key]["items"].append(item)
+        grouped[key]["context"] = context
+        grouped[key]["ref"] = ref
+        grouped[key]["turn_hash"] = turn_hash
+        grouped[key]["role"] = role
+
+    token_fields = (
+        "input_tokens",
+        "cached_input_tokens",
+        "cache_write_input_tokens",
+        "output_tokens",
+        "reasoning_output_tokens",
+        "total_tokens",
+    )
+    rows: list[dict[str, Any]] = []
+    for group in grouped.values():
+        context = group["context"] or _blank_context()
+        items = group["items"]
+        stamps = [item.get("stamp") for item in items if item.get("stamp") is not None]
+        row = {
+            "thread_hash": _public_thread_hash(group["ref"]),
+            "turn_hash": group["turn_hash"],
+            "model": context.get("model", "unknown"),
+            "role": group["role"],
+            "reasoning_effort": context.get("reasoning_effort"),
+            "service_tier": context.get("service_tier"),
+            "fast_mode": context.get("fast_mode"),
+            "plan_type": context.get("plan_type"),
+            "context_status": {
+                dimension: context["status"].get(dimension, "missing")
+                for dimension in _CONTEXT_DIMENSIONS
+            },
+            "context_sources": {
+                dimension: list(context["sources"].get(dimension, []))
+                for dimension in _CONTEXT_DIMENSIONS
+            },
+            "first_observed_at": min(stamps) if stamps else None,
+            "last_observed_at": max(stamps) if stamps else None,
+            "unique_responses": len(items),
+        }
+        for field in token_fields:
+            row[field] = sum(item["usage"][field] for item in items)
+        row["uncached_input_tokens"] = (
+            row["input_tokens"] - row["cached_input_tokens"]
+        )
+        rows.append(row)
+
+    rows.sort(
+        key=lambda row: (
+            row["thread_hash"],
+            row["turn_hash"] or "",
+            row["model"],
+            row["role"],
+            row["reasoning_effort"] or "",
+            row["service_tier"] or "",
+            str(row["fast_mode"]),
+            row["plan_type"] or "",
+            row["first_observed_at"] is None,
+            row["first_observed_at"] or 0,
+        )
+    )
+    return rows
 
 
 def _aggregate_cumulative(
@@ -1400,6 +2037,7 @@ def _finalize(state: dict[str, Any]) -> dict[str, Any]:
     contexts = _resolve_contexts(state)
     request_usage, largest_request, requests = _aggregate_requests(state, contexts)
     state["requests_by_response"] = requests
+    request_context_usage = _aggregate_request_context(state, requests)
     latest_cumulative, latest_by_ref, latest_by_source = _aggregate_cumulative(state)
     tool_rows, model_usage, wait_rows = _aggregate_calls(state, contexts)
 
@@ -1485,6 +2123,7 @@ def _finalize(state: dict[str, Any]) -> dict[str, Any]:
         "compactions": state["compactions"],
         "diagnostics": diagnostics,
         "request_usage": request_usage,
+        "request_context_usage": request_context_usage,
         "largest_request_tokens": largest_request,
         "latest_cumulative_tokens": latest_cumulative,
         "latest_cumulative_tokens_by_thread": [

@@ -70,19 +70,23 @@ def build_parser() -> argparse.ArgumentParser:
 
     meter = sub.add_parser("meter", help="sense native account quotas; keep local snapshots")
     meter.add_argument(
-        "action", choices=("snapshot", "report", "history"), nargs="?", default="snapshot"
+        "action",
+        choices=("snapshot", "report", "history", "tasks", "rates"),
+        nargs="?",
+        default="snapshot",
     )
     meter.add_argument(
         "--thread",
         action="append",
         default=[],
-        help="read backend estimated usage for a thread UUID (up to 8)",
+        help="snapshot: backend usage UUID (up to 8); report/tasks: exact local task filter",
     )
     meter.add_argument("--json", action="store_true")
     meter.add_argument(
         "--no-save", action="store_true", help="snapshot without writing local history"
     )
     meter.add_argument("--directory", type=Path, help="local sessions directory for report")
+    meter.add_argument("--days", type=float, default=7, help="tasks lookback in days (default 7)")
     meter.add_argument(
         "--limit", type=int, help="report file limit (200) or history row limit (20)"
     )
@@ -125,11 +129,14 @@ def main(argv: list[str] | None = None) -> int:
         from .meter import (
             load_snapshots,
             meter_report,
+            meter_tasks,
             normalize_snapshot,
             record_snapshot,
             report_summary,
             snapshot_summary,
+            tasks_summary,
         )
+        from .meter_policy import pricing_context
         from .meter_source import read_meter_sources
 
         try:
@@ -150,8 +157,20 @@ def main(argv: list[str] | None = None) -> int:
                     sessions=args.directory,
                     limit=args.limit if args.limit is not None else 200,
                     baseline_id=args.baseline,
+                    thread_ids=args.thread,
                 )
                 rendered = report_summary(report)
+            elif args.action == "tasks":
+                report = meter_tasks(
+                    sessions=args.directory,
+                    days=args.days,
+                    limit=args.limit if args.limit is not None else 200,
+                    thread_ids=args.thread,
+                )
+                rendered = tasks_summary(report)
+            elif args.action == "rates":
+                report = pricing_context()
+                rendered = json.dumps(report, indent=2, sort_keys=True)
             else:
                 report = load_snapshots(root, limit=args.limit if args.limit is not None else 20)
                 rendered = (

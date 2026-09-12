@@ -97,9 +97,15 @@ def normalize_subscription(account_response: Any, limits: Any) -> dict[str, Any]
     account = _account_payload(account_response)
     auth_value = account.get("type") if account is not None else None
     auth_type = auth_value if isinstance(auth_value, str) and auth_value in AUTH_TYPES else None
-    native_plan = plan_type(account.get("planType")) if account is not None else None
+    native_plan = (
+        plan_type(account.get("planType"))
+        if account is not None and auth_type not in {"apiKey", "amazonBedrock"}
+        else None
+    )
     quota_plans = _quota_plan_types(limits)
     account_reported = auth_type is not None or native_plan is not None
+
+    route_without_subscription = auth_type in {"apiKey", "amazonBedrock"}
 
     if native_plan is not None:
         status = "reported"
@@ -107,8 +113,18 @@ def normalize_subscription(account_response: Any, limits: Any) -> dict[str, Any]
             status = "conflicted"
         source = "account/read"
         selected_plan = native_plan
+    elif route_without_subscription:
+        # API-key and Bedrock routes do not expose a ChatGPT subscription tier.
+        # Never promote a quota bucket's plan into a subscription claim for
+        # these routes; a simultaneous bucket observation is explicitly a
+        # route/plan conflict instead.
+        status = "conflicted" if quota_plans else "reported"
+        source = "account/read"
+        selected_plan = None
     elif quota_plans:
-        status = "fallback"
+        # More than one bucket plan cannot identify a single current tier.
+        # Preserve the allowlisted evidence while refusing to choose one.
+        status = "conflicted" if len(quota_plans) > 1 else "fallback"
         source = "quota_buckets"
         selected_plan = quota_plans[0] if len(quota_plans) == 1 else None
     elif account_reported:

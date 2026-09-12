@@ -57,10 +57,10 @@ class MeterPlanTest(unittest.TestCase):
 
     def test_bucket_fallback_requires_one_allowlisted_plan(self) -> None:
         result = normalize_subscription(
-            {"account": {"type": "apiKey"}},
+            {"account": {"type": "chatgpt"}},
             [{"limit_id": "codex", "plan_type": "pro"}],
         )
-        self.assertEqual(result["auth_type"], "apiKey")
+        self.assertEqual(result["auth_type"], "chatgpt")
         self.assertEqual(result["plan_type"], "pro")
         self.assertEqual(result["status"], "fallback")
         self.assertEqual(result["source"], "quota_buckets")
@@ -73,9 +73,25 @@ class MeterPlanTest(unittest.TestCase):
             ],
         )
         self.assertIsNone(ambiguous["plan_type"])
-        self.assertEqual(ambiguous["status"], "fallback")
+        self.assertEqual(ambiguous["status"], "conflicted")
         self.assertEqual(ambiguous["source"], "quota_buckets")
         self.assertEqual(ambiguous["quota_plan_types"], ["plus", "pro"])
+
+    def test_non_chatgpt_routes_do_not_claim_bucket_subscription(self) -> None:
+        for auth_type in ("apiKey", "amazonBedrock"):
+            with self.subTest(auth_type=auth_type):
+                result = normalize_subscription(
+                    {"account": {"type": auth_type}},
+                    [{"limit_id": "codex", "plan_type": "pro"}],
+                )
+                self.assertEqual(result["auth_type"], auth_type)
+                self.assertIsNone(result["plan_type"])
+                self.assertEqual(result["status"], "conflicted")
+                self.assertEqual(result["source"], "account/read")
+
+                route_only = normalize_subscription({"account": {"type": auth_type}}, [])
+                self.assertEqual(route_only["status"], "reported")
+                self.assertEqual(route_only["source"], "account/read")
 
     def test_unknown_native_values_never_leak_or_override_fallback(self) -> None:
         result = normalize_subscription(

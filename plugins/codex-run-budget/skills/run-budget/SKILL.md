@@ -1,6 +1,6 @@
 ---
 name: run-budget
-description: Operate shared token budgets, sense native Codex account quota percentages, compare model token observations, or audit task lifecycle and efficiency. Use for quota sensing, token lineage, STEER/HALT governance, and retrospective task analysis.
+description: Operate shared token budgets, sense native quota and subscription plans, compare cross-task model/Fast/reasoning token observations, or audit task lifecycle and efficiency. Use for quota sensing, token lineage, STEER/HALT governance, and retrospective task analysis.
 ---
 
 # Run Budget
@@ -144,6 +144,31 @@ Zero displayed change is not proof of free usage. Local token-share percentages
 must not be used to split account quota among models: concurrent tasks, other
 devices, partial transcripts and reporting lag prevent that inference. Do not
 run extra model workloads just to force the percentage meter to move.
+
+## Compare tasks, subscription and Fast/effort
+
+Use `meter tasks --days 1` for recent cross-task history without needing two quota
+snapshots. `--thread UUID` filters exact Task identities in `tasks` and `report`;
+it does not restrict the account quota to those Tasks. JSON contains per-turn
+configuration rows and each field's evidence source/status; check these before
+claiming Fast was active or a reasoning level was used.
+
+Historical settings come from metadata at the request position, never today's
+configuration or prompt text. Missing Fast is unknown; `default` and API
+`priority` do not establish ChatGPT Fast. Current Codex transcripts may omit
+speed entirely. Official thread-usage speed groups, when present, are separate
+backend estimates and cannot be retroactively assigned to local requests.
+
+Snapshots report the account plan and billing route. Historical transcript
+plans are nearby quota observations, not exact per-request billing facts. Do
+not turn a `pro`/`prolite` enum into a detected 5x/20x allowance without direct
+evidence or backfill old Task plans from the current subscription.
+
+`meter rates` shows a dated official Fast/plan reference, not live prices or
+measured charges. Recheck its linked official source for current pricing claims;
+do not multiply raw tokens by a mode factor to invent quota percentages. Input
+already includes cached input, output includes reasoning, and reasoning levels
+have no fixed consumption multiplier in this meter.
 
 ## Update safely
 

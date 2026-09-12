@@ -17,6 +17,14 @@ python3 plugins/codex-run-budget/scripts/run_budget.py meter report
 # Inspect saved snapshots or compare with an earlier ID:
 python3 plugins/codex-run-budget/scripts/run_budget.py meter history
 python3 plugins/codex-run-budget/scripts/run_budget.py meter report --baseline 1 --json
+
+# Cross-task history without a saved baseline or a network request:
+python3 plugins/codex-run-budget/scripts/run_budget.py meter tasks --days 1
+python3 plugins/codex-run-budget/scripts/run_budget.py meter tasks --thread <UUID> --json
+# Filter local tasks in a quota interval; quota itself is still account-wide:
+python3 plugins/codex-run-budget/scripts/run_budget.py meter report --thread <UUID>
+# Dated official mode/plan reference, not measured charges:
+python3 plugins/codex-run-budget/scripts/run_budget.py meter rates
 ```
 
 `--thread <UUID>` requests backend-estimated thread usage; repeat it for up to
@@ -27,6 +35,55 @@ from those native fields, not a price list. Conflicting token subtotals suppress
 the ratio. Groups remain per thread; the meter does not sum potentially
 overlapping parent/descendant billing into an account total.
 Unknown/custom model identifiers are hashed, consistent with the local audit.
+Unrecognized quota bucket IDs and display labels are also hashed before storage.
+
+## Cross-task configuration history
+
+`tasks` scans the bounded local cohort (seven days and 200 pages by default).
+Repeat `--thread` to select exact Task UUIDs, not parent session IDs. It keeps
+Task, turn, model, role, reasoning effort, service tier and Fast state together
+with their request tokens. Human output shows 20 rows; JSON includes the full
+bounded selection and per-field source/status. Missing selected Tasks are not
+zero-usage Tasks. Parent/subagent identities stay separate; no Task is restarted.
+
+Historical context is captured at each request's physical transcript position.
+Later settings do not fill earlier requests, and today's config is never used
+to reconstruct historical Fast or reasoning settings. Explicit `fast` records
+Fast=true, `normal`/`standard` records false. A missing value, `default`, or API
+`priority` does not prove ChatGPT Fast is on or off. Duplicate response evidence
+is deduplicated; conflicting metadata stays unresolved. Context may be a
+requested configuration, not proof of backend execution or settled billing.
+
+The local cohort tested on 2026-09-12 contains turn-level model and effort.
+Some pages omit service tier; others record only `default`. Neither proves
+historical Fast on/off, so those Fast values remain **unknown**.
+When official thread usage provides speed/effort, the meter displays that
+separate backend estimate; it does not retrofit that group onto specific local
+requests. No prompt, command or unstructured log text is mined to guess Fast.
+
+## Subscription and consumption context
+
+Snapshots additionally read `account/read` with `refreshToken:false`, keeping
+only the allowlisted billing route and plan enum. Quota-bucket plans remain
+separate evidence; disagreement is a conflict. A missing account endpoint can
+fall back to a clearly-labelled bucket-plan observation. Native plan enums do
+not establish the exact Pro allowance option, so `tier_multiplier` remains null.
+Old snapshots remain readable and are never backfilled with today's plan.
+
+Historical local plan rows use a preceding same-page `token_count` plan snapshot,
+labelled `nearby_observation`; that is not the billed plan of a specific request.
+An observed account/plan/billing-route change invalidates quota comparisons.
+
+The dated `rates` reference was verified on 2026-09-12:
+
+- [Fast mode](https://learn.chatgpt.com/docs/agent-configuration/speed): where supported,
+  ChatGPT-credit Fast consumes 2.5x for Astra/5.6/5.5 and 2x for 5.4.
+- [Plan context](https://learn.chatgpt.com/docs/pricing): Pro has 5x and 20x allowance
+  options relative to Plus. These are published options, not detected account tiers.
+
+The reference is not a live price resolver and may age. API Priority has separate
+pricing; reasoning has no fixed multiplier in this meter. No published factor is
+multiplied by local tokens to invent a Task charge or quota percentage.
 
 ## Keep the three measurements separate
 

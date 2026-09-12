@@ -12,6 +12,8 @@ import os
 import re
 import sqlite3
 import stat
+import time
+import uuid
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -19,6 +21,8 @@ from typing import Any
 from urllib.parse import quote
 
 from .audit import KNOWN_MODELS
+from .meter_plan import normalize_subscription, plan_type
+from .meter_policy import pricing_context
 from .survey import survey_transcripts
 from .util import stable_hash
 
@@ -52,6 +56,13 @@ def _number(value: Any, *, integer: bool = False) -> int | float | None:
 
 def _label(value: Any) -> str | None:
     return value if isinstance(value, str) and _LABEL.fullmatch(value) else None
+
+
+def _quota_label(value: Any) -> str | None:
+    if not _label(value):
+        return None
+    public_labels = {"codex", "codex_bengalfox", "spark", "legacy", "Codex", "Codex-Spark"}
+    return value if value in public_labels else "hash:" + stable_hash(value)
 
 
 def _model(value: Any) -> str | None:
@@ -152,6 +163,12 @@ def _official_usage(item: dict[str, Any]) -> dict[str, Any]:
                 if group.get("speed")
                 in ("normal", "standard", "default", "fast", "priority", "flex")
                 else None,
+                "fast_mode": True
+                if group.get("speed") == "fast"
+                else False
+                if group.get("speed") in ("normal", "standard")
+                else None,
+                "configuration_source": "backend_usage_group",
                 **tokens,
                 "token_status": "conflicted" if conflicted else "reported",
                 "estimated_credits_micros": credits,
@@ -198,10 +215,10 @@ def normalize_snapshot(sources: dict[str, Any]) -> dict[str, Any]:
         individual = individual if isinstance(individual, dict) else {}
         limits.append(
             {
-                "limit_id": key,
-                "label": _label(bucket.get("limitName")),
+                "limit_id": _quota_label(key),
+                "label": _quota_label(bucket.get("limitName")),
                 "normal_model": _model(bucket.get("normalModelSlug")),
-                "plan_type": _label(bucket.get("planType")),
+                "plan_type": plan_type(bucket.get("planType")),
                 "windows": [
                     window
                     for slot in ("primary", "secondary")
@@ -250,6 +267,7 @@ def normalize_snapshot(sources: dict[str, Any]) -> dict[str, Any]:
                 "initialize",
                 "rate_limits",
                 "account_usage",
+                "account",
                 "thread_usage",
                 "transport",
             ) and code in (
@@ -271,7 +289,7 @@ def normalize_snapshot(sources: dict[str, Any]) -> dict[str, Any]:
     if len(thread_rows) > 8:
         diagnostics.append("thread_limit_reached")
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "capture_started_at": started,
         "captured_at": finished,
         "account_hash": stable_hash(account) if isinstance(account, str) and account else None,
@@ -280,6 +298,7 @@ def normalize_snapshot(sources: dict[str, Any]) -> dict[str, Any]:
         else "unavailable",
         "ordinary_usage_allowed": _bool(raw.get("ordinaryUsageAllowed")),
         "limits": limits,
+        "subscription": normalize_subscription(sources.get("account_response"), limits),
         "account_usage": {
             "lifetime_tokens": _number(summary.get("lifetimeTokens"), integer=True),
             "daily_tokens": daily_rows,
@@ -364,7 +383,7 @@ def load_snapshots(directory: Path, *, limit: int = 20) -> list[dict[str, Any]]:
             if len(payload.encode()) > MAX_SNAPSHOT_BYTES:
                 raise ValueError("stored snapshot is too large")
             value = json.loads(payload)
-            if not isinstance(value, dict) or value.get("schema_version") != 1:
+            if not isinstance(value, dict) or value.get("schema_version") not in (1, 2):
                 raise ValueError("invalid stored snapshot")
             result.append({**value, "id": number})
         return result
@@ -380,6 +399,16 @@ def compare_snapshots(before: dict[str, Any], after: dict[str, Any]) -> dict[str
         reasons.append("account_identity_unavailable")
     elif account != after["account_hash"]:
         reasons.append("account_changed")
+    old_subscription = before.get("subscription") or {}
+    new_subscription = after.get("subscription") or {}
+    if any(s.get("status") == "conflicted" for s in (old_subscription, new_subscription)):
+        reasons.append("subscription_conflicted")
+    if old_subscription.get("auth_type") and new_subscription.get("auth_type"):
+        if old_subscription["auth_type"] != new_subscription["auth_type"]:
+            reasons.append("billing_route_changed")
+    if old_subscription.get("plan_type") and new_subscription.get("plan_type"):
+        if old_subscription["plan_type"] != new_subscription["plan_type"]:
+            reasons.append("subscription_changed")
     start, end = before["captured_at"], after["captured_at"]
     if end <= start or after["capture_started_at"] < start:
         reasons.append("overlapping_or_unordered_captures")
@@ -452,6 +481,11 @@ def compare_snapshots(before: dict[str, Any], after: dict[str, Any]) -> dict[str
         "elapsed_seconds": max(0, end - start),
         "windows": rows,
         "model_quota_attribution": "unavailable",
+        "subscription_observations": {
+            "before": old_subscription or None,
+            "after": new_subscription or None,
+            "historical_task_plan_inferred": False,
+        },
         "limitations": [
             "Account quota includes concurrent tasks, other devices and potentially delayed usage.",
             "A zero displayed change is below meter resolution, not free token usage.",
@@ -483,10 +517,18 @@ def snapshot_summary(snapshot: dict[str, Any]) -> str:
     lines = [f"Codex native quota meter — {_utc(snapshot['captured_at'])}"]
     if snapshot.get("id") is not None:
         lines.append(f"Saved local snapshot #{snapshot['id']} (no budget change)")
+    subscription = snapshot.get("subscription") or {}
+    lines.append(
+        f"Subscription at capture: {subscription.get('plan_type') or 'unknown'}; "
+        f"billing route: {subscription.get('auth_type') or 'unknown'}; "
+        f"evidence: {subscription.get('status') or 'not_recorded'}; "
+        "allowance tier multiplier: unknown"
+    )
     for bucket in snapshot["limits"]:
         for window in bucket["windows"]:
             lines.append(
-                f"{bucket['limit_id']} / {_format(window['duration_minutes'])} min: "
+                f"{bucket['limit_id']} / {_format(window['duration_minutes'])} min "
+                f"(plan {bucket.get('plan_type') or 'unknown'}): "
                 f"used {_format(window['used_percent'])}%; "
                 f"remaining {_format(window['remaining_percent'])}%; "
                 f"resets {_utc(window['resets_at'])}"
@@ -523,6 +565,7 @@ def meter_report(
     sessions: Path | None = None,
     limit: int = 200,
     baseline_id: int | None = None,
+    thread_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """Compose quota and offline tokens without deriving model quota allocations.
 
@@ -544,13 +587,16 @@ def meter_report(
     )
     if baseline_id is not None and baseline is None:
         raise ValueError("baseline not available in retained selection")
+    selected_threads = _selected_threads(thread_ids)
     report: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "status": "baseline_needed" if latest is None else "second_snapshot_needed",
         "latest": latest,
         "interval": None,
         "local_usage": None,
         "model_quota_attribution": "unavailable",
+        "pricing_context": pricing_context(),
+        "selected_thread_hashes": sorted(selected_threads),
     }
     if baseline is None:
         return report
@@ -568,10 +614,52 @@ def meter_report(
     except (OSError, ValueError):
         report["local_usage"] = {"status": "unavailable", "models": []}
         return report
+    report["local_usage"] = _local_usage(survey, selected_threads)
+    return report
+
+
+def _selected_threads(thread_ids: list[str] | None) -> set[str]:
+    if thread_ids is None:
+        return set()
+    if not isinstance(thread_ids, (list, tuple)) or len(thread_ids) > 64:
+        raise ValueError("invalid task selection")
+    hashes = set()
+    for value in thread_ids:
+        if not isinstance(value, str) or str(uuid.UUID(value)) != value.lower():
+            raise ValueError("invalid task UUID")
+        hashes.add(stable_hash(value.lower()))
+    return hashes
+
+
+def _local_usage(survey: dict[str, Any], selected_threads: set[str]) -> dict[str, Any]:
     audit = survey["audit"]
+    rows = [
+        row
+        for row in audit.get("request_context_usage", audit.get("model_usage", []))
+        if not selected_threads or row.get("thread_hash") in selected_threads
+    ]
     usage = audit.get("request_usage")
+    if selected_threads:
+        selected = [row for row in rows if row.get("unique_responses")]
+        usage = (
+            {
+                field: sum(row.get(field, 0) for row in selected)
+                for field in (
+                    "unique_responses",
+                    "input_tokens",
+                    "cached_input_tokens",
+                    "cache_write_input_tokens",
+                    "uncached_input_tokens",
+                    "output_tokens",
+                    "reasoning_output_tokens",
+                    "total_tokens",
+                )
+            }
+            if selected
+            else None
+        )
     totals: dict[str, dict[str, Any]] = {}
-    for row in audit.get("model_usage", []):
+    for row in rows:
         if not row.get("unique_responses"):
             continue
         model = row.get("model") or "unknown"
@@ -613,22 +701,113 @@ def meter_report(
         row["cached_input_share_percent"] = (
             100 * row["cached_input_tokens"] / row["input_tokens"] if row["input_tokens"] else None
         )
-    report["local_usage"] = {
+    contexts = [
+        row
+        for row in audit.get("request_context_usage", [])
+        if not selected_threads or row.get("thread_hash") in selected_threads
+    ]
+    observed_threads = {
+        row["thread_hash"]
+        for row in rows
+        if row.get("unique_responses") and row.get("thread_hash") not in (None, "unknown")
+    }
+    return {
         "status": "observed_partial" if usage else "unknown",
         "selection": survey["selection"],
         "coverage": survey["coverage"],
         "diagnostics": audit.get("diagnostics", {}),
         "request_usage": usage,
         "models": sorted(totals.values(), key=lambda row: (-row["total_tokens"], row["model"])),
+        "tasks": sorted(
+            (row for row in rows if row.get("unique_responses")),
+            key=lambda row: (-row.get("total_tokens", 0), row["thread_hash"], row["model"]),
+        ),
+        "task_count": len(observed_threads),
+        "request_context_usage": contexts,
+        "metadata_coverage": {
+            field: {
+                "known_requests": sum(
+                    row.get("unique_responses", 0)
+                    for row in contexts
+                    if row.get(field) is not None and row.get(field) != "unknown"
+                ),
+                "total_requests": sum(row.get("unique_responses", 0) for row in contexts),
+            }
+            for field in ("model", "reasoning_effort", "service_tier", "fast_mode", "plan_type")
+        },
+        "selected_thread_hashes": sorted(selected_threads),
+        "missing_selected_thread_hashes": sorted(selected_threads - observed_threads),
         "limitations": [
             "Local request completion-time observations, not an account-wide billing ledger.",
             "Input includes cached input; output includes reasoning output. "
             "Do not add subsets twice.",
             "Unknown/conflicting model identity and partial transcript coverage remain unresolved.",
             "Token share percent is not quota percent. Per-model quota is unavailable.",
+            "Task selection filters local tokens only; account quota remains account-wide.",
+            "Historical Fast/effort/plan require contemporaneous evidence, not current defaults.",
         ],
     }
-    return report
+
+
+def meter_tasks(
+    *,
+    sessions: Path | None = None,
+    days: float = 7,
+    limit: int = 200,
+    thread_ids: list[str] | None = None,
+    now: float | None = None,
+) -> dict[str, Any]:
+    """Read cross-task historical observations without network or meter DB writes."""
+    selected = _selected_threads(thread_ids)
+    until = time.time() if now is None else now
+    survey = survey_transcripts(sessions, days=days, limit=limit, now=until)
+    return {
+        "schema_version": 2,
+        "status": "local_observation",
+        "since": until - days * 86400,
+        "until": until,
+        "local_usage": _local_usage(survey, selected),
+        "pricing_context": pricing_context(),
+        "model_quota_attribution": "unavailable",
+    }
+
+
+def tasks_summary(report: dict[str, Any]) -> str:
+    local = report.get("local_usage") or {}
+    interval = report.get("interval") or report
+    lines = [
+        f"Cross-task observations: {local.get('task_count', 0)} tasks (local/partial)",
+        f"Window: {_utc(interval.get('since'))} → {_utc(interval.get('until'))}",
+        "task | turn | model | effort | service tier | Fast | plan | requests | total tokens",
+    ]
+    for row in sorted(
+        local.get("request_context_usage", []), key=lambda row: -row.get("total_tokens", 0)
+    )[:20]:
+        lines.append(
+            " | ".join(
+                str(value) if value is not None else "unknown"
+                for value in (
+                    (row.get("thread_hash") or "unknown")[:12],
+                    (row.get("turn_hash") or "unknown")[:12],
+                    row.get("model"),
+                    row.get("reasoning_effort"),
+                    row.get("service_tier"),
+                    row.get("fast_mode"),
+                    row.get("plan_type"),
+                    row.get("unique_responses"),
+                    row.get("total_tokens"),
+                )
+            )
+        )
+    if not local.get("request_context_usage"):
+        lines.append("No attributable request context in the selected local evidence.")
+    if local.get("missing_selected_thread_hashes"):
+        lines.append("Some selected tasks have no observed request usage; missing is not zero.")
+    lines.extend(local.get("limitations", []))
+    lines.append("Historical plan is a nearby quota observation, not a verified per-request bill.")
+    lines.append("Fast reference (2026-09-12, ChatGPT credits only): Astra/5.6/5.5 2.5x; 5.4 2x.")
+    lines.append("These published mode multipliers are not measured task charges or quota shares.")
+    return "\n".join(lines)
 
 
 def report_summary(report: dict[str, Any]) -> str:
@@ -666,4 +845,5 @@ def report_summary(report: dict[str, Any]) -> str:
     if not local.get("models"):
         lines.append("No attributable local request-token observations; model usage unknown.")
     lines.extend(interval["limitations"])
+    lines.append(tasks_summary(report))
     return "\n".join(lines)
