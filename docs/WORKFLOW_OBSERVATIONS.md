@@ -7,6 +7,23 @@ is part of this module. Existing per-turn automatic receipts remain independent.
 
 ## Exact scope and cost
 
+The skill accepts plain-language descriptions of work. Its model-based discovery
+uses bounded native Task titles/summaries and, only when needed, short candidate
+turn reads. It binds exact IDs before calling the CLI, and asks only when the
+workflow cannot be resolved confidently. A described topic never silently falls
+back to the current Task. Remote/cloud native targets are not remapped to local
+Tasks. Semantic summaries stay ephemeral; no full-history prompt index is built.
+This semantic discovery uses normal model tokens; only deterministic capture is
+model-free. Natural-language skill selection follows the official
+[description-matching mechanism](https://learn.chatgpt.com/docs/build-skills#how-chatgpt-and-codex-use-skills).
+
+Observation and suggestion requests remain read-only. A request that also asks
+to implement an improvement carries that authority through the resolved scope;
+the skill then uses the target repository's real verification and execution
+rules. Improving workflow code is outside the deterministic observer module,
+not a hidden side effect of capture. Ambiguity, ownership conflicts and missing
+approvals remain explicit. Continuous observation still requires separate intent.
+
 Bare `workflow` is a no-I/O menu. `workflow observe` uses the current Task unless
 explicit `--thread` UUIDs or listed hash selectors are supplied. Missing identity
 fails, never falls back to all Tasks. Up to 8 explicit roots and 32 total Tasks

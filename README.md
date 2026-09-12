@@ -53,7 +53,14 @@ when Codex prompts you; untrusted hooks are skipped by design.
 
 ### On-demand workflow observations
 
-Use `/skills` → `workflow-observe` to inspect a selected workflow once. It
+Describe the work you want inspected or improved; Task IDs are not required.
+For example: “找最近每天 X 策展的 Task，觀察重複 QA 的原因，先提出改善建議。”
+The `workflow-observe` skill resolves bounded native Task names/summaries and
+locks exact identities before observing. A clear match proceeds; ambiguity gets
+one meaningful question, not a request to copy UUIDs. “直接改善流程” can authorize
+scoped implementation; an observation/suggestion request remains read-only.
+
+Use `/skills` → `workflow-observe` to select the skill explicitly. It
 resolves native Task/agent names, compares bounded evidence with an explicit
 cursor, and returns changes plus a private report link. Observation is read-only
 with respect to Codex and the workflow; only its separate private evidence store

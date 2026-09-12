@@ -1,5 +1,31 @@
 # Validation evidence
 
+## Description-first workflow routing — 2026-09-13 Asia/Taipei, v0.12.1
+
+This is a skill/description/reference update, not a semantic search engine or
+observer-runtime change. The skill now resolves plain-language work descriptions
+through bounded native names/summaries, then binds exact Task/host identities.
+It separates deictic current-Task requests, ambiguous matches, advice-only intent,
+authorized implementation and explicit recurring intent. Semantic summaries remain
+ephemeral. The deterministic CLI and observation schema are unchanged.
+
+194 existing tests passed; Ruff and repository/plugin/skill validators passed.
+A real native listing requested 20 recent Tasks and filtered metadata before
+model-visible output. It returned the expected current plugin-development Task
+with its native name, short summary and local host, without reading conversation
+turns. This is an availability/discovery smoke check, not a blind semantic-match
+accuracy benchmark or proof of every ambiguity/authorization scenario.
+
+An isolated `0.12.1+codex.20260912195731` install succeeded. Stable installation
+matched source, preserved pre-change 0.3.0–0.12.0 cache identities and saved report
+preferences, and changed only 11 reviewed hook trust hashes in the main config.
+Native `skills/list` returned `codex-run-budget:workflow-observe` enabled with the
+new plain-language description and installed routing reference. All plugin hooks
+and the unrelated Railway hook stayed enabled/trusted, without hook warnings.
+The hook archive differs from 0.12.0 only in the package version member; no new
+model canary, observation schedule or repair of a candidate workflow was run.
+Runtime SHA-256: `2b190a4abaac3744b4dcbb2bd3784241de536ec12539b1ad7dd26670fa2cc7d4`.
+
 ## On-demand workflow observer — 2026-09-13 Asia/Taipei, v0.12.0
 
 194 tests passed. Eight added workflow cases exercise exact scope and overlapping

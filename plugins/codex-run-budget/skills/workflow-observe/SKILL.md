@@ -1,14 +1,21 @@
 ---
 name: workflow-observe
-description: Inspect an explicitly selected Codex workflow across Tasks and subagents, compare compact evidence with a cursor, and identify follow-up checks. On-demand by default; recurring observation requires an explicit user request. Never automatically intervene in the workflow.
+description: Find related Codex Tasks from a plain-language description of work, observe their workflow and agents, and investigate efficiency problems. Use when the user describes a process to inspect or improve without Task IDs. On-demand by default; changes and recurring observation follow the user's explicit scope.
 ---
 
 # Workflow observer
 
-Use the deterministic CLI first. Resolve `PLUGIN_ROOT` two directories above
-this skill. Select the user's named Tasks with native Task tools or the existing
-metadata-only `report tasks --limit 10`; never read all conversations to choose.
-No specific target means the current Task, not all Tasks. Use native names.
+Users can describe the work, not its Task IDs. For a topic/process description,
+or a request to improve the workflow, first read
+[Resolve work and improvement intent](references/resolve-and-improve.md).
+Find relevant Tasks from bounded native names/summaries, bind exact identities,
+then use the deterministic CLI. Do not default a described topic to this Task.
+Only a genuinely deictic request such as “this Task” uses the current identity.
+If neither topic nor target is supplied, ask what work the user means.
+
+Resolve `PLUGIN_ROOT` two directories above this skill. Exact user-supplied
+identities may go directly to observation. Never read all conversations to choose.
+Use native Task names in the explanation; IDs remain internal tool parameters.
 
 ```sh
 python3 "$PLUGIN_ROOT/scripts/run_budget.py" workflow observe --thread SELECTOR
@@ -50,6 +57,8 @@ or deployment read-back under the user's existing acceptance criteria.
 Only propose optimization hypotheses supported by observations. Do not send
 messages, restart/stop agents, alter models, edit workflow code, publish, or
 launch QA under observation authority. Those are separate execution requests.
+When the user's same request includes implementation, carry that existing
+authority through the resolved scope using the reference; do not ask for it again.
 
 ## Optional explicit continuous mode
 
