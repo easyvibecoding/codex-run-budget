@@ -1320,6 +1320,7 @@ def _aggregate_requests(
         canonical_page, canonical_event = group[0]
         item = {
             **canonical_event,
+            "_timestamp_observations": {event.get("stamp") for _page, event in group},
             "ref": _event_ref(
                 canonical_page,
                 canonical_event.get("thread_hash"),
@@ -1477,7 +1478,7 @@ def _merge_request_context(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def _aggregate_request_context(
-    state: dict[str, Any], requests: dict[str, dict[str, Any]]
+    state: dict[str, Any], requests: dict[str, dict[str, Any]], *, per_request: bool = False
 ) -> list[dict[str, Any]]:
     """Aggregate deduplicated request tokens by contemporaneous context.
 
@@ -1508,7 +1509,9 @@ def _aggregate_request_context(
         }
     )
     for item in requests.values():
-        if not item.get("in_scope"):
+        if not item.get("in_scope") and not (
+            per_request and None in item["_timestamp_observations"]
+        ):
             continue
         context = _merge_request_context(item)
         ref = item.get("ref") or "page:unknown"
@@ -1529,6 +1532,8 @@ def _aggregate_request_context(
                 for dimension in _CONTEXT_DIMENSIONS
             ),
         )
+        if per_request:
+            key = (item["response_hash"],)
         grouped[key]["items"].append(item)
         grouped[key]["context"] = context
         grouped[key]["ref"] = ref
@@ -1574,6 +1579,14 @@ def _aggregate_request_context(
         row["uncached_input_tokens"] = (
             row["input_tokens"] - row["cached_input_tokens"]
         )
+        if per_request:
+            # A replay with inconsistent timestamps cannot be placed in a
+            # reporting window. Never choose a convenient duplicate's time.
+            observed = items[0]["_timestamp_observations"]
+            row["observed_at"] = next(iter(observed)) if len(observed) == 1 else None
+            row["timestamp_status"] = (
+                "observed" if row["observed_at"] is not None else "ambiguous_or_missing"
+            )
         rows.append(row)
 
     rows.sort(
@@ -2022,7 +2035,7 @@ def _aggregate_calls(
     return tool_rows, model_usage, wait_rows
 
 
-def _finalize(state: dict[str, Any]) -> dict[str, Any]:
+def _finalize(state: dict[str, Any], *, include_requests: bool = False) -> dict[str, Any]:
     _canonicalize_pages(state)
     _resolve_page_refs(state)
     contexts = _resolve_contexts(state)
@@ -2108,6 +2121,9 @@ def _finalize(state: dict[str, Any]) -> dict[str, Any]:
     ]
     return {
         "schema_version": 2,
+        **({"request_observations": _aggregate_request_context(
+            state, requests, per_request=True
+        )} if include_requests else {}),
         "pages": len(files),
         "files": files,
         "observed_elapsed_ms": elapsed,
@@ -2238,7 +2254,8 @@ def _prepare_page(
 
 
 def audit_transcripts(
-    paths: Iterable[Path], *, since: float | None = None, until: float | None = None
+    paths: Iterable[Path], *, since: float | None = None, until: float | None = None,
+    include_requests: bool = False,
 ) -> dict[str, Any]:
     """Audit multiple transcript pages with cross-page deduplication.
 
@@ -2262,7 +2279,7 @@ def audit_transcripts(
         _, captured_total = _prepare_page(
             state, path, raise_errors=False, captured_total=captured_total
         )
-    return _finalize(state)
+    return _finalize(state, include_requests=include_requests)
 
 
 def audit_transcript(path: Path) -> dict[str, Any]:

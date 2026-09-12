@@ -1,6 +1,6 @@
 ---
 name: run-budget
-description: Operate shared token budgets, sense native quota and subscription plans, compare cross-task model/Fast/reasoning token observations, or audit task lifecycle and efficiency. Use for quota sensing, token lineage, STEER/HALT governance, and retrospective task analysis.
+description: Operate shared token budgets, sense native quota and subscription plans, produce multi-window Task usage reports, or compare model/Fast/reasoning observations. Use for quota sensing, token lineage, STEER/HALT governance, and retrospective task analysis.
 ---
 
 # Run Budget
@@ -184,6 +184,39 @@ pricing, or an included-quota percentage. It excludes unpriced models,
 unsupported cache-write bases and separate tool/image/voice charges. API,
 legacy Enterprise and negotiated USD billing may use different rate cards.
 Reasoning levels have no fixed consumption multiplier in this meter.
+
+## Produce a Task usage report
+
+Use the read-only `report` command for saved, presentable reports. It is distinct
+from `meter report`, which compares native quota snapshots:
+
+```sh
+python3 "$PLUGIN_ROOT/scripts/run_budget.py" report \
+  --timezone Asia/Taipei --windows 5h,24h,7d,30d,today,week,month \
+  --format html --output usage-report.html
+```
+
+Choose the user's timezone, or leave the UTC default explicit. Formats are
+`markdown` (default), `html` and `json`. `--thread UUID` selects exact Tasks and
+is repeatable; absent a filter, the report covers recently observed local Tasks.
+It does not implicitly include descendants. `--since` and `--until` accept ISO
+timestamps with offsets for historical intervals. `week` starts Monday; windows
+are `[since, until)` and overlap, so do not add their totals.
+
+Check coverage: default discovery is 200 pages, not all account history. Detail
+rows can be truncated independently from totals (`--detail-limit`, default 200).
+Reports preserve unknown historical settings, separate saved account quota from
+local tokens, and label Standard/Fast credits as scenarios. Native snapshots are
+read from history, not refreshed; capture separately only when requested. The
+report does not start polling, enforce a budget, or change task/settings state.
+
+Prefer Markdown in Codex's native file viewer for readable summaries and HTML
+for local window/Task filtering and print/save-as-PDF. Use the available app
+file/browser opening tool after creating the report when helpful. Do not assume
+raw HTML will render inline in a Markdown message or claim this modifies the
+built-in quota widget. A conversation visualization is optional when supported
+and useful, not a dependency. Use new filenames: report output refuses overwrites
+and symlink paths. Task/turn IDs are hashed; never add prompt-derived names.
 
 ## Update safely
 

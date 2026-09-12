@@ -37,7 +37,9 @@ class SurveyTest(unittest.TestCase):
         self.page("ignore.txt", 99_500)
         with patch("codex_run_budget.survey.audit_transcripts", return_value={}) as audit:
             result = survey_transcripts(self.root, days=1, limit=2, now=100_000)
-        audit.assert_called_once_with([first, second], since=13_600, until=100_000)
+        audit.assert_called_once_with(
+            [first, second], since=13_600, until=100_000, include_requests=False
+        )
         selected = result["selection"]
         self.assertTrue(selected["coverage_limited"])
         self.assertEqual(selected["selected_files"], 2)

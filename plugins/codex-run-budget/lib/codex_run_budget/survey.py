@@ -36,6 +36,7 @@ def survey_transcripts(
     limit: int = 200,
     now: float | None = None,
     since: float | None = None,
+    include_requests: bool = False,
 ) -> dict[str, Any]:
     """Select recent regular JSONL pages, then analyze one bounded time window.
 
@@ -127,7 +128,9 @@ def survey_transcripts(
             "byte_limit_skips",
         )
     )
-    audit = audit_transcripts(selected, since=since, until=until)
+    audit = audit_transcripts(
+        selected, since=since, until=until, include_requests=include_requests
+    )
     evidence_issues = _evidence_issues(audit)
     evidence_available = _has_evidence(audit)
     return {

@@ -51,6 +51,23 @@ codex plugin add codex-run-budget@codex-run-budget
 Start a new Codex task after installation. Review and trust the bundled hooks
 when Codex prompts you; untrusted hooks are skipped by design.
 
+### Task reports
+
+Generate a private report without starting a budget:
+
+```sh
+python3 plugins/codex-run-budget/scripts/run_budget.py report \
+  --timezone Asia/Taipei --windows 5h,24h,7d,30d,today,week,month \
+  --format html --output usage-report.html
+```
+
+Includes Task/turn and model/Fast/reasoning evidence, independent time windows,
+saved native account quota, and clearly separated Standard/Fast credit scenarios.
+Markdown (the default) works in Codex's file viewer; HTML adds offline filtering
+and print/save-as-PDF; JSON preserves the evidence schema. Exact `--thread`
+filters are repeatable. Output never overwrites an existing file. See
+[report semantics and coverage](docs/REPORTS.md) before interpreting totals.
+
 ### Updating an installed version
 
 With other Codex tasks idle, run from this checkout:
