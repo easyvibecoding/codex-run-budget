@@ -31,7 +31,7 @@ EVENTS = (
 )
 MODULES = (
     "__init__.py", "governor.py", "ledger.py", "transcript.py", "util.py", "hook_adapter.py",
-    "auto_report.py", "task_catalog.py",
+    "auto_report.py", "auto_preview.py", "task_catalog.py",
 )
 
 
@@ -40,7 +40,7 @@ def artifacts(plugin: Path = PLUGIN) -> dict[Path, bytes]:
         "__main__.py": b"from codex_run_budget.hook_adapter import main\nraise SystemExit(main())\n"
     }
     package = plugin / "lib/codex_run_budget"
-    for name in (*MODULES, "migrations/002_hardening.sql"):
+    for name in (*MODULES, "migrations/002_hardening.sql", "assets/turn-card.html"):
         content["codex_run_budget/" + name] = (package / name).read_bytes()
     archive = io.BytesIO()
     # Stored members are portable and byte-identical across Python/zlib versions.

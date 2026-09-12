@@ -68,7 +68,9 @@ class AutoReportTest(unittest.TestCase):
 
     def start(self, threshold=0):
         configure(self.data, enabled=True, threshold_seconds=threshold)
-        self.assertIsNone(self.event("UserPromptSubmit"))
+        result = self.event("UserPromptSubmit")
+        self.assertEqual(set(result), {"hookSpecificOutput"})
+        return result
 
     def append(self, item):
         with self.page.open("a") as stream:
@@ -87,7 +89,7 @@ class AutoReportTest(unittest.TestCase):
     def test_missing_settings_default_on_without_writing_preferences(self):
         self.assertEqual(settings(self.data), {"enabled": True, "threshold_seconds": 0})
         self.assertFalse(self.data.exists())
-        self.assertIsNone(self.event("UserPromptSubmit"))
+        self.assertIsNotNone(self.event("UserPromptSubmit"))
         self.append(counter(1200))
         self.assertEqual(set(self.event("Stop", 1)), {"systemMessage"})
         self.assertEqual(self.report()["usage"]["total"], 200)
@@ -110,7 +112,7 @@ class AutoReportTest(unittest.TestCase):
             results = list(
                 pool.map(lambda n: self.event("UserPromptSubmit", turn_id=f"turn-{n}"), range(8))
             )
-        self.assertEqual(results, [None] * 8)
+        self.assertTrue(all(set(result) == {"hookSpecificOutput"} for result in results))
         self.assertEqual(len(recent(self.data)), 8)
 
     def test_every_turn_default_zero_and_boundary_counts(self):
@@ -127,6 +129,80 @@ class AutoReportTest(unittest.TestCase):
         self.assertEqual(receipt["task_hash"], stable_hash("private-task-id"))
         self.assertIsNone(self.event("Stop", 10))
         self.assertEqual(recent(self.data)[0]["state"], "reported")
+
+    def test_start_requests_inline_preview_and_stop_completes_pending_markdown(self):
+        result = self.start()
+        specific = result["hookSpecificOutput"]
+        self.assertEqual(specific["hookEventName"], "UserPromptSubmit")
+        context = specific["additionalContext"]
+        target = next((self.data / "auto-reports").glob("*.md"))
+        self.assertIn("--preview", context)
+        self.assertIn("visualize reference", context)
+        self.assertLess(len(context), 1300)
+        self.assertIn("待結算", target.read_text())
+        self.assertNotIn("Token 前後差額", target.read_text())
+        self.append(counter(1400))
+        self.event("Stop", 10)
+        self.assertIn("400", target.read_text())
+        self.assertNotIn("待結算", target.read_text())
+        final = target.read_bytes()
+        self.assertIsNone(self.event("Stop", 20))
+        self.assertEqual(target.read_bytes(), final)
+
+    def test_footer_command_quotes_shell_characters(self):
+        self.data = self.root / "space >[inject](x)"
+        context = self.start()["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("'" + str(self.data) + "'", context)
+        self.assertNotIn("\n", context)
+
+    def test_pending_file_does_not_claim_report_after_failure_or_disable(self):
+        self.start()
+        target = next((self.data / "auto-reports").glob("*.md"))
+        pending = target.read_bytes()
+        configure(self.data, enabled=False)
+        self.assertIsNone(self.event("Stop", 1))
+        self.assertEqual(target.read_bytes(), pending)
+
+    def test_report_never_overwrites_foreign_markdown_or_symlink(self):
+        for mode in ("foreign", "symlink"):
+            with self.subTest(mode=mode):
+                self.payload["turn_id"] = mode
+                self.start()
+                row = recent(self.data)[0]
+                target = self.data / "auto-reports" / (row["key"] + ".md")
+                foreign = self.root / "foreign"
+                foreign.write_text("retain")
+                if mode == "symlink":
+                    target.unlink()
+                    target.symlink_to(foreign)
+                else:
+                    target.write_text("retain")
+                self.assertEqual(set(self.event("Stop", 1)), {"systemMessage"})
+                self.assertEqual(target.read_text(), "retain")
+                self.assertEqual(foreign.read_text(), "retain")
+                self.assertEqual(recent(self.data)[0]["state"], "failed")
+
+    def test_governor_preserves_budget_context_with_footer(self):
+        governor = Governor(self.data)
+        self.addCleanup(governor.close)
+        budget = {"systemMessage": "STEER", "hookSpecificOutput": {
+            "hookEventName": "UserPromptSubmit", "additionalContext": "budget rules"
+        }}
+        with patch.object(governor, "_handle_budget", return_value=budget):
+            result = governor.handle({**self.payload, "hook_event_name": "UserPromptSubmit"})
+        self.assertEqual(result["systemMessage"], "STEER")
+        self.assertTrue(
+            result["hookSpecificOutput"]["additionalContext"].startswith("budget rules\n")
+        )
+        self.assertNotIn("decision", result)
+        self.assertNotIn("continue", result)
+
+    def test_subagent_start_never_injects_footer(self):
+        self.assertIsNone(self.event("UserPromptSubmit", agent_id="child"))
+        self.meta["payload"]["source"] = {"subagent": {"thread_spawn": {}}}
+        self.page.write_text(json.dumps(self.meta) + "\n")
+        self.assertIsNone(self.event("UserPromptSubmit"))
+        self.assertFalse(self.data.exists())
 
     def test_optional_threshold_strictly_exceeds_and_start_idempotent(self):
         self.start(300)

@@ -6,6 +6,7 @@ import json
 import math
 import os
 import re
+import shlex
 import sqlite3
 import stat
 import tempfile
@@ -23,6 +24,45 @@ from .util import stable_hash
 SCAN_BYTES = 8 * 1024 * 1024
 MAX_ROWS = 10_000
 EVENTS = {"UserPromptSubmit", "Stop", "Interrupt", "SessionEnd"}
+
+
+def _pending(key: str) -> str:
+    return (
+        "# Codex 回合用量摘要\n\n"
+        "待結算：本回合尚未產生可用的 Stop 快照，這不是已完成的用量報告。\n\n"
+        "回合結束後由本機程式填入；若關閉報告、中斷、未達時間門檻或 Hook 失敗，"
+        "此頁可能維持待結算。沒有數字不代表零用量。\n\n"
+        f"<!-- run-budget-pending:{key} -->\n"
+    )
+
+
+def _footer(directory: Path, key: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Publish a real pending target before asking for one normal-answer link."""
+    target = directory / f"{key}.md"
+    descriptor = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(descriptor, "w") as output:
+        output.write(_pending(key))
+    digest = getattr(__loader__, "runtime_digest", None)
+    runner = (
+        directory.parent / "runtimes" / (digest + ".pyz")
+        if digest else Path(__file__).resolve().parents[2] / "scripts/hook.py"
+    )
+    command = shlex.join([
+        "python3", "-I", str(runner), "--preview", payload["session_id"], payload["turn_id"],
+        "--data-dir", str(directory.parent.absolute()),
+    ])
+    return {"hookSpecificOutput": {
+        "hookEventName": "UserPromptSubmit",
+        "additionalContext": (
+            "Automatic Codex usage card, this turn only: before your normal final answer, "
+            "run once: " + command + " --output-dir <task-owned writable visualization directory>. "
+            "Use an absolute directory from this task's writable roots. The deterministic tool "
+            "returns a visualize reference; put that reference on its own line at the end of "
+            "your final answer so the card renders inline, not as a Markdown link. Do not read "
+            "the report body, analyze it, invent numbers or start another turn. If skipped/failed, "
+            "omit the card without retrying. Omit on user disable or incompatible exact format."
+        ),
+    }}
 
 
 def _directory(root: Path) -> Path:
@@ -335,9 +375,9 @@ def _documents(receipt: dict[str, Any]) -> tuple[str, str]:
 def _publish(root: Path, key: str, receipt: dict[str, Any]) -> str:
     directory = _directory(root)
     markdown, html = _documents(receipt)
-    # Deterministic keys plus exclusive creation make retries no-clobber.
+    # Completed receipts remain no-clobber. Only our exact pending Markdown may
+    # be atomically replaced, after both other artifacts have been written.
     for extension, content in (
-        ("md", markdown),
         ("html", html),
         ("json", json.dumps(receipt, ensure_ascii=True, indent=2)),
     ):
@@ -345,7 +385,30 @@ def _publish(root: Path, key: str, receipt: dict[str, Any]) -> str:
         descriptor = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
         with os.fdopen(descriptor, "w") as output:
             output.write(content)
-    return str((directory / f"{key}.md").absolute())
+    target = directory / f"{key}.md"
+    if target.exists() or target.is_symlink():
+        expected = _pending(key).encode()
+        descriptor = os.open(target, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(descriptor, "rb") as source:
+            if (
+                not stat.S_ISREG(os.fstat(source.fileno()).st_mode)
+                or source.read(len(expected) + 1) != expected
+            ):
+                raise ValueError("report is not our pending target")
+        descriptor, temporary = tempfile.mkstemp(prefix="receipt-", dir=directory)
+        try:
+            with os.fdopen(descriptor, "w") as output:
+                output.write(markdown)
+            os.replace(temporary, target)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+    else:
+        # Compatibility with starts recorded by older pinned runtimes.
+        descriptor = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(descriptor, "w") as output:
+            output.write(markdown)
+    return str(target.absolute())
 
 
 def handle(
@@ -355,7 +418,7 @@ def handle(
     wall: float | None = None,
     monotonic: float | None = None,
 ) -> dict[str, Any] | None:
-    """Informational hook output only. No context injection or continuation."""
+    """One start-time footer instruction; Stop never requests continuation."""
     event = payload.get("hook_event_name")
     if event not in EVENTS or payload.get("agent_id"):
         return None
@@ -390,6 +453,7 @@ def handle(
                 return None
             row = connection.execute("SELECT * FROM turns WHERE key=?", (key,)).fetchone()
             if event == "UserPromptSubmit":
+                footer = None
                 if row is None:
                     if connection.execute("SELECT count(*) FROM turns").fetchone()[0] >= MAX_ROWS:
                         raise ValueError("auto-report timing index is full")
@@ -404,8 +468,9 @@ def handle(
                             json.dumps(observed, separators=(",", ":")),
                         ),
                     )
+                    footer = _footer(_directory(root), key, payload)
                 connection.commit()
-                return None
+                return footer
             if row is None or row["state"] not in ("started", "short"):
                 return None
             if event == "Interrupt":

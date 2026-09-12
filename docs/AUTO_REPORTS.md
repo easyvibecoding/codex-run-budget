@@ -10,11 +10,27 @@ after its start. Timing remains useful metadata but is not a generation gate.
 ## Lifecycle and presentation
 
 `UserPromptSubmit` records a hashed session/turn key and a bounded token-counter
-baseline. `Stop` claims that key before generating private Markdown, HTML and
+baseline. From v0.13 it also creates a pending Markdown file and returns one short
+`additionalContext` instruction to run one deterministic pre-final preview tool
+and put its native `visualize` reference at the end of the normal final answer.
+The model is told not to read/analyze the report, invent numbers, or add another
+turn. The tool reads this exact Task and timing key and renders a bundled HTML
+fragment into a task-owned writable visualization directory selected by the caller.
+Its output is only status/reference, not the report body. The numeric card is a
+pre-final snapshot, excluding subsequent work; it is not overwritten by Stop.
+Disabling reports or an incompatible
+exact-output request takes precedence. The same persistent switch controls both
+generation and this presentation instruction; an explicit off is not overridden.
+
+`Stop` claims that key before generating private Markdown, HTML and
 JSON files under the budget data directory's `auto-reports/`. Files are mode
 0600 and use opaque names; no prompt, transcript text or raw transcript path is
 persisted. The Stop output contains only an informational `systemMessage`.
-Existing budget decisions and enforcement fields are preserved.
+Existing budget decisions, context and enforcement fields are preserved.
+HTML and JSON are written exclusively before atomically replacing only this
+turn's exact pending Markdown. Completed or user-edited files are not overwritten.
+The optional Markdown fallback exists before the answer and explicitly says
+pending. Interrupted, disabled, short or failed turns may leave it pending.
 
 From v0.11, the receipt heading uses an exact, bounded read of Codex's native
 Task `name` when available. It never reads the prompt-like `title`, preview or
@@ -28,7 +44,16 @@ This follows the [official Stop interface](https://learn.chatgpt.com/docs/hooks#
 and [common output contract](https://learn.chatgpt.com/docs/hooks#common-output-fields).
 Codex decides how it displays that UI message and whether it linkifies the path.
 No supported hook output was found for rewriting the assistant's final answer
-or automatically opening an artifact. Markdown is the native-file-viewer entry
+or automatically opening an artifact. `systemMessage` alone was insufficient:
+the v0.12.1 desktop answer omitted the link despite a real completed receipt.
+The v0.13 bridge uses the documented
+[UserPromptSubmit context interface](https://learn.chatgpt.com/docs/hooks#userpromptsubmit)
+to request an inline card in the normal answer, not a Stop continuation or transcript
+edit. Its instruction, one tool call/result and output reference have a token cost;
+model compliance is not a deterministic native-footer guarantee. The visualize
+surface must be available; no renderer, model or network is needed by the fixed
+template itself. CLI validation can prove reference emission but not desktop paint.
+Markdown is the native-file-viewer entry
 point; HTML is an offline static alternative, not a promised automatic preview.
 
 A Stop is a user-turn boundary, not semantic completion of a long-running Task.
@@ -52,8 +77,11 @@ files are retained, and only fully written outputs are announced.
   allocation. Absent/ambiguous Fast remains unknown, never inferred from the
   current global preference or model name.
 - Only the current Task transcript is read. No descendant/cross-Task scan,
-  native quota query, pricing lookup, network request, model request, context
-  injection or continuation is performed by receipt generation. Use the manual
+  native quota query, pricing lookup, network request, model request or
+  continuation is performed by receipt generation. Only the short start-time
+  preview instruction and compact command result enter model context; the report
+  body does not. The preview adds one bounded exact-Task read, not a history scan.
+  Use the manual
   `report` or `meter` commands for richer, separately requested analysis.
 - Each start/Stop reads at most a 128 KiB header and an 8 MiB tail. At most 16
   exact-turn setting observations are retained. SQLite's write wait is 0.4
@@ -64,7 +92,7 @@ files are retained, and only fully written outputs are announced.
   requesting model retries. No automatic deletion is performed. Disabling
   retains the index and generated files.
 - `model_requests_for_report: 0` means no extra model calls for generation, not
-  zero CPU/disk cost or a promise that later model analysis costs no tokens.
+  zero CPU/disk cost, zero tokens for the preview call/reference, or free later analysis.
 
 ## Controls
 

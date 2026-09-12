@@ -109,7 +109,7 @@ Native names may be sensitive; they are not prompt/title/preview fallbacks.
 Output never overwrites an existing file. See
 [report semantics and coverage](docs/REPORTS.md) before interpreting totals.
 
-### Automatic zero-model-call receipts (v0.10.1)
+### Automatic inline usage cards (v0.13)
 
 Automatic receipts are **on by default**, independently of token budgets.
 Use the persistent report-only switch (it does not disable the plugin):
@@ -126,11 +126,17 @@ file gets the default on value. You can also ask Codex to “turn automatic
 per-turn reports on/off”; it runs the same switch and reads back the result.
 This is a local plugin setting, not a new native Codex Settings toggle.
 
-When enabled, each main user turn's first eligible `Stop` writes private Markdown, HTML and
-JSON files and emits a short UI `systemMessage` with the Markdown path. The
+When enabled, `UserPromptSubmit` creates a private pending Markdown target and
+provides a short instruction to run one deterministic preview command before the
+normal final answer. That command returns only a native `visualize` reference:
+the answer displays an inline usage card rather than a clickable report link.
+Its HTML fragment uses a fixed bundled template, not model-generated markup.
+The first eligible `Stop` separately fills the Markdown target and writes HTML/JSON. The
 default threshold is **zero**: elapsed time is information, not a cost gate.
 This is a turn-stop receipt, not proof the whole Task is complete. It makes no
-model/API requests, injects no model context and never requests continuation.
+model/API requests from its Python renderer and never requests continuation.
+The normal model/tool round trip, instruction and final reference use tokens;
+this is not zero-token display or a zero-additional-inference guarantee.
 Local CPU, disk and storage still have a cost; asking a model to read the result
 later uses normal tokens. Disable with `auto-report disable`; existing files
 remain. For an explicitly desired duration filter, use
@@ -139,8 +145,12 @@ remain. For an explicitly desired duration filter, use
 These bounded receipts are lighter than the manual multi-window report above:
 current transcript boundary counters only, no native-quota refresh or other
 Task/subagent aggregation. Missing counters stay unknown; Stop may precede
-the final persisted usage event. Codex controls the UI message presentation;
-this does not append to an already-sent answer or automatically open HTML.
+the final persisted usage event. The inline card is explicitly a **pre-final
+snapshot**; it excludes subsequent tools/final text and is not updated by Stop.
+The reference is model-written in the normal answer, not an edit to a sent answer.
+An incompatible exact-output request or disabling reports takes precedence;
+model omission and native presentation support are still limitations. Preview
+failure skips the card without retries. Missing observations are unknown, not zero.
 See [automatic receipt boundaries](docs/AUTO_REPORTS.md).
 
 ### Updating an installed version

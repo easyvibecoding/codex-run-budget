@@ -29,6 +29,7 @@ class RuntimeLoader(importlib.abc.MetaPathFinder, importlib.abc.Loader):
 
     def __init__(self, blob):
         self.archive = zipfile.ZipFile(io.BytesIO(blob))
+        self.runtime_digest = hashlib.sha256(blob).hexdigest()
 
     def member(self, fullname):
         if fullname != "codex_run_budget" and not fullname.startswith("codex_run_budget."):

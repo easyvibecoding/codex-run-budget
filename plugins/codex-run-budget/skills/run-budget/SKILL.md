@@ -256,9 +256,20 @@ The setting is checked at each relevant hook, not cached per Task. This is a
 local plugin configuration, not a new native app Settings toggle. A conversational
 request to change it uses normal tokens; automatic generation needs no model call.
 
-UserPromptSubmit records a baseline; the first eligible Stop generates private
-Markdown/HTML/JSON and a short UI `systemMessage`. No model/network requests,
-additionalContext, continuation or full cross-Task scan are used. Local CPU,
+UserPromptSubmit records a baseline and creates a pending Markdown target. From
+v0.13 it supplies a short `additionalContext` instruction to run one deterministic
+preview command before the normal final answer. Select a task-owned writable
+visualization directory, run that command once, and include its returned native
+`visualize` reference on its own line in the final answer, not as a Markdown link.
+Do not read the report body, invent numbers or regenerate layout with a model.
+The fixed template supplies the whole inline card. Skip without retries on failure.
+Omit it when the user disables reports
+or requires an incompatible exact format. The first eligible Stop fills the same
+Markdown path and generates HTML/JSON plus an informational `systemMessage`.
+The renderer makes no model/network requests; there are no report-driven new
+turns or full cross-Task scans. The normal preview tool round trip may add inference.
+The instruction, one tool call/result and normal-answer reference use tokens;
+do not describe visible reporting as zero-token. Local CPU,
 disk and later model reading still cost resources. Do not add a model follow-up
 just to produce, decorate or announce these automatic receipts.
 
@@ -270,8 +281,13 @@ descendants, actual quota shares or billing. Historical settings are observed,
 not inferred or used to allocate token totals. The bounded index keeps at most
 10,000 turns; report failures are informational and never change governance.
 
-Codex owns presentation of `systemMessage`; do not claim hooks append to the
-assistant's final answer or auto-open HTML. Use the Markdown report path if the
+Codex owns presentation of `systemMessage`; that warning alone does not append
+to the final answer. The v0.13 reference is model-written in the normal answer,
+not a deterministic native-footer guarantee or an edit to a sent answer.
+The card is a pre-final snapshot, not the Stop settlement; it excludes subsequent
+work and is not live-updated. Missing data is unknown, not zero. Native visualize
+support is required for inline display; do not claim an auto-open browser panel.
+Use the Markdown report path if the
 user asks to open a receipt, respecting native file/browser restrictions. After
 upgrading, use a new Task for the updated pinned runtime.
 

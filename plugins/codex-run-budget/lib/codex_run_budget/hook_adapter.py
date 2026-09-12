@@ -27,7 +27,28 @@ EVENTS = (
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--event", choices=EVENTS)
-    event = parser.parse_args().event
+    parser.add_argument("--preview", nargs=2, metavar=("SESSION", "TURN"))
+    parser.add_argument("--output-dir")
+    parser.add_argument("--data-dir")
+    args = parser.parse_args()
+    event = args.event
+    if args.preview is not None:
+        from pathlib import Path
+
+        from .auto_preview import preview
+        from .util import data_path
+
+        if event or not args.output_dir:
+            parser.error("preview needs --output-dir and cannot run as a hook event")
+        try:
+            result = preview(
+                Path(args.data_dir) if args.data_dir else data_path(),
+                *args.preview, output_dir=Path(args.output_dir),
+            )
+        except Exception:
+            result = {"status": "unavailable", "reason": "preview not generated; do not retry"}
+        print(json.dumps(result, ensure_ascii=False))
+        return 0
 
     def reject(reason: str) -> int:
         message = "Run Budget rejected hook input: " + reason + ". Private input omitted."

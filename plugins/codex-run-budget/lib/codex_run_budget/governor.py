@@ -110,7 +110,7 @@ class Governor:
         if payload.get("hook_event_name") in (
             "UserPromptSubmit", "Stop", "Interrupt", "SessionEnd"
         ):
-            # Preserve all existing decisions; reporting only adds a UI message.
+            # Preserve decisions and context; reporting may add one start footer.
             # Rejected prompts do not start a timing interval.
             if payload.get("hook_event_name") == "UserPromptSubmit" and (
                 result and (result.get("decision") == "block" or result.get("continue") is False)
@@ -123,10 +123,21 @@ class Governor:
                 message = {"systemMessage": "自動用量報告未完成；原有預算決策不變。"}
             if message:
                 result = dict(result or {})
-                result["systemMessage"] = "\n".join(
-                    value for value in (result.get("systemMessage"), message["systemMessage"])
-                    if value
-                )
+                if message.get("systemMessage"):
+                    result["systemMessage"] = "\n".join(
+                        value for value in (result.get("systemMessage"), message["systemMessage"])
+                        if value
+                    )
+                if message.get("hookSpecificOutput"):
+                    extra = message["hookSpecificOutput"]
+                    specific = dict(result.get("hookSpecificOutput") or {})
+                    specific.setdefault("hookEventName", extra["hookEventName"])
+                    specific["additionalContext"] = "\n".join(
+                        value for value in (
+                            specific.get("additionalContext"), extra["additionalContext"]
+                        ) if value
+                    )
+                    result["hookSpecificOutput"] = specific
         return result
 
     def _handle_budget(self, payload: dict[str, Any]) -> dict[str, Any] | None:

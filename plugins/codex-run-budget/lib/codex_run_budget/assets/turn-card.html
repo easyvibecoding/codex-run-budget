@@ -1,0 +1,46 @@
+<section id="run-budget-$key" aria-label="本回合 Codex 用量">
+  <style>
+    #run-budget-$key { color: var(--foreground); overflow-wrap: anywhere; }
+    #run-budget-$key .report-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; }
+    #run-budget-$key .report-head h2 { margin: 0; }
+    #run-budget-$key .report-config { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+    #run-budget-$key dt { color: var(--muted-foreground); }
+    #run-budget-$key dd { margin: 4px 0 0; }
+    #run-budget-$key summary { cursor: pointer; }
+    #run-budget-$key .report-detail { display: grid; grid-template-columns: 1fr auto; gap: 8px 16px; }
+    #run-budget-$key .report-detail dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+  </style>
+  <div class="report-head">
+    <h2>本回合用量</h2>
+    <span class="text-small">結論前快照 · $captured</span>
+  </div>
+  <p>$task</p>
+  <div class="viz-grid">
+    <div class="card viz-stat">
+      <div>觀測 Token</div>
+      <div class="viz-stat-value tabular-nums">$total</div>
+      <div class="text-small">$usage_label</div>
+    </div>
+    <div class="card viz-stat">
+      <div>經過時間</div>
+      <div class="viz-stat-value tabular-nums">$elapsed</div>
+      <div class="text-small">包含工具與等待</div>
+    </div>
+  </div>
+  <dl class="report-config">
+    <div><dt>模型</dt><dd>$model</dd></div>
+    <div><dt>思考等級</dt><dd>$effort</dd></div>
+    <div><dt>Fast</dt><dd>$fast</dd></div>
+  </dl>
+  <details>
+    <summary>Token 明細與計量範圍</summary>
+    <dl class="report-detail">
+      <dt>輸入（含快取）</dt><dd>$input</dd>
+      <dt>其中快取輸入</dt><dd>$cached</dd>
+      <dt>輸出（含思考）</dt><dd>$output</dd>
+      <dt>其中思考 Token</dt><dd>$reasoning</dd>
+    </dl>
+    <p class="text-small">僅目前 Task；不含子代理。計數器可能落後，不含之後的工具與結論。
+      這不是訂閱額度百分比或帳單。未知不代表 0；Stop 結算另存，不會回寫這張快照。</p>
+  </details>
+</section>

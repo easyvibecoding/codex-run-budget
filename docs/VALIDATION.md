@@ -1,5 +1,61 @@
 # Validation evidence
 
+## Inline pre-final usage card — 2026-09-13 Asia/Taipei, v0.13.0
+
+The reported desktop failure was reproduced from local evidence: the preceding
+root turn had a `reported` timing row and a named Markdown receipt, but its final
+answer screenshot had no usage report. `systemMessage` is a warning/event-stream
+message, not a final-answer attachment. The new start hook gives one preview-tool
+instruction; Python renders a fixed fragment and returns only the native visualize
+reference. The model places it in the normal answer. Stop settlement stays separate.
+
+204 tests passed, plus Ruff, repository, plugin and changed-skill validators.
+Coverage includes switch preservation, pending/no-clobber receipt replacement,
+governance-context merging, exact turn/source identity, subagent exclusion,
+unknown counters/Fast, escaped names, private output, symlink refusal, unchanged
+timing state and immutable pre-final fragments. The trusted archive bundles its
+HTML template; the loader exposes only its digest for the preview command path.
+
+One actual installed Codex CLI turn, prompted only to acknowledge completion,
+finished in 14.78 seconds. It emitted one `command_execution`, one final inline
+visualize reference to an existing fragment, one `turn.completed`, and one Stop
+receipt. There was no report-driven continuation or hook failure. The two
+`agent_message` items were normal progress/final output, not two completed turns.
+The unrelated existing chronicle unstable-feature warning remained. Total test
+usage was 46,150 input (6,528 cached) and 409 output tokens; this includes all native
+startup context and is **not** a measurement of incremental report cost. Rendering
+itself makes zero model calls, but the normal preview tool round trip uses tokens
+and can add inference compared with an otherwise tool-free answer.
+
+The current desktop Task also produced a real named preview from its existing
+start baseline. In a local browser rendering of the official visualize wrapper,
+736px/320px and light/dark layouts had no horizontal overflow; expanding details
+increased the measured height in all four cases. The light desktop screenshot was
+visually read back. This validates fragment layout, not a claimed desktop paint
+before the final answer is sent; the final response supplies the actual reference.
+
+Isolated cachebuster installation and stable v0.13.0 installation succeeded.
+Installed source and retained v0.3.0–v0.12.1 caches matched their identities.
+Saved report preferences were unchanged. Config changes were the 11 reviewed
+plugin hook trust hashes plus the CLI-created trust entry for the isolated test
+workspace; no model, budget, Railway hook or recurring-observation setting changed.
+All plugin hooks and the unrelated Railway hook read back enabled/trusted.
+Runtime SHA-256: `db5cc2a7930e94be9c8a66c44e58fc4de5e90b23fe279855a4cf7263a22ef24a`.
+
+A follow-up cost-wording correction correctly triggered same-version cache
+replacement protection. The updater retained/restored the original v0.13.0
+cache and quarantined the substituted copy. The official cachebuster helper
+then installed `0.13.0+codex.20260912202926` without replacing the old version.
+The final source/cache identity and settings were rechecked. Its archive differs
+from the model-tested archive only in `__init__.py` version metadata, with final
+SHA-256 `be587f6ed1867d51ae3c375e4f385bb5e5734eedd12380ed2cf69e53f298c928`.
+
+Automatic inline presentation requires the supported visualize surface and model
+compliance with the short instruction. Exact-format/off requests take precedence;
+failure skips without retry. It is not a deterministic native UI injection, and
+does not rewrite old answers or live-refresh a snapshot after Stop. New Tasks are
+the supported pickup boundary for the updated pinned hook runtime.
+
 ## Description-first workflow routing — 2026-09-13 Asia/Taipei, v0.12.1
 
 This is a skill/description/reference update, not a semantic search engine or
