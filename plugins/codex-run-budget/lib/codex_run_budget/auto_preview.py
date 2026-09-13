@@ -26,6 +26,8 @@ from .util import stable_hash
 
 
 def render_card(receipt: dict) -> str:
+    from .quota_view import render_html
+
     text = ReportText(receipt.get("locale", "zh-Hant"))
     parent = receipt["usage"]
     task_usage = receipt.get("task_usage")
@@ -101,6 +103,7 @@ def render_card(receipt: dict) -> str:
         + "</div></div>"
         for row in children.get("rows", [])[:32]
     )
+    escaped["quota"] = render_html(receipt.get("quota"), text)
     return Template(template.decode()).substitute(escaped)
 
 
@@ -155,12 +158,15 @@ def preview(root: Path, session: str, turn: str, *, output_dir: Path, home=None)
         status = "first_turn_usage_pending"
     children = collect(root, session, row["started"], captured, home=home,
                        unnamed_label=text("unnamed"))
+    # One small account read inside the existing preview tool, never in hooks.
+    from .turn_quota import observe
+    quota = observe(root, key, home=home)
     receipt = {
         "key": key, "task_name": task["display_name"], "usage": usage, "usage_status": status,
         "contexts": current["contexts"], "contexts_limited": current.get("contexts_limited", False),
         "task_usage": current.get("usage"), "elapsed_seconds": seconds,
         "captured_at": datetime.fromtimestamp(captured).astimezone().strftime("%H:%M:%S %Z"),
-        "subagents": children,
+        "subagents": children, "quota": quota,
         **locale,
     }
     if not output_dir.is_absolute() or any(

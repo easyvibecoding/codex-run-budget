@@ -102,6 +102,36 @@ class MeterSourceTest(unittest.TestCase):
         self.assertIsInstance(result["started_at"], float)
         self.assertIsInstance(result["finished_at"], float)
 
+    def test_quota_only_never_reads_token_history_or_refreshes_auth(self) -> None:
+        fake = self.server(
+            """
+            import json, sys
+            for line in sys.stdin:
+                request = json.loads(line)
+                method = request['method']
+                if method == 'initialized':
+                    continue
+                if method == 'initialize':
+                    result = {}
+                elif method == 'account/rateLimits/read':
+                    assert request['params'] == {'excludeResetCreditDetails': True}
+                    result = {'rateLimits': {'primary': {'usedPercent': 20}}}
+                elif method == 'account/read':
+                    assert request['params'] == {'refreshToken': False}
+                    result = {'account': {'type': 'chatgpt', 'planType': 'pro'}}
+                else:
+                    raise AssertionError('unexpected endpoint')
+                print(json.dumps({'id': request['id'], 'result': result}), flush=True)
+            """
+        )
+        result = read_meter_sources(codex_binary=str(fake), include_usage=False, timeout=2)
+        self.assertEqual(result["errors"], [])
+        self.assertIsNone(result["account_usage"])
+        self.assertEqual(result["thread_usage"], [])
+        self.assertEqual(result["account_response"]["account"]["planType"], "pro")
+        with self.assertRaises(ValueError):
+            read_meter_sources(include_usage=False, thread_ids=[str(uuid.uuid4())])
+
     def test_partial_account_usage_rpc_failure_keeps_thread_success(self) -> None:
         fake = self.server(
             """

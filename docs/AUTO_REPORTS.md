@@ -204,9 +204,10 @@ machine-readable compatibility fields are unchanged.
   the work was free. A reset between boundaries may be unobservable.
 - Input includes cached input; output includes reasoning. Subsets are not added
   again. Model/reasoning pairs are exact-turn observations, not token allocation.
-- Only the current Task and bounded exact descendants are read. No unrelated
-  cross-Task history scan, native quota query, pricing lookup, network request, model request or
-  continuation is performed by receipt generation. Only the short start-time
+- Token reconciliation reads only the current Task and bounded exact descendants.
+  No unrelated cross-Task history scan, pricing lookup, model request or
+  continuation is performed by receipt generation. The pre-final quota read is
+  separate, described below. Only the short start-time
   preview instruction and compact command result enter model context; the report
   body does not. The preview adds bounded exact-Task-tree reads, not a history scan.
   Use the manual
@@ -226,6 +227,59 @@ machine-readable compatibility fields are unchanged.
   retains the index and generated files.
 - `model_requests_for_report: 0` means no extra model calls for generation, not
   zero CPU/disk cost, zero tokens for the preview call/reference, or free later analysis.
+
+### Account quota beside token usage
+
+The existing single preview command also captures native account rate limits
+and account plan. It calls only `account/rateLimits/read` (without reset-credit
+details) and non-refreshing `account/read`, after initialization. It does not
+query account token history, thread billing, prices or credentials. The RPC
+conversation has a two-second deadline plus bounded process cleanup; failure
+leaves quota unknown without suppressing the token card. This adds a network
+read and local processing, not another model tool turn. No quota call happens
+in start/Stop hooks. Stop includes the saved pre-final quota snapshot with its
+own capture time; it is not a fresh Stop-time account reading.
+
+The card displays `100 - usedPercent`, clamped to 0–100, and the difference in
+**remaining percentage points** from this Task's immediately preceding turn's
+card. Negative differences mean the displayed allowance fell; they are not the
+percentage of this Task's own usage. Account-wide usage includes concurrent
+Tasks, other devices/features and reporting delay. A displayed zero difference
+means unchanged at the source's reported precision, not free work, a precise
+less-than-one-percent bound, or a token-to-percent conversion. Supplied fractional
+percentages are preserved; no fractional spend is inferred from token counts.
+
+Windows are named by native `windowDurationMins`, never by a fixed Plus/Pro
+mapping or `primary = 5h` assumption. Main Codex and additional buckets remain
+distinct. The native reported ChatGPT plan is displayed only when unambiguous;
+Pro does not establish a detected 5x/20x tier. The
+[official rate-limit schema](https://learn.chatgpt.com/docs/app-server#6-rate-limits-chatgpt)
+defines duration, reset timestamp and used percentage. The
+[plan guide](https://learn.chatgpt.com/docs/pricing#what-are-the-usage-limits-for-my-plan)
+uses five-hour estimates for both Plus and Pro and directs users to actual
+account limits; those estimates do not override the native observation.
+
+A changed account, plan, bucket alias, window duration/reset timestamp, crossed
+reset deadline, missing identity or unordered capture prevents subtraction.
+If `account/read` is unavailable, comparison may still use matching account
+identity and valid plan evidence from the quota response itself; the displayed
+account plan remains unknown. Missing or conflicting quota plan evidence does
+not permit that fallback.
+An increased remainder without an observed reset is labeled correction/recovery,
+not negative consumption. The new observation becomes the next baseline.
+Unavailable/interrupted previous turns are not skipped to compare with an older
+successful turn. A reset followed by consumption that exceeds the old used
+percentage may still be unobservable if the backend leaves the same window
+identity; therefore this is an observation difference, not billing-grade spend.
+
+`auto-reports/quota.sqlite3` is private, separate from the budget ledger and the
+manual meter. It stores allowlisted numbers, known plan enums and hashed account,
+bucket and turn identities, never names, emails, prompts or response text.
+Only up to eight quota buckets and 32 KiB per capture are retained, at most
+10,000 turn rows. A persisted claim precedes the RPC, so duplicate/concurrent
+previews and crashed captures do not retry it. The immediate previous turn is
+looked up in the existing timing index, not across Task history. The same report
+switch suppresses preview/capture when off; no background schedule is installed.
 
 ## Controls
 

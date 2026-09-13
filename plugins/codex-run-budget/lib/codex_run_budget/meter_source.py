@@ -459,11 +459,14 @@ def read_meter_sources(
     thread_ids: Iterable[str] = (),
     timeout: float = 30.0,
     codex_home: Path | None = None,
+    include_usage: bool = True,
 ) -> dict[str, Any]:
     """Read account/rate-limit and account/token-usage snapshots.
 
     The deadline applies to the complete app-server conversation, including all
-    requested threads.  A failed source does not erase earlier successful
+    requested threads. ``include_usage=False`` skips account/token history and
+    allows only the small rate-limit/account reads used by automatic previews.
+    A failed source does not erase earlier successful
     responses; once the stream itself becomes unusable, later thread rows are
     retained with ``not_attempted`` (or the fatal transport code).
     """
@@ -471,6 +474,8 @@ def read_meter_sources(
     binary, canonical_ids, timeout_value, home = _validate_inputs(
         codex_binary, thread_ids, timeout, codex_home
     )
+    if type(include_usage) is not bool or (not include_usage and canonical_ids):
+        raise ValueError("usage reads must be enabled when requesting threads")
     started_at = float(time.time())
     deadline = time.monotonic() + timeout_value
     report: dict[str, Any] = {
@@ -550,7 +555,7 @@ def read_meter_sources(
                 if error in FATAL_ERROR_CODES:
                     fatal_code = error
 
-        if fatal_code is None:
+        if fatal_code is None and include_usage:
             account_usage, error = request(3, "account/usage/read", {}, SOURCE_ACCOUNT_USAGE)
             if error is None:
                 report["account_usage"] = account_usage

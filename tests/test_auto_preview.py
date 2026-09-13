@@ -24,6 +24,9 @@ TASK = "12345678-1234-1234-1234-123456789abc"
 
 class AutoPreviewTest(unittest.TestCase):
     def setUp(self):
+        quota_source = patch("codex_run_budget.turn_quota.read_meter_sources", return_value={})
+        quota_source.start()
+        self.addCleanup(quota_source.stop)
         for module in ("auto_preview", "auto_report"):
             locale = patch("codex_run_budget." + module + ".resolve_locale",
                            return_value={"locale": "zh-Hant", "locale_source": "test"})
@@ -255,6 +258,22 @@ class AutoPreviewTest(unittest.TestCase):
         self.assertIn('data-metric="task-total">1,000</dd>', card)
         self.assertIn('data-metric="turn-delta">等待用量寫入</dd>', card)
         self.assertNotIn('data-metric="turn-delta">0</dd>', card)
+
+    def test_quota_read_stays_in_one_preview_and_stop_reuses_same_capture(self):
+        from test_turn_quota import source
+
+        with patch("codex_run_budget.turn_quota.read_meter_sources",
+                   return_value=source()) as reader:
+            self.preview()
+            card = next(self.output.glob("*.html")).read_text()
+            self.assertIn("80%", card)
+            self.assertIn("Pro", card)
+            handle({**self.payload, "hook_event_name": "Stop"}, self.data, home=self.root)
+            reader.assert_called_once()
+        receipt = json.loads(next((self.data / "auto-reports").glob("*.json")).read_text())
+        self.assertEqual(receipt["quota"]["rows"][0]["remaining_percent"], 80)
+        self.assertFalse(receipt["native_quota_refreshed"])
+        self.assertEqual(next(self.output.glob("*.html")).read_text(), card)
 
     def test_disabled_child_capture_and_governor_decision_are_preserved(self):
         event = {**self.payload, "hook_event_name": "SubagentStop", "agent_id": "child"}

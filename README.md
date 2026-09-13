@@ -149,8 +149,14 @@ remain. For an explicitly desired duration filter, use
 
 These bounded receipts are lighter than the manual multi-window report above:
 parent boundary counters plus deduplicated descendant request records in the
-current turn's observation window, with no native-quota refresh or unrelated
-Task scan. `SubagentStop` saves available numeric evidence; the parent's one
+current turn's observation window, with no unrelated Task scan. The existing
+pre-final call also makes one bounded, read-only native quota capture: account
+remaining percentages and movement since this Task's immediately previous card.
+These are shared account observations, not quota consumed by this Task. Actual
+native window durations are used for every plan, including Pro; reset or
+incomparable snapshots establish a new baseline, and unchanged percentages do
+not mean zero usage. Start and Stop do not refresh quota; Stop retains the
+pre-final quota timestamp. `SubagentStop` saves available numeric evidence; the parent's one
 pre-final read reconciles late records without asking children to self-report,
 wait, stop or continue. Parent/child subtotals, names/ownership and incomplete
 coverage are shown in the card. Missing counters stay unknown; Stop may precede
@@ -321,9 +327,12 @@ Set `CODEX_RUN_BUDGET_HOME` to override it. The SQLite database records:
 
 It does not intentionally record prompts, command text, tool arguments, tool
 responses, or transcript content. Governance and offline audits do not send
-telemetry over the network. The optional native meter uses Codex's signed-in
-account connection for read-only quota/usage requests, including thread IDs
-explicitly selected for backend usage lookup.
+telemetry over the network. The automatic pre-final quota capture uses Codex's
+signed-in connection for read-only account and rate-limit requests, not token
+history. The manual native meter additionally supports usage requests, including
+thread IDs explicitly selected for backend usage lookup. Private quota storage
+contains allowlisted numeric observations and hashed identities, not raw account
+IDs, names, email addresses or provider error text.
 
 Inspect recent runs and privacy-preserving lineage:
 

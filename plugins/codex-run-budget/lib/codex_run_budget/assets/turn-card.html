@@ -19,6 +19,15 @@
     #run-budget-$key .report-context-list li + li { margin-top: 6px; }
     #run-budget-$key .report-context-single { margin: 8px 0; }
     #run-budget-$key .report-context .text-small { color: var(--muted-foreground); margin: 6px 0; }
+    #run-budget-$key .report-quota { margin: 20px 0; }
+    #run-budget-$key .report-quota h3 { margin: 0 0 8px; }
+    #run-budget-$key .report-quota .text-small { color: var(--muted-foreground); margin: 6px 0; }
+    #run-budget-$key .report-quota-table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+    #run-budget-$key .report-quota-table th, #run-budget-$key .report-quota-table td { text-align: left; vertical-align: top; padding: 10px 12px 10px 0; border-bottom: 1px solid var(--border); }
+    #run-budget-$key .report-quota-table th:last-child, #run-budget-$key .report-quota-table td:last-child { padding-right: 0; }
+    #run-budget-$key .report-quota-table thead th { color: var(--muted-foreground); }
+    #run-budget-$key .report-quota-table th:nth-child(1) { width: 34%; }
+    #run-budget-$key .report-quota-table th:nth-child(2) { width: 23%; }
     #run-budget-$key dt { color: var(--muted-foreground); }
     #run-budget-$key dd { margin: 4px 0 0; }
     #run-budget-$key details { margin-top: 20px; }
@@ -54,6 +63,7 @@
     <p>$usage_label</p>
     <p>$coverage</p>
   </div>
+  $quota
   <div class="report-context">
     <h3>$label_context_heading</h3>
     $contexts

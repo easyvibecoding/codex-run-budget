@@ -1,5 +1,50 @@
 # Validation evidence
 
+## Account quota in the per-turn card — 2026-09-13 Asia/Taipei
+
+Installed `0.13.0+codex.20260913003157`. All 313 tests passed, plus Ruff,
+repository/plugin validators, reproducible runtime verification and redacted
+sensitive-data worktree/history scans. Added regressions cover fractional
+remaining-percentage-point differences, unchanged display, reset/deadline and
+plan/account changes, missing immediately previous captures, unrelated Tasks,
+malformed observations, bounded storage and quota-only RPC protocol requests.
+Plus and Pro fixtures use source-provided durations, not fixed plan/window maps.
+
+Independent read-back passed the accounting and privacy boundaries. An extra
+eight-worker concurrency check plus a repeated call made exactly one source
+read; a failing reader did not suppress Token metrics or trigger a Stop read.
+Quota-sourced plan fallback remains usable for comparison only with matching
+native account and bucket-plan evidence; it is not displayed as a detected
+account plan. No raw account identifiers, emails or provider errors are stored.
+
+A fresh real Codex CLI Task ran two short turns. Each emitted exactly one
+preview command, one inline reference, two model requests and one Stop receipt.
+The native account plan, main window and separately identified additional
+windows reached the card. The first capture established a baseline; the next
+main-window observation was unchanged, while changed additional-window reset
+timestamps prevented subtraction. The second capture's previous timestamp
+exactly matched the first. Stop reused the saved quota display without a new
+read, while its independent token counters matched native turn/Task counters.
+Between-turn model/effort switching and the absence of a Fast field still passed.
+No workloads were run to force a quota-percentage threshold change.
+
+All nine automatic-report catalogs now have 99 matching keys. The bordered
+layout passed 36 browser cases: nine languages, light/dark, 736px/320px, blocked
+network, no errors or horizontal overflow, three distinct quota rows and working
+details. Traditional Chinese desktop and German narrow screenshots were visually
+inspected. Browser fixtures are synthetic; CLI reference/counter evidence is not
+native desktop paint verification or evidence that immutable cards refresh at Stop.
+
+All 11 hooks read back enabled/trusted with zero issues. Source and installed
+trees matched; 27 retained pre-edit cache trees matched their hashes. Settings
+outside reviewed hook trust and optional test workspace trust, plus the report
+switch, remained unchanged. Runtime SHA-256:
+`eb5c3a574e75345c07417dbc63b56bd8a0ea81e3a010e7df8961616dce27290b`.
+Existing Tasks retain pinned code; new Tasks load the updated preview capture.
+Account snapshots remain shared observations, not per-Task quota billing or a
+token-to-subscription conversion. Displayed precision, delayed writes and resets
+not observable between captures remain explicit limitations.
+
 ## Per-turn settings and Task/turn metrics — 2026-09-13 Asia/Taipei
 
 Installed `0.13.0+codex.20260913001011`. All 293 tests passed, plus Ruff,

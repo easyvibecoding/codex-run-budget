@@ -559,6 +559,8 @@ def child_coverage(children: dict, locale="zh-Hant") -> str:
 
 
 def _documents(receipt: dict[str, Any]) -> tuple[str, str]:
+    from .quota_view import render_html, render_markdown
+
     text = ReportText(receipt.get("locale", "zh-Hant"))
     children = receipt.get("subagents") or {"status": "unavailable"}
     usage, complete = observed_total(receipt["usage"], children)
@@ -626,6 +628,8 @@ def _documents(receipt: dict[str, Any]) -> tuple[str, str]:
             "",
             text("status", value=receipt['usage_status']),
             "",
+            render_markdown(receipt.get("quota"), text),
+            "",
             "## " + text("limits"),
             "",
             *(f"- {line}" for line in notes),
@@ -649,6 +653,7 @@ def _documents(receipt: dict[str, Any]) -> tuple[str, str]:
         f"<h2>{escape(text('context_heading'))}</h2>"
         + "".join(f"<p>{escape(line)}</p>" for line in context_lines)
         + f"<p>{escape(text('status', value=receipt['usage_status']))}</p>"
+        + render_html(receipt.get("quota"), text)
         + f"<h2>{escape(text('limits'))}</h2><ul>"
         + "".join(f"<li>{escape(line)}</li>" for line in notes)
         + "</ul></main></html>"
@@ -798,6 +803,7 @@ def handle(
             locale = resolve_locale(home=home)
             text = ReportText(locale["locale"])
             from .child_usage import collect
+            from .turn_quota import saved
             children = collect(root, session, row["started"], now, home=home,
                                unnamed_label=text("unnamed"))
             receipt = {
@@ -823,6 +829,7 @@ def handle(
                 "stop_hook_active": payload.get("stop_hook_active") is True,
                 "model_requests_for_report": 0,
                 "native_quota_refreshed": False,
+                "quota": saved(root, key),
                 "subagents_included": children.get("agents_with_usage", 0) > 0,
                 "subagents": children,
                 "final_usage_may_not_yet_be_persisted": True,
