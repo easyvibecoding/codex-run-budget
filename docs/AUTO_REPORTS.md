@@ -163,7 +163,11 @@ The inline card keeps Task totals and the current turn's token increase visible.
 Observed parent/child coverage, account quota, current-turn settings and token
 details are four independent native `details` disclosures, closed by default.
 Their summaries reuse the report locale; opening and closing require no scripts,
-network requests or model calls. Stop Markdown/HTML remains expanded for offline
+network requests or model calls. When exactly one native main-Codex 7-day window
+is present, the closed quota summary also shows its remaining percentage and
+previous-card movement/status. Other quota buckets are never substituted, and
+resets or unavailable readings keep their existing labels. No weekly window is
+inferred from the subscription plan. Stop Markdown/HTML remains expanded for offline
 reading. Existing immutable cards retain their original layout.
 
 The bordered inline card pairs the main agent's native Task total with this

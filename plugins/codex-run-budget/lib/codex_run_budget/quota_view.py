@@ -107,8 +107,21 @@ def render_html(quota, text: ReportText, *, collapsible=False) -> str:
     """Return escaped fixed markup, suitable for both the inline card and Stop HTML."""
     title = escape(text("quota_heading"))
     container, heading = ("details", "summary") if collapsible else ("section", "h3")
+    summary = title
+    if collapsible and isinstance(quota, dict) and isinstance(quota.get("rows"), list):
+        # Only an unambiguous native main-Codex weekly window belongs in the
+        # compact summary. Never substitute another bucket or infer one by plan.
+        weekly = [row for row in quota["rows"][:16] if isinstance(row, dict)
+                  and row.get("bucket") == "codex" and row.get("duration_minutes") == 10080]
+        values = _rows({**quota, "rows": weekly}, text) if len(weekly) == 1 else []
+        if values:
+            _, remaining, change = values[0]
+            caption = " · ".join((text("quota_days", value=text.number(7)),
+                                  text("quota_remaining") + ": " + remaining,
+                                  text("quota_change") + ": " + change))
+            summary += '<span class="report-quota-weekly">' + escape(caption) + '</span>'
     parts = [f'<{container} class="report-quota" aria-label="{title}">'
-             f'<{heading}>{title}</{heading}>']
+             f'<{heading}>{summary}</{heading}>']
     parts.append('<p class="text-small report-quota-plan">'
                  + escape(_plan_note(quota, text)) + '</p>')
     rows = _rows(quota, text)

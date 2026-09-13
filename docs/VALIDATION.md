@@ -2,24 +2,29 @@
 
 ## Collapsible inline card sections — 2026-09-13 Asia/Taipei
 
-Installed `0.13.1+codex.20260913005143`. All 314 tests passed, plus Ruff and
+Installed `0.13.1+codex.20260913005626`. All 316 tests passed, plus Ruff and
 repository/plugin validators. Regression checks cover four independent, closed
 native disclosures with Task/turn metrics outside them, localized summary labels,
 missing quota, and unchanged expanded Stop HTML/Markdown. No accounting,
 collection, language-catalog, report-switch or hook-policy logic changed.
+The closed quota summary exposes only an unambiguous native main-Codex weekly
+remaining percentage and previous-card movement/status. Regressions exclude
+additional/ambiguous windows and retain fractional, reset, expired, unchanged
+and unavailable observations without inventing weekly windows from plan names.
 
 All 36 synthetic browser cases passed: nine languages, light/dark, 736px/320px,
 four initially closed sections, visible primary metrics, hidden detail bodies,
 independent mouse toggles, Enter/Space keyboard toggles, expanded content, no
-horizontal overflow or script errors. Traditional Chinese collapsed desktop and
+horizontal overflow or script errors, and weekly percentage/difference visible
+while the quota table is closed. Traditional Chinese collapsed desktop and
 German expanded narrow screenshots were visually reviewed. Browser wrapper
 evidence is not a claim of native desktop paint; existing immutable cards are
 not rewritten. This layout-only change did not require extra model canaries.
 
 All 11 hooks read back enabled/trusted with zero issues. Source/cache identities
-matched, all 28 retained old cache trees were preserved, and report settings plus
+matched, all 29 retained old cache trees were preserved, and report settings plus
 configuration outside reviewed hook trust hashes were unchanged. Runtime SHA-256:
-`183d7ddfc8a463365f280b2b15a5cd5d7d24dbf70e1d4baadc0ff7fd49b2c394`.
+`4e48e3dc27a52229d57527ce2f04705138f3cda7b356a878587fc067a105fa95`.
 New Tasks load the updated card; previously started Tasks keep pinned runtimes.
 
 ## Account quota in the per-turn card — 2026-09-13 Asia/Taipei

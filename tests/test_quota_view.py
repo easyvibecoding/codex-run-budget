@@ -33,11 +33,46 @@ class QuotaViewTest(unittest.TestCase):
                 folded = render_html(source, text, collapsible=True)
                 expanded = render_html(source, text)
                 title = escape(text("quota_heading"))
-                self.assertIn(f'<summary>{title}</summary>', folded)
+                self.assertIn(f'<summary>{title}', folded)
                 self.assertTrue(folded.endswith('</details>'))
                 self.assertNotIn(' open', folded)
                 self.assertIn(f'<h3>{title}</h3>', expanded)
                 self.assertTrue(expanded.endswith('</section>'))
+
+    def test_collapsed_weekly_summary_uses_only_main_window_and_localized_values(self):
+        for locale in LOCALES:
+            text = ReportText(locale)
+            source = quota(row(remaining_percent=72.125, delta_pp=-0.125),
+                           row(bucket="codex_bengalfox", remaining_percent=100, delta_pp=-42))
+            output = render_html(source, text, collapsible=True)
+            summary = output.split('</summary>', 1)[0]
+            self.assertIn('class="report-quota-weekly"', summary)
+            for expected in (text("quota_days", value=text.number(7)),
+                             text("quota_percent", value=text.number(72.125)),
+                             text("quota_delta_pp", value=text.number(-0.125))):
+                self.assertIn(escape(expected), summary)
+            self.assertNotIn("100", summary)
+            self.assertNotIn("-42", summary)
+            self.assertNotIn('report-quota-weekly', render_html(source, text))
+
+    def test_collapsed_weekly_summary_preserves_unknown_reset_and_unchanged(self):
+        text = ReportText("zh-Hant")
+        for status in ("unchanged", "reset", "expired", "previous_unavailable", "not_comparable"):
+            summary = render_html(quota(row(comparison=status, delta_pp=-42)), text,
+                                  collapsible=True).split('</summary>', 1)[0]
+            self.assertIn(escape(text("quota_" + status)), summary)
+            self.assertNotIn("-42", summary)
+            if status == "expired":
+                self.assertNotIn("72%", summary)
+        for source in (None, quota(row(bucket="spark")), quota(row(duration_minutes=300)),
+                       quota(row(), row())):
+            summary = render_html(source, text, collapsible=True).split('</summary>', 1)[0]
+            self.assertNotIn('report-quota-weekly', summary)
+        source = quota(row())
+        source["status"] = "unavailable"
+        summary = render_html(source, text, collapsible=True).split('</summary>', 1)[0]
+        self.assertIn(text("not_observed"), summary)
+        self.assertNotIn("72%", summary)
 
     def test_remaining_and_signed_percentage_points_preserve_small_observations(self):
         for locale, expected in (("en", "-0.125 pp"), ("de", "-0,125 Prozentpunkte")):
