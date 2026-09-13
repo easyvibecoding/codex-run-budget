@@ -192,6 +192,13 @@ SHA-pinned runtime outside the plugin cache. Recovery copies remain under
 `~/.codex/run-budget/cache-backups` (or `CODEX_RUN_BUDGET_HOME`). The helper does
 not alter hook trust, enabled states, or budget policy.
 
+After each update that changes hook definitions, open `/hooks` in the Codex CLI
+and review the changed `codex-run-budget` hooks again. Trust is tied to the exact
+hook hash: a plugin can be installed and enabled while its hooks are `modified`
+and skipped. Restarting the app or creating a Task from a phone does not grant
+trust. Finish the review before starting a new Task. The updater prints this
+reminder but never changes trust state or uses a trust-bypass flag.
+
 Starting in v0.4.2, trusted hook commands contain a small bootstrap and the exact
 runtime hash. They load verified bytes from the durable `runtimes` directory,
 so deleting/replacing the plugin cache does not remove an initialized task's

@@ -425,11 +425,20 @@ def main() -> int:
                 prewarm_runtime(version, data_root)
         return result
 
-    return preserve_install(
+    result = preserve_install(
         cache,
         install,
         backup_root=data_root / "cache-backups",
     )
+    if result == 0 and not args.retain_only:
+        print(
+            "Installation complete; hook trust was not changed. Review changed "
+            "codex-run-budget hooks in Codex CLI /hooks, then start a new Task. "
+            "Installed/enabled plugins may still have modified hooks that are skipped; "
+            "restarting the app does not grant trust.",
+            flush=True,
+        )
+    return result
 
 
 if __name__ == "__main__":
