@@ -1,5 +1,14 @@
 # Validation evidence
 
+## 2026-09-13: counter-source isolation (0.14.1)
+
+- Installed `0.14.1+codex.20260913150757` into a fresh isolated Codex home and invoked its actual bootstrap hooks. The installed runtime bytes matched the freshly built package.
+- A synthetic legacy baseline of 12,000 and later legacy total of 12,500 coexisted with a native thread total of 9,000 and native turn total of 500. Stop returned in 0.136 seconds with `native_turn_counter`, `counter_source: native_request` and turn usage 500, instead of a false counter reset.
+- After a native thread total of 9,500, native turn total of 1,000 and explicit completion, the pinned background worker published revision 2 with usage 1,000. A next-turn 9,999,000 counter was excluded. Original Stop JSON/HTML/Markdown bytes remained unchanged.
+- All 377 Python tests passed, including real same-source declines, invalid latest native records, first-turn proof, cross-source fallback rejection and a native turn decrease across bounded snapshots while the thread total rises. The prior preview and reconciliation fixtures now model consistent native source continuity when testing a true reset or later usage.
+- Ruff, repository/runtime validation, plugin manifest validation and the sensitive-data gate passed. Governor, Ledger and budget transcript source remain byte-identical to the preceding release; existing HALT, STEER, deny and report-failure tests passed. The synthetic ungoverned Stop emitted no new budget decision fields.
+- This proves isolated installed-hook accounting and policy preservation; it is not a new native UI/trust observation or a billing-accuracy guarantee. The maintainer's active installation was not changed by this validation.
+
 ## 2026-09-13: bounded completion reconciliation (0.14.0)
 
 - A fresh isolated Codex home installed `0.14.0+codex.20260913144124`. Its actual installed bootstrap hooks returned Stop in 0.1117 seconds and the pinned worker revised synthetic turn usage from 200 to 500 after completion. The next turn was excluded; all Stop JSON/HTML/Markdown bytes and the Governor response were preserved. This is an installed-hook invocation, not proof of new hook trust in the maintainer’s active Task.

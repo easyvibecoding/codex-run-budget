@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here.
 
+## 0.14.1 - 2026-09-13
+
+- Separate native request/thread counters from legacy `token_count` events before reset detection. Different historical baselines no longer produce a false counter-reset result.
+- Prefer a validated native counter for the selected turn even when a later legacy event uses a different total. Native turn usage remains available without subtracting incompatible sources; fallback subtraction requires matching sources.
+- Preserve same-source counter regression, malformed native turn counters, source identity and completion-boundary checks. Store `counter_source` in preview, Stop and completion evidence; budget governance is unchanged.
+
 ## 0.14.0 - 2026-09-13
 
 - Add one bounded, report-only completion check after an eligible Stop: at most eight reads with a 25-second process deadline, no model calls or Governor events.

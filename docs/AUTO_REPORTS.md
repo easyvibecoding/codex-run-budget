@@ -267,6 +267,27 @@ machine-readable compatibility fields are unchanged.
 
 ### Counter interpretation
 
+From v0.14.1, native request/thread counters (`native_request`) and legacy
+`token_count` event counters are separate evidence sources. They can represent
+different historical baselines in the same native file. For example, a synthetic
+legacy total of 12,000 followed by a valid native thread total of 9,000 and a
+native turn total of 500 is not by itself a reset. The selected turn may report
+500 directly from its native turn counter. It must not subtract 12,000 from
+9,000, add both totals, or treat a later legacy event as a replacement native
+baseline.
+
+A matching native request/thread counter takes priority; event counters remain
+fallback evidence. Reset detection compares observations within the selected source;
+a decrease there or an invalid native turn counter still makes the result
+unknown. Native turn decreases are also rejected across bounded snapshots, even
+when the older native record has fallen outside the tail and the thread total rises.
+Boundary subtraction across different `counter_source` values returns
+`counter_source_changed`, unless an independently validated native turn counter
+supplies the exact turn amount. Missing, malformed or incomplete evidence retains
+its existing partial/unknown rules. Preview, Stop and completion revision evidence
+record the selected `counter_source`; this affects reporting, not the Governor's
+budget ledger or policy decisions.
+
 - Parent turn usage prefers validated native `turn_token_usage` paired with the
   newest matching `thread_token_usage`. This matters when a long Task's current
   rollout segment begins with existing Task history: the Task counter is not a
