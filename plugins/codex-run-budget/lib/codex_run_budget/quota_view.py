@@ -103,10 +103,12 @@ def _plan_note(quota, text: ReportText) -> str:
     return text("quota_plan", plan=display or text("quota_plan_unknown"))
 
 
-def render_html(quota, text: ReportText) -> str:
+def render_html(quota, text: ReportText, *, collapsible=False) -> str:
     """Return escaped fixed markup, suitable for both the inline card and Stop HTML."""
     title = escape(text("quota_heading"))
-    parts = ['<section class="report-quota" aria-label="' + title + '"><h3>' + title + '</h3>']
+    container, heading = ("details", "summary") if collapsible else ("section", "h3")
+    parts = [f'<{container} class="report-quota" aria-label="{title}">'
+             f'<{heading}>{title}</{heading}>']
     parts.append('<p class="text-small report-quota-plan">'
                  + escape(_plan_note(quota, text)) + '</p>')
     rows = _rows(quota, text)
@@ -127,7 +129,7 @@ def render_html(quota, text: ReportText) -> str:
         parts.append('<p class="text-small">' + escape(captured) + '</p>')
     parts.extend('<p class="text-small">' + escape(text(key)) + '</p>'
                  for key in ("quota_scope_note", "quota_precision_note"))
-    parts.append('</section>')
+    parts.append(f'</{container}>')
     return "".join(parts)
 
 

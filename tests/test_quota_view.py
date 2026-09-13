@@ -4,6 +4,7 @@ import copy
 import sys
 import unittest
 from html import escape
+from html.parser import HTMLParser
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,6 +26,19 @@ def row(**changes):
 
 
 class QuotaViewTest(unittest.TestCase):
+    def test_inline_quota_is_collapsible_but_stop_html_remains_expanded(self):
+        for locale in LOCALES:
+            text = ReportText(locale)
+            for source in (None, quota(row())):
+                folded = render_html(source, text, collapsible=True)
+                expanded = render_html(source, text)
+                title = escape(text("quota_heading"))
+                self.assertIn(f'<summary>{title}</summary>', folded)
+                self.assertTrue(folded.endswith('</details>'))
+                self.assertNotIn(' open', folded)
+                self.assertIn(f'<h3>{title}</h3>', expanded)
+                self.assertTrue(expanded.endswith('</section>'))
+
     def test_remaining_and_signed_percentage_points_preserve_small_observations(self):
         for locale, expected in (("en", "-0.125 pp"), ("de", "-0,125 Prozentpunkte")):
             text = ReportText(locale)
@@ -153,6 +167,32 @@ class QuotaViewTest(unittest.TestCase):
         self.assertIn('scope="col"', card)
         self.assertIn('scope="row"', card)
         self.assertNotIn("Fast", card)
+        class Structure(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.depth = 0
+                self.disclosures = []
+                self.metrics = []
+
+            def handle_starttag(self, tag, attrs):
+                attrs = dict(attrs)
+                if tag == "details":
+                    self.disclosures.append((self.depth, "open" in attrs, attrs.get("class")))
+                    self.depth += 1
+                if "data-metric" in attrs:
+                    self.metrics.append((attrs["data-metric"], self.depth))
+
+            def handle_endtag(self, tag):
+                if tag == "details":
+                    self.depth -= 1
+
+        structure = Structure()
+        structure.feed(card)
+        self.assertEqual(structure.disclosures, [
+            (0, False, "report-scope"), (0, False, "report-quota"),
+            (0, False, "report-context"), (0, False, None),
+        ])
+        self.assertEqual(structure.metrics, [("task-total", 0), ("turn-delta", 0)])
 
 
 if __name__ == "__main__":

@@ -159,6 +159,13 @@ turn is added. A completed child does not need to remain running to be counted.
 
 ### Current-turn settings and layout
 
+The inline card keeps Task totals and the current turn's token increase visible.
+Observed parent/child coverage, account quota, current-turn settings and token
+details are four independent native `details` disclosures, closed by default.
+Their summaries reuse the report locale; opening and closing require no scripts,
+network requests or model calls. Stop Markdown/HTML remains expanded for offline
+reading. Existing immutable cards retain their original layout.
+
 The bordered inline card pairs the main agent's native Task total with this
 turn's added tokens. Both primary values exclude children; the separately
 labeled observed turn subtotal adds only saved child request evidence in the

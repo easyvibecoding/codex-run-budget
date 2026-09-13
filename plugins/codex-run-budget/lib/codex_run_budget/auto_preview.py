@@ -103,7 +103,7 @@ def render_card(receipt: dict) -> str:
         + "</div></div>"
         for row in children.get("rows", [])[:32]
     )
-    escaped["quota"] = render_html(receipt.get("quota"), text)
+    escaped["quota"] = render_html(receipt.get("quota"), text, collapsible=True)
     return Template(template.decode()).substitute(escaped)
 
 
