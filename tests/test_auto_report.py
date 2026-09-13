@@ -62,7 +62,7 @@ class AutoReportTest(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.data = self.root / "data"
         self.page = self.root / "private-source.jsonl"
-        self.meta = {"type": "session_meta", "payload": {"id": "private-task-id"}}
+        self.meta = {"type": "session_meta", "payload": {"id": "private-session-id"}}
         self.page.write_text(json.dumps(self.meta) + "\n" + json.dumps(counter(1000)) + "\n")
         self.payload = {
             "session_id": "private-session-id",
@@ -140,7 +140,7 @@ class AutoReportTest(unittest.TestCase):
         self.assertEqual(receipt["usage"]["total"], 200)
         self.assertEqual(receipt["usage"]["cached_input"], 160)
         self.assertEqual(receipt["model_requests_for_report"], 0)
-        self.assertEqual(receipt["task_hash"], stable_hash("private-task-id"))
+        self.assertEqual(receipt["task_hash"], stable_hash("private-session-id"))
         self.assertIsNone(self.event("Stop", 10))
         self.assertEqual(recent(self.data)[0]["state"], "reported")
 
@@ -216,7 +216,7 @@ class AutoReportTest(unittest.TestCase):
     def test_request_counter_advances_old_event_without_double_counting(self):
         self.start()
         self.append(counter(1200))
-        self.append(native_counter("private-task-id", self.payload["turn_id"], 1500,
+        self.append(native_counter("private-session-id", self.payload["turn_id"], 1500,
                                    request=300, turn_total=500))
         self.assertEqual(snapshot(str(self.page), self.payload["turn_id"])["usage"]["total"], 1500)
         self.append(counter(1500))
@@ -224,7 +224,7 @@ class AutoReportTest(unittest.TestCase):
         self.assertEqual(self.report()["usage"]["total"], 500)
 
     def test_native_counter_rejects_foreign_scope_missing_fields_and_bad_values(self):
-        base = native_counter("private-task-id", self.payload["turn_id"], 1200)
+        base = native_counter("private-session-id", self.payload["turn_id"], 1200)
         variants = [
             {"thread_id": "other-task"}, {"session_id": "other-session"},
             {"root_turn_id": "other-turn"}, {"response_id": ""},
@@ -243,8 +243,8 @@ class AutoReportTest(unittest.TestCase):
                 self.assertIsNone(snapshot(str(self.page), self.payload["turn_id"])["usage"])
 
     def test_request_only_and_foreign_turn_do_not_replace_cumulative_counter(self):
-        self.append(native_counter("private-task-id", "other-turn", 9000))
-        request = native_counter("private-task-id", self.payload["turn_id"], 1200)
+        self.append(native_counter("private-session-id", "other-turn", 9000))
+        request = native_counter("private-session-id", self.payload["turn_id"], 1200)
         del request["payload"]["thread_token_usage"]
         self.append(request)
         self.assertEqual(snapshot(str(self.page), self.payload["turn_id"])["usage"]["total"], 1000)
@@ -466,7 +466,7 @@ class AutoReportTest(unittest.TestCase):
         after = snapshot(str(self.page), self.payload["turn_id"])
         self.assertEqual(_delta(before, after), (None, "snapshot_incomplete"))
         # A validated native turn counter does not depend on that baseline.
-        self.append(native_counter("private-task-id", self.payload["turn_id"], 1700,
+        self.append(native_counter("private-session-id", self.payload["turn_id"], 1700,
                                    request=100, turn_total=200))
         usage, status = _delta(before, snapshot(str(self.page), self.payload["turn_id"]))
         self.assertEqual((usage["total"], status), (200, "native_turn_counter"))
@@ -481,6 +481,38 @@ class AutoReportTest(unittest.TestCase):
         self.append(counter(1000))
         usage, status = _delta(before, snapshot(str(self.page), self.payload["turn_id"]))
         self.assertEqual((usage["total"], status), (0, "boundary_counter_difference"))
+
+    def test_foreign_start_stop_and_both_never_publish_another_tasks_counters(self):
+        for stage in ("start", "stop", "both"):
+            with self.subTest(stage=stage):
+                self.data = self.root / ("identity-" + stage)
+                self.page.write_text(json.dumps({"type": "session_meta", "payload": {
+                    "id": "foreign-task" if stage in ("start", "both")
+                    else self.payload["session_id"]}}) + "\n" + json.dumps(counter(1000)) + "\n")
+                self.start()
+                if stage == "stop":
+                    self.page.write_text(json.dumps({"type": "session_meta", "payload": {
+                        "id": "foreign-task"}}) + "\n")
+                elif stage == "start":
+                    self.page.write_text(json.dumps({"type": "session_meta", "payload": {
+                        "id": self.payload["session_id"]}}) + "\n")
+                self.append({"type": "turn_context", "payload": {
+                    "turn_id": self.payload["turn_id"], "model": "example-foreign-model",
+                    "effort": "high"}})
+                self.append(counter(98000))
+                self.event("Stop", 10)
+                receipt = self.report()
+                self.assertEqual(receipt["task_hash"], stable_hash(self.payload["session_id"]))
+                self.assertFalse(receipt["source_identity_verified"])
+                self.assertEqual(receipt["usage_status"], "source_identity_unavailable")
+                self.assertIsNone(receipt["usage"])
+                self.assertIsNone(receipt["task_usage"])
+                self.assertEqual(receipt["stop_contexts"], [])
+                self.assertTrue(receipt["contexts_limited"])
+                for path in (self.data / "auto-reports").glob("*.html"):
+                    content = path.read_text()
+                    self.assertNotIn("98,000", content)
+                    self.assertNotIn("example-foreign-model", content)
 
     def test_context_is_exact_turn_unknown_fast_not_false_and_safe(self):
         self.start()
@@ -511,7 +543,7 @@ class AutoReportTest(unittest.TestCase):
             raw = path.read_bytes()
             for secret in (
                 b"private-source",
-                b"private-task-id",
+                b"private-session-id",
                 b"private-session-id",
                 b"private-turn-id",
                 b"PRIVATE PROMPT",

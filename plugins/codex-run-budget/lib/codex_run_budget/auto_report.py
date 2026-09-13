@@ -358,9 +358,89 @@ def _first_turn_proof(records, turn: str) -> tuple[bool, bool]:
     return began, began and not model_seen and not usage_seen
 
 
-def snapshot(path_value: Any, turn_id: str, *, at_turn_start: bool = False) -> dict[str, Any]:
+def _completion_prefix(lines: list[tuple[bytes, int]], task: str, turn: str) -> tuple:
+    """Find a witnessed terminal boundary without reading any later turn as evidence.
+
+    A completion marker alone cannot identify the preceding unscoped counters.
+    Require a matching start/context in this bounded prefix, and reject broken
+    ordering or explicit foreign identities. File quietness is never evidence.
+    """
+    active = None
+    target_seen = False
+
+    def unavailable(status, **extra):
+        return None, {"completion_observed": False, "completion_status": status, **extra}
+
+    for index, (line, line_end) in enumerate(lines):
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except (ValueError, RecursionError):
+            return unavailable("completion_structure_invalid", invalid_records=True)
+        if (not isinstance(record, dict) or not isinstance(record.get("type"), str)
+                or not isinstance(record.get("payload"), dict)):
+            return unavailable("completion_structure_invalid", invalid_records=True)
+        kind, payload = record["type"], record["payload"]
+        event = payload.get("type")
+        if kind == "session_meta":
+            if index != 0 or payload.get("id") != task:
+                return unavailable("completion_identity_ambiguous")
+            continue
+        if (payload.get("thread_id", task) != task
+                or payload.get("session_id", task) != task):
+            return unavailable("completion_identity_ambiguous")
+        is_context = kind == "turn_context" or kind == "event_msg" and event == "turn_context"
+        is_start = kind == "event_msg" and event == "task_started"
+        if is_context or is_start:
+            next_turn = payload.get("turn_id")
+            if not isinstance(next_turn, str) or not next_turn:
+                return unavailable("completion_order_ambiguous")
+            if target_seen and (next_turn != turn or is_start):
+                return unavailable("completion_order_ambiguous")
+            active = next_turn
+            target_seen |= active == turn
+            continue
+        if kind == "event_msg" and event in ("task_complete", "turn_aborted"):
+            event_turn = payload.get("turn_id")
+            if event_turn == turn:
+                if event == "turn_aborted":
+                    return unavailable("completion_aborted")
+                if not target_seen or active != turn:
+                    return unavailable("completion_start_unobserved")
+                if payload.get("root_turn_id", turn) != turn:
+                    return unavailable("completion_identity_ambiguous")
+                evidence = {"completion_observed": True, "completion_status": "observed",
+                            "completion_end": line_end}
+                stamp = record.get("timestamp")
+                if isinstance(stamp, str) and 0 < len(stamp) <= 128:
+                    try:
+                        parsed = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+                        if parsed.tzinfo is not None and math.isfinite(parsed.timestamp()):
+                            evidence["completed_at"] = stamp
+                    except (ValueError, OverflowError):
+                        pass
+                return lines[:index + 1], evidence
+            if active == turn:
+                return unavailable("completion_order_ambiguous")
+            if event_turn in (None, active):
+                active = None
+            continue
+        if active == turn and (payload.get("turn_id", turn) != turn
+                               or payload.get("root_turn_id", turn) != turn):
+            return unavailable("completion_identity_ambiguous")
+    return unavailable("completion_not_observed")
+
+
+def snapshot(path_value: Any, turn_id: str, *, at_turn_start: bool = False,
+             completed_only: bool = False) -> dict[str, Any]:
     """Only header identity and a bounded tail are read; no text is persisted."""
-    result: dict[str, Any] = {"status": "unavailable", "usage": None, "contexts": []}
+    unavailable: dict[str, Any] = {"status": "unavailable", "usage": None, "contexts": []}
+    if completed_only:
+        unavailable.update(completion_observed=False, completion_status="unavailable")
+        if at_turn_start:
+            return {**unavailable, "completion_status": "conflicting_snapshot_modes"}
+    result = dict(unavailable)
     if not isinstance(path_value, str) or not path_value:
         return result
     path = Path(path_value)
@@ -406,6 +486,13 @@ def snapshot(path_value: Any, turn_id: str, *, at_turn_start: bool = False) -> d
         # Incomplete first/last records never establish a counter value.
         if offset:
             lines = lines[1:]
+        if completed_only:
+            prefix, evidence = _completion_prefix(lines, identity, turn_id)
+            result.update(evidence)
+            if prefix is None:
+                return {**result, "status": "unavailable", "usage": None, "contexts": []}
+            lines = prefix
+            result["size"] = result["completion_end"]
         if lines[-1][0]:
             try:
                 json.loads(lines[-1][0])
@@ -506,7 +593,7 @@ def snapshot(path_value: Any, turn_id: str, *, at_turn_start: bool = False) -> d
         return result
     except (OSError, ValueError, TypeError, AttributeError, RecursionError,
             KeyError, OverflowError):
-        return {"status": "unavailable", "usage": None, "contexts": []}
+        return unavailable
 
 
 def _delta(before: dict[str, Any], after: dict[str, Any]) -> tuple[dict[str, int] | None, str]:
@@ -593,6 +680,10 @@ def _documents(receipt: dict[str, Any]) -> tuple[str, str]:
         return text.number(usage[key] if usage is not None else None)
 
     rows = [
+        (text("report_revision"), str(receipt.get("revision", 1))),
+        (text("reconcile_heading"), text("reconcile_" + receipt.get(
+            "reconciliation_status", "pending"))),
+        (text("report_updated"), receipt.get("reconciled_at", receipt["stopped_at"])),
         (text("elapsed_wait"), text.duration(receipt['elapsed_seconds'], minutes=False)),
         (text("task_total"), text.number((receipt.get("task_usage") or {}).get("total"))),
         (text("total" if complete else "subtotal"), number("total")),
@@ -609,6 +700,9 @@ def _documents(receipt: dict[str, Any]) -> tuple[str, str]:
     notes = [text("note_" + key) for key in (
         "stop", "usage", "counter", "subsets", "scope", "children", "render"
     )]
+    if receipt.get("completion_observed"):
+        notes[0] = text("note_completion")
+    notes.append(text("note_reconcile"))
     contexts = receipt["stop_contexts"]
     context_lines = []
     for context in contexts:
@@ -778,7 +872,9 @@ def handle(
                     start_ticks = ticks - (now - started)
                     observed["recovered_at"] = now
                 if observed.get("task_hash") != stable_hash(session):
-                    observed["fresh_turn_start"] = False
+                    # The hook selects the Task. A foreign transcript cannot
+                    # seed counters, contexts, or identity in its private state.
+                    observed = {"status": "source_unavailable", "usage": None, "contexts": []}
                 observed["start_event"] = event
                 # A later tool's model is not evidence of the original start model.
                 observed["hook_model"] = None if recovery else _model(payload.get("model"))
@@ -843,7 +939,11 @@ def handle(
                 return None
             started = json.loads(row["baseline"])
             stopped = snapshot(payload.get("transcript_path"), turn)
+            source_verified = (started.get("task_hash") == stable_hash(session)
+                               and stopped.get("task_hash") == stable_hash(session))
             usage, status = _delta(started, stopped)
+            if not source_verified:
+                usage, status = None, "source_identity_unavailable"
             locale = resolve_locale(home=home)
             text = ReportText(locale["locale"])
             from .child_usage import collect
@@ -853,10 +953,10 @@ def handle(
             receipt = {
                 "schema_version": 2,
                 "scope": "user_turn_stop_boundary",
-                "task_hash": started.get("task_hash") or "unknown",
+                "task_hash": stable_hash(session),
+                "source_identity_verified": source_verified,
                 "task": task_description(session, home=home, unnamed_label=text("unnamed"))
-                if started.get("task_hash") == stable_hash(session)
-                else None,
+                if source_verified else None,
                 "turn_hash": row["turn_hash"],
                 "elapsed_seconds": round(elapsed, 3),
                 "started_at": datetime.fromtimestamp(row["started"], timezone.utc).isoformat(),
@@ -864,12 +964,12 @@ def handle(
                 "start_recovered": "recovered_at" in started,
                 "stopped_at": datetime.fromtimestamp(now, timezone.utc).isoformat(),
                 "usage": usage,
-                "task_usage": stopped.get("usage"),
+                "task_usage": stopped.get("usage") if source_verified else None,
                 "usage_status": status,
-                "start_model": started.get("hook_model"),
-                "stop_model": _model(payload.get("model")),
-                "stop_contexts": stopped["contexts"],
-                "contexts_limited": stopped.get("contexts_limited", False),
+                "start_model": started.get("hook_model") if source_verified else None,
+                "stop_model": _model(payload.get("model")) if source_verified else None,
+                "stop_contexts": stopped["contexts"] if source_verified else [],
+                "contexts_limited": stopped.get("contexts_limited", False) or not source_verified,
                 "snapshot_scan_bytes": started.get("scan_bytes", 0) + stopped.get("scan_bytes", 0),
                 "stop_tail_limited": stopped.get("tail_limited"),
                 "stop_hook_active": payload.get("stop_hook_active") is True,

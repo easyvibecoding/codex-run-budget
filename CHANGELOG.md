@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here.
 
+## 0.14.0 - 2026-09-13
+
+- Add one bounded, report-only completion check after an eligible Stop: at most eight reads with a 25-second process deadline, no model calls or Governor events.
+- Require the selected turn's explicit native completion boundary before publishing revision 2, excluding later-turn counters and preserving the original child window and quota observation.
+- Preserve the original Stop JSON/HTML/Markdown and inline snapshot; point the report index to a separate completion revision. Reports show revision, completion status and update time.
+- Reject foreign transcript identities at start and Stop, and retain unknown/partial accounting when completion, baseline, counter or child evidence is insufficient.
+- Record the mobile A/B result: a newly emitted reference loaded revised contents, while the original inline card retained its prior snapshot. Task reentry is not a promised refresh route.
+
 ## 0.13.4 - 2026-09-13
 
 - Fix inline report text disappearing when a remote host omits or misbinds its theme variables. Pair browser system foreground/background colors and scope text styles to each card.

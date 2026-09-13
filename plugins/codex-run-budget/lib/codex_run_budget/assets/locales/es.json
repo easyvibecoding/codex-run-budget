@@ -97,5 +97,13 @@
   "note_children": "Los subagentes sin terminar, los registros de solicitudes faltantes y los límites de exploración siguen incompletos. El informe no espera, no fuerza la detención ni solicita continuación.",
   "note_render": "La representación fija de Python local no llama a ningún modelo, no solicita continuación y no modifica la respuesta del asistente ni las conversaciones de origen.",
   "decimal": ",",
-  "group": "."
+  "group": ".",
+  "report_revision": "Revisión del informe",
+  "reconcile_heading": "Comprobación de finalización",
+  "report_updated": "Última actualización",
+  "reconcile_pending": "Instantánea provisional de Stop",
+  "reconcile_complete": "Finalización observada",
+  "reconcile_partial": "Finalización observada; evidencia parcial",
+  "note_completion": "El uso del agente principal termina en el evento explícito de finalización del turno seleccionado. El uso de los subagentes conserva la ventana original desde el inicio hasta Stop; los turnos posteriores quedan excluidos. Esto no demuestra que todo el Task haya terminado.",
+  "note_reconcile": "Una comprobación acotada en segundo plano puede publicar una revisión tras Stop al confirmar la finalización del turno, sin llamar a ningún modelo. Si falta evidencia de finalización, la instantánea de Stop sigue siendo provisional. Las tarjetas integradas conservan su instantánea original; volver a abrir el Task no garantiza que se actualicen."
 }

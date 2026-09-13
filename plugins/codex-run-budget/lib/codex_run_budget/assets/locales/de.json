@@ -97,5 +97,13 @@
   "note_children": "Nicht beendete Subagenten, fehlende Anfrageaufzeichnungen und Scan-Limits bleiben unvollständig. Der Bericht wartet nicht, beendet nichts zwangsweise und fordert keine Fortsetzung an.",
   "note_render": "Das feste lokale Python-Rendering ruft kein Modell auf, fordert keine Fortsetzung an und ändert weder die Antwort des Assistenten noch die ursprünglichen Unterhaltungen.",
   "decimal": ",",
-  "group": "."
+  "group": ".",
+  "report_revision": "Berichtsversion",
+  "reconcile_heading": "Abschlussprüfung",
+  "report_updated": "Zuletzt aktualisiert",
+  "reconcile_pending": "Vorläufiger Stop-Snapshot",
+  "reconcile_complete": "Abschluss beobachtet",
+  "reconcile_partial": "Abschluss beobachtet; Nachweise unvollständig",
+  "note_completion": "Die Nutzung des Hauptagenten endet am ausdrücklichen Abschlussereignis des ausgewählten Turns. Für Subagenten bleibt das ursprüngliche Zeitfenster vom Start bis Stop erhalten; nachfolgende Turns sind ausgeschlossen. Dies belegt nicht, dass der gesamte Task abgeschlossen ist.",
+  "note_reconcile": "Eine begrenzte Hintergrundprüfung kann nach Stop eine Berichtsversion mit bestätigtem Turn-Abschluss veröffentlichen, ohne ein Modell aufzurufen. Fehlt der Abschlussnachweis, bleibt der Stop-Snapshot vorläufig. Inline-Karten behalten ihren ursprünglichen Snapshot; das erneute Öffnen des Tasks garantiert keine Aktualisierung."
 }

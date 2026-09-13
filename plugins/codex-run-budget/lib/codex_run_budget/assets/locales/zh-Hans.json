@@ -97,5 +97,13 @@
   "note_children": "未完成的子代理、缺失的请求记录和扫描限制仍会造成不完整。报告不会等待、强制停止或请求续跑。",
   "note_render": "固定的本地 Python 渲染不调用模型、不请求续跑，也不会修改助理的回答或源对话。",
   "decimal": ".",
-  "group": ","
+  "group": ",",
+  "report_revision": "报告版本",
+  "reconcile_heading": "结束后核对",
+  "report_updated": "最后更新时间",
+  "reconcile_pending": "Stop 暂定快照",
+  "reconcile_complete": "已观测回合完成",
+  "reconcile_partial": "已观测回合完成；数据仍不完整",
+  "note_completion": "主代理用量截止于指定回合的明确完成事件；子代理保留原本开始至 Stop 的时间范围，排除后续回合。这不代表整个 Task 已完成。",
+  "note_reconcile": "Stop 后会以有界后台核对生成结算版，不调用模型。缺少完成证据时保留暂定快照。内嵌卡片保留原始快照，重新进入 Task 不保证刷新。"
 }

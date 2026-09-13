@@ -78,7 +78,8 @@ JSON files under the budget data directory's `auto-reports/`. Files are mode
 persisted. The Stop output contains only an informational `systemMessage`.
 Existing budget decisions, context and enforcement fields are preserved.
 HTML and JSON are written exclusively before atomically replacing only this
-turn's exact pending Markdown. Completed or user-edited files are not overwritten.
+turn's exact pending Markdown. Stop publication does not overwrite completed or
+user-edited files.
 The optional Markdown fallback exists before the answer and explicitly says
 pending. Interrupted, disabled, short or failed turns may leave it pending.
 
@@ -118,6 +119,41 @@ do not generate full turn reports. Child numeric capture is separate. Duplicate
 deliveries cannot overwrite report files. A crash
 after claiming leaves an incomplete attempt without automatic retries; partial
 files are retained, and only fully written outputs are announced.
+
+## Completion revision (v0.14)
+
+After the normal Governor dispatch and an eligible reported Stop, the hook adapter
+may launch one detached report-only child. The child never enters Governor,
+changes a budget ledger/admission decision, invokes a model, refreshes quota or
+requests a continuation. It performs at most eight bounded snapshot reads with
+a 25-second process deadline, checks the report switch again before publishing,
+and exits. A disabled switch, absent receipt, repeated Stop or failed launch does
+not start another worker. No recurring monitor or scheduler is installed.
+
+A matching native `task_complete` record is required. File quietness is not
+completion evidence. The reader also requires matching Task/turn context or a
+start inside the bounded prefix, rejects foreign or ambiguous ordering, and
+truncates evidence at that completion record before interpreting counters and
+model/effort observations. Subsequent turns cannot supply usage or settings.
+The native format is observational and can change; unavailable completion,
+missing counters, reset counters and bounded evidence remain provisional/partial.
+This is completion of the selected user turn, not proof the whole Task is done.
+
+The completion revision keeps the original start-to-Stop elapsed time and child
+window; it may include child numeric records persisted late for that same window.
+Quota remains the original timestamped pre-final account observation. The Stop
+JSON/HTML/Markdown remain immutable. Separate `.reconciled.json`, `.reconciled.html`
+and `.reconciled.md` files carry revision 2, check status and update time. No
+original report path is overwritten; edits and symlinks remain untouched. The
+timing index points to the new Markdown revision after successful publication.
+
+Inline HTML is not overwritten. A mobile A/B experiment confirmed that a new
+reference read the updated source but the original card retained A after the
+source became B. Reentering the Task is not a reliable refresh API. Open the latest
+report from `auto-report list`; neither the old card nor sent answer is promised
+automatic in-place refresh. Hashed job state contains only its key, status,
+attempt count and update time. Native selectors travel through the child's stdin
+and are not persisted in job state or command-line arguments.
 
 ## Evidence and cost
 
@@ -191,8 +227,8 @@ permits a missing transcript path and a continuation decision. Capture can prece
 final persistence; the one pre-final reread reconciles records that arrived later.
 It cannot force native counters to flush or guarantee every child's final tokens.
 Missing sources, limited scans, pending agents and conflicts remain visible as
-partial/unknown. No background polling, blocking wait, agent interruption or retry
-turn is added. A completed child does not need to remain running to be counted.
+partial/unknown. The completion revision adds only its bounded report-only check;
+no agent interruption or model retry turn is added. A completed child does not need to remain running to be counted.
 
 ### Current-turn settings and layout
 

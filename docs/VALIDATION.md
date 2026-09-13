@@ -1,5 +1,18 @@
 # Validation evidence
 
+## 2026-09-13: bounded completion reconciliation (0.14.0)
+
+- A fresh isolated Codex home installed `0.14.0+codex.20260913144124`. Its actual installed bootstrap hooks returned Stop in 0.1117 seconds and the pinned worker revised synthetic turn usage from 200 to 500 after completion. The next turn was excluded; all Stop JSON/HTML/Markdown bytes and the Governor response were preserved. This is an installed-hook invocation, not proof of new hook trust in the maintainer’s active Task.
+- Final runtime SHA-256: `85be9a7647824817ceaa3974927de264175d43be68eb7e0ca6ca04ebd279e783`.
+
+- Ported the report-only completion worker and exact-turn completion snapshot from Codex Usage Reports. Governor, Ledger and budget transcript source are unchanged; the Stop adapter preserves their original result before scheduling reporting work.
+- Synthetic regression starts with a 200-token Stop delta, writes a late 500-token native turn counter and explicit completion, then verifies revision 2. A subsequent 9,999,000-token counter and later model context cannot enter that completed turn's report.
+- Original Stop JSON, HTML and Markdown stay immutable. The timing index selects the separate completion revision; edited files, symlinks and pre-existing revision targets are preserved.
+- Worker tests exercise missing completion, counter reset, disabled reporting, duplicate delivery, foreign sources, launch failures, bounded process completion and private selector handling. Adapter regressions verify that worker failure cannot call Governor or change HALT, STEER, block or deny results.
+- All 368 Python tests passed, including 18 completion-worker and five budget-adapter regressions. Ruff, repository/runtime validation, `git diff --check` and the worktree sensitive-data gate passed (zero findings). The signal regression uses a real subprocess alarm; the collector's ordinary exception handler cannot swallow the deadline.
+- A real source-hook subprocess returned from Stop before delayed completion; its detached child observed the late record and published revision 2. This is a synthetic local process test, not a new native Codex lifecycle or billing-accuracy claim.
+- The mobile A/B experiment separately observed a new reference rendering B/250 while the original A/100 card stayed unchanged after source replacement. The plugin keeps inline snapshots immutable and does not promise Task-reentry refresh.
+
 ## 2026-09-13: remote report text visibility (0.13.4)
 
 - Changed only the report presentation to use paired browser system colors and scoped typography, removing its dependency on host foreground tokens.

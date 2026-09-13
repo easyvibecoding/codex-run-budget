@@ -97,5 +97,13 @@
   "note_children": "Unfinished children, missing request records and scan limits remain incomplete. Reporting does not wait, force-stop or request continuation.",
   "note_render": "Fixed local Python rendering calls no model, requests no continuation and edits neither the assistant's answer nor source conversations.",
   "decimal": ".",
-  "group": ","
+  "group": ",",
+  "report_revision": "Report revision",
+  "reconcile_heading": "Completion check",
+  "report_updated": "Last updated",
+  "reconcile_pending": "Provisional Stop snapshot",
+  "reconcile_complete": "Completion observed",
+  "reconcile_partial": "Completion observed; partial evidence",
+  "note_completion": "Parent usage ends at the selected turn’s explicit completion event. Subagent usage retains the original start-to-Stop window; subsequent turns are excluded. This is not proof the entire Task is finished.",
+  "note_reconcile": "A bounded background check can publish a completion revision after Stop, without a model call. Missing completion evidence leaves the Stop snapshot provisional. Inline cards keep their original snapshot; reopening the Task does not guarantee a refresh."
 }

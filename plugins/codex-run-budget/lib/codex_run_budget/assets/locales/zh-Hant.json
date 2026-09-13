@@ -97,5 +97,13 @@
   "note_children": "子代理未結束、缺少逐請求紀錄或超過讀取上限時保留缺漏；不會等待、強制停止或要求續跑。",
   "note_render": "使用固定 Python 排版；不呼叫模型、不要求續跑、不改寫助理回答或原始對話。",
   "decimal": ".",
-  "group": ","
+  "group": ",",
+  "report_revision": "報告版本",
+  "reconcile_heading": "結束後核對",
+  "report_updated": "最後更新時間",
+  "reconcile_pending": "Stop 暫定快照",
+  "reconcile_complete": "已觀測回合完成",
+  "reconcile_partial": "已觀測回合完成；資料仍不完整",
+  "note_completion": "主代理用量截止於指定回合的明確完成事件；子代理保留原本開始至 Stop 的時間範圍，排除後續回合。這不代表整個 Task 已完成。",
+  "note_reconcile": "Stop 後會以有界背景核對產生結算版，不呼叫模型。缺少完成證據時保留暫定快照。內嵌卡片保留原始快照，重進 Task 不保證刷新。"
 }

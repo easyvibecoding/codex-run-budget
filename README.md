@@ -167,6 +167,18 @@ wait, stop or continue. Parent/child subtotals, names/ownership and incomplete
 coverage are shown in the card. Missing counters stay unknown; Stop may precede
 the final persisted usage event. The inline card is explicitly a **pre-final
 snapshot**; it excludes subsequent tools/final text and is not updated by Stop.
+From v0.14, the Stop adapter can launch one report-only background completion
+check: at most eight bounded reads within 25 seconds. An explicitly matched
+native `task_complete` event permits a separate revision with final parent
+counters; later-turn records are excluded. The child observation window and
+saved quota timestamp remain unchanged. Missing or incomplete evidence stays
+provisional/partial; no Governor event, model call or continuation is generated.
+Read `auto-report list` to locate the latest report. The original Stop JSON/HTML/Markdown
+and inline card stay unchanged; the report index points to a separate completion
+revision. Report files show revision, completion
+status and update time. The mobile A/B experiment found that a new reference
+read the updated file while the original card retained its old contents;
+reopening a Task is not a supported refresh mechanism.
 The reference is model-written in the normal answer, not an edit to a sent answer.
 Report labels follow Codex's saved desktop language choice; Auto uses a read-only
 host-language fallback. Bundled languages: English, Traditional/Simplified Chinese,
