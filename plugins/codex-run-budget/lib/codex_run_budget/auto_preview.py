@@ -28,23 +28,21 @@ from .util import stable_hash
 def render_card(receipt: dict) -> str:
     text = ReportText(receipt.get("locale", "zh-Hant"))
     parent = receipt["usage"]
+    task_usage = receipt.get("task_usage")
     children = receipt.get("subagents") or {"status": "unavailable"}
     usage, complete = observed_total(parent, children)
-    pending = receipt.get("usage_status") == "first_turn_usage_pending"
+    pending = receipt.get("usage_status") in ("first_turn_usage_pending", "turn_usage_pending")
 
     def number(key):
         return text.number(usage[key] if usage is not None else None)
 
-    contexts = receipt["contexts"]
-
-    def observed(field, labels=None):
-        values = []
-        for context in contexts:
-            value = context.get(field)
-            label = labels.get(value, text("unknown")) if labels else str(value or text("unknown"))
-            if label not in values:
-                values.append(label)
-        return " / ".join(values) or text("unknown")
+    contexts = receipt.get("contexts") or []
+    context_pairs = [text(
+        "context_pair", model=context.get("model") or text("not_observed"),
+        effort=context.get("reasoning_effort") or text("not_observed"),
+    ) for context in contexts[:16]]
+    contexts_limited = receipt.get("contexts_limited", False) or len(contexts) > 16
+    parent_total = parent.get("total") if parent is not None else None
 
     seconds = receipt["elapsed_seconds"]
     elapsed = text.duration(seconds)
@@ -55,30 +53,44 @@ def render_card(receipt: dict) -> str:
         "key": receipt["key"], "task": receipt["task_name"],
         "captured": receipt["captured_at"],
         "total": text("pending_usage") if pending and usage is None else number("total"),
+        "task_total": text.number(task_usage.get("total") if task_usage is not None else None),
+        "turn_delta": (text("pending_usage") if pending and parent_total is None else
+                       ("+" if parent_total is not None and parent_total > 0 else "")
+                       + text.number(parent_total)),
         "elapsed": elapsed,
         "locale": text.locale,
         "total_label": text("total" if complete else "subtotal"),
-        "usage_label": text("pending_usage_note" if pending else
-                            "combined" if complete else "incomplete"),
-        "parent_total": text("pending_usage") if pending else
-        text.number(parent['total'] if parent is not None else None),
+        "usage_label": text("pending_usage_note") if pending else
+        "" if complete else text("incomplete"),
+        "parent_total": text("pending_usage") if pending and parent_total is None else
+        text.number(parent_total),
         "child_total": (
             text("na") if children.get("status") == "none" else
             text.number(children['usage']['total'] if children.get("usage") is not None else None)
         ),
         "coverage": child_coverage(children, text.locale),
-        "model": observed("model"), "effort": observed("reasoning_effort"),
-        "fast": observed("fast_mode", {True: text("on"), False: text("off")}),
         "input": number("input"), "cached": number("cached_input"),
         "output": number("output"), "reasoning": number("reasoning_output"),
     }
     values.update({"label_" + key: text(key) for key in (
-        "card_title", "pre_final", "elapsed", "includes_wait", "parent_model", "parent_effort",
-        "parent_fast", "details", "parent", "child_subtotal", "input", "cached", "output",
-        "reasoning", "card_note",
+        "card_title", "pre_final", "elapsed_wait", "details", "parent", "child_subtotal",
+        "input", "cached", "output", "reasoning", "card_note", "task_total", "turn_delta",
+        "context_heading", "context_note", "combined",
     )})
     escaped = {k: escape(str(v)) for k, v in values.items()}
     # Native display names are data. Only this fixed markup is inserted unescaped.
+    if len(context_pairs) > 1:
+        escaped["contexts"] = '<ol class="report-context-list">' + "".join(
+            "<li>" + escape(pair) + "</li>" for pair in context_pairs
+        ) + "</ol>"
+    else:
+        escaped["contexts"] = '<p class="report-context-single">' + escape(
+            context_pairs[0] if context_pairs else text("not_observed")
+        ) + "</p>"
+    escaped["context_partial"] = (
+        '<p class="text-small report-warning">' + escape(text("context_partial")) + "</p>"
+        if contexts_limited else ""
+    )
     escaped["agents"] = "".join(
         '<div class="report-agent"><div>' + escape(row["display_name"])
         + '<div class="text-small">'
@@ -145,7 +157,8 @@ def preview(root: Path, session: str, turn: str, *, output_dir: Path, home=None)
                        unnamed_label=text("unnamed"))
     receipt = {
         "key": key, "task_name": task["display_name"], "usage": usage, "usage_status": status,
-        "contexts": current["contexts"], "elapsed_seconds": seconds,
+        "contexts": current["contexts"], "contexts_limited": current.get("contexts_limited", False),
+        "task_usage": current.get("usage"), "elapsed_seconds": seconds,
         "captured_at": datetime.fromtimestamp(captured).astimezone().strftime("%H:%M:%S %Z"),
         "subagents": children,
         **locale,

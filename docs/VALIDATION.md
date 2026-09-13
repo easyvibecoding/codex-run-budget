@@ -1,5 +1,53 @@
 # Validation evidence
 
+## Per-turn settings and Task/turn metrics — 2026-09-13 Asia/Taipei
+
+Installed `0.13.0+codex.20260913001011`. All 293 tests passed, plus Ruff,
+repository/plugin validators, reproducible runtime check and sensitive-data
+worktree/history scans. Regression cases cover exact-turn model/effort pairs,
+returning to an earlier pair, applied settings, reasoning-only updates,
+conflicting aliases, reversed timestamps, bounded histories, segmented Task
+versus turn counters, reset/recovery and incomplete baseline/end snapshots.
+Independent read-back found the incomplete-baseline edge, which now has a
+dedicated regression. A native turn counter remains usable independently of
+that baseline when its own attribution and counter checks pass.
+
+A real fresh Codex CLI Task ran twice, changing from `gpt-5.6-sol` / `medium`
+to `gpt-6-astra` / `low` on resume. Each turn used exactly one preview command,
+one inline reference, two model requests and one separate Stop receipt. The
+rendered settings and Stop settings matched the respective turn, not the first
+Task settings. The first card showed Task 23,155 / turn +23,155; its Stop total
+was 46,498. The second card showed Task 75,780 / turn +29,282; Stop showed
+Task 105,250 / turn 58,752. Each numeric value matched the corresponding native
+counter, and 46,498 + 58,752 = 105,250. These include Task/startup context and
+are not incremental report costs or billing measurements.
+
+An earlier canary exposed a timing race: the second preview read the previous
+turn's last counter before the new request counter was written. Re-reading that
+same observation now produces pending usage rather than zero; synthetic tests
+cover this state and preserve genuine newly observed zero differences. No wait,
+polling loop, extra preview call or model continuation was added. The final live
+canary had both first-request counters available. Stop still cannot update an
+already rendered immutable pre-final card.
+
+All nine automatic-report catalogs have 74 matching keys. The new bordered
+layout passed 36 browser cases: nine languages, light/dark, 736px/320px, blocked
+network, no errors or horizontal overflow, working details, ordered settings
+and no Fast field. Traditional Chinese desktop and German narrow screenshots
+were visually inspected. These are synthetic browser layout checks plus real
+CLI lifecycle evidence, not native desktop paint verification. Mid-turn setting
+events are tested with synthetic records; the live test proves between-turn
+switching, not that every client persists every in-turn reasoning change.
+
+All 11 hooks read back enabled/trusted, with zero warnings/errors. Source and
+installed trees matched; all 25 pre-edit cache versions matched their retained
+hashes. Configuration outside reviewed hook trust hashes and optional test
+workspace trust, plus the report switch, remained unchanged. Runtime SHA-256:
+`819e7f08a6379ae6c520319f79af44d344d8dbce4ddc332e28748c095a94bc8e`.
+New Tasks load this runtime; existing Tasks and saved cards retain their pinned
+versions. Task and turn primary metrics are parent-only, with observed child
+usage kept separately labeled.
+
 ## First-request counter visible before the preview returns — 2026-09-13 Asia/Taipei
 
 The next short-turn incident still showed the pending-write state. Scoped native

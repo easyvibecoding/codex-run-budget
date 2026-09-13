@@ -29,6 +29,8 @@ remain unavailable; the rollout schema is not a stable public contract.
 If a verified fresh first turn has not persisted its first usage counter yet,
 the card says it is awaiting the usage write. It does not display zero or request
 another tool call. Stop independently settles whatever counters are then available.
+On later turns, merely re-reading the same pre-start counter also remains pending,
+not an observed zero. The Task total can still show the last saved Task counter.
 Disabling reports or an incompatible
 exact-output request takes precedence. The same persistent switch controls both
 generation and this presentation instruction; an explicit off is not overridden.
@@ -155,16 +157,45 @@ Missing sources, limited scans, pending agents and conflicts remain visible as
 partial/unknown. No background polling, blocking wait, agent interruption or retry
 turn is added. A completed child does not need to remain running to be counted.
 
+### Current-turn settings and layout
+
+The bordered inline card pairs the main agent's native Task total with this
+turn's added tokens. Both primary values exclude children; the separately
+labeled observed turn subtotal adds only saved child request evidence in the
+current window. Elapsed time is secondary header metadata. Nine locales share
+the same responsive layout, with stacked metrics on narrow screens.
+
+Model and reasoning effort are displayed as chronological pairs from this turn,
+not independent lists or the Task's initial settings. Adjacent identical pairs
+collapse; returning to a previous pair remains visible. The bounded reader uses
+`turn_context`, native `thread_settings_applied` events, and explicitly attributed
+request settings when supplied. It also recognizes persisted reasoning-only
+`configuration_update` items; these are not model-change events. The API documents
+[reasoning changes within a conversation](https://developers.openai.com/api/docs/guides/reasoning#change-reasoning-mid-conversation),
+but this is not a guarantee that every Codex client persists every change.
+
+Missing settings never fall back to the first Task model or global preferences.
+Conflicting aliases, reversed timestamps and bounded/incomplete records remain
+unknown or partial. At most 16 observed pairs are retained; this is not a complete
+request-by-request model allocation or proof that an unrecorded change did not
+happen. Fast is omitted from automatic human-facing reports; manual sensing and
+machine-readable compatibility fields are unchanged.
+
 ### Counter interpretation
 
-- Parent usage is the difference of cumulative counters at the two observed
-  boundaries, not an aggregation of individual requests. A fresh original first
+- Parent turn usage prefers validated native `turn_token_usage` paired with the
+  newest matching `thread_token_usage`. This matters when a long Task's current
+  rollout segment begins with existing Task history: the Task counter is not a
+  zero-based turn counter. Otherwise it uses the difference of cumulative counters
+  at the two observed boundaries, not an aggregation of individual requests.
+  A fresh original first
   turn may use its first cumulative counter only when the complete bounded
   prefix proves the matching start without inherited history or earlier model
   work, and the ending prefix has no other turn or observed counter reset.
   Forked, malformed, incomplete or tail-limited evidence cannot establish that
   exception. Other missing baselines,
-  changed/truncated sources, negative deltas and inconsistent subsets stay
+  changed/truncated sources, observed resets (even if the counter rises again),
+  negative deltas and inconsistent subsets stay
   unknown. A brand-new Task often has no persisted counter at preview time. Child usage instead
   uses deduplicated request records, not cumulative differences; missing request
   evidence is unknown. The card separates parent, child and known subtotal, and
@@ -172,9 +203,7 @@ turn is added. A completed child does not need to remain running to be counted.
 - Stop may precede final token persistence. Even a zero delta does not mean
   the work was free. A reset between boundaries may be unobservable.
 - Input includes cached input; output includes reasoning. Subsets are not added
-  again. Model/Fast/reasoning values are exact-turn tail observations, not token
-  allocation. Absent/ambiguous Fast remains unknown, never inferred from the
-  current global preference or model name.
+  again. Model/reasoning pairs are exact-turn observations, not token allocation.
 - Only the current Task and bounded exact descendants are read. No unrelated
   cross-Task history scan, native quota query, pricing lookup, network request, model request or
   continuation is performed by receipt generation. Only the short start-time

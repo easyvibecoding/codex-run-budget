@@ -176,12 +176,138 @@ def _request_thread_counter(payload: dict, task: str, turn: str) -> dict | None:
             ("total", "input", "cached_input", "output", "reasoning_output")}
 
 
+def _setting_values(payload: dict) -> dict:
+    """Allowlisted point-in-time settings; contradictory aliases stay unknown."""
+    collaboration = payload.get("collaboration_mode")
+    nested = collaboration.get("settings") if isinstance(collaboration, dict) else None
+    reasoning = payload.get("reasoning")
+    candidates = {"model": [], "reasoning_effort": []}
+    for source in (payload, nested if isinstance(nested, dict) else {}):
+        if "model" in source:
+            candidates["model"].append(_model(source["model"]))
+        for field in ("effort", "reasoning_effort"):
+            if field in source:
+                candidates["reasoning_effort"].append(source[field])
+    if isinstance(reasoning, dict) and "effort" in reasoning:
+        candidates["reasoning_effort"].append(reasoning["effort"])
+    values = {}
+    for field, items in candidates.items():
+        if items:
+            value = items[0] if all(item == items[0] for item in items) else None
+            if field == "reasoning_effort" and value not in (
+                "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"
+            ):
+                value = None
+            values[field] = value
+    return values
+
+
+def _turn_contexts(records: list, task: str, turn: str, *, limited=False) -> tuple[list, bool]:
+    """A bounded, chronological settings lane, isolated from previous turns.
+
+    Settings without a turn ID may refine only an active matching turn (or
+    seed the immediately following start). No Task/global preference fallback.
+    """
+    active = None
+    pending = None
+    current = {"model": None, "reasoning_effort": None, "fast_mode": None}
+    contexts = []
+    stamp = None
+
+    def timestamp(record):
+        try:
+            value = datetime.fromisoformat(record["timestamp"].replace("Z", "+00:00")).timestamp()
+            return value if math.isfinite(value) else None
+        except (KeyError, ValueError, TypeError, AttributeError, OverflowError):
+            return None
+
+    def apply(values):
+        nonlocal limited
+        if not values:
+            return
+        if any(value is None for value in values.values()):
+            limited = True
+        current.update(values)
+        if not contexts or current != contexts[-1]:
+            contexts.append(dict(current))
+            if len(contexts) > 16:
+                contexts.pop(0)
+                limited = True
+
+    for record in records:
+        kind, payload = record["type"], record["payload"]
+        event = payload.get("type")
+        is_context = kind == "turn_context" or kind == "event_msg" and event == "turn_context"
+        is_start = kind == "event_msg" and event == "task_started"
+        if payload.get("thread_id", task) != task:
+            if is_start or is_context:
+                active = None
+                current = {"model": None, "reasoning_effort": None, "fast_mode": None}
+            continue
+        if is_start or is_context:
+            next_turn = payload.get("turn_id")
+            now = timestamp(record)
+            if (is_context and active == turn and stamp is not None
+                    and now is not None and now < stamp):
+                limited = True
+                continue
+            if is_start or next_turn != active:
+                current = {"model": None, "reasoning_effort": None, "fast_mode": None}
+                stamp = None
+            active = next_turn
+            if now is not None:
+                stamp = now
+            if active == turn:
+                if is_start and pending is not None:
+                    pending_values, pending_stamp = pending
+                    if now is not None and pending_stamp is not None and pending_stamp > now:
+                        limited = True
+                    else:
+                        apply(pending_values)
+                if is_context:
+                    apply(_setting_values(payload))
+            pending = None
+            continue
+        is_settings = kind == "thread_settings_applied" or (
+            kind == "event_msg" and event == "thread_settings_applied"
+        )
+        is_update = kind == "response_item" and event == "configuration_update"
+        is_request = kind == "token_usage_record"
+        if not (is_settings or is_update or is_request):
+            if kind == "event_msg" and event in ("task_complete", "turn_aborted"):
+                active = None
+                pending = None
+            continue
+        values = {}
+        if is_settings and isinstance(payload.get("thread_settings"), dict):
+            values.update(_setting_values(payload["thread_settings"]))
+        top = _setting_values({"reasoning": payload.get("reasoning")}
+                              if is_update else payload)
+        for field, value in top.items():
+            values[field] = None if field in values and values[field] != value else value
+        if is_settings and active is None and payload.get("turn_id") is None:
+            pending = (values, timestamp(record))
+            continue
+        if active != turn or payload.get("turn_id", active) != turn:
+            continue
+        if payload.get("root_turn_id", turn) != turn:
+            continue
+        now = timestamp(record)
+        if now is not None and stamp is not None and now < stamp:
+            limited = True
+            continue
+        if now is not None:
+            stamp = now
+        apply(values)
+    return contexts, limited
+
+
 def _first_turn_proof(records, turn: str) -> tuple[bool, bool]:
     """Prove a full, original first-turn prefix; absence alone is never zero."""
     if not records or records[0].get("type") != "session_meta":
         return False, False
     metadata = records[0]["payload"]
-    if any(value for key, value in metadata.items()
+    if metadata.get("history_base") or any(value for key, value in metadata.items()
            if key.startswith("fork") or key == "parent_thread_id"):
         return False, False
     began = model_seen = usage_seen = False
@@ -270,20 +396,29 @@ def snapshot(path_value: Any, turn_id: str) -> dict[str, Any]:
             scan_bytes=len(header) + len(raw),
             tail_limited=bool(offset),
         )
-        lines = raw.split(b"\n")
+        lines = []
+        position = offset
+        for line in raw.split(b"\n"):
+            end = position + len(line)
+            lines.append((line, end))
+            position = end + 1
         # Incomplete first/last records never establish a counter value.
         if offset:
             lines = lines[1:]
-        if lines[-1]:
+        if lines[-1][0]:
             try:
-                json.loads(lines[-1])
+                json.loads(lines[-1][0])
             except (ValueError, RecursionError):
                 lines.pop()
                 result["invalid_records"] = True
-        contexts = []
         usage_seen = False
+        turn_usage_seen = False
+        later_turn_usage = None
+        turn_counter_invalid = False
+        later_counter = None
+        later_counter_end = None
         records = []
-        for line in reversed(lines):
+        for line, line_end in reversed(lines):
             if not line.strip():
                 continue
             try:
@@ -298,40 +433,48 @@ def snapshot(path_value: Any, turn_id: str) -> dict[str, Any]:
             if not isinstance(record.get("type"), str) or not isinstance(payload, dict):
                 result["invalid_records"] = True
                 continue
-            if not offset:
-                records.append(record)
+            records.append(record)
+            counter = None
             if record.get("type") == "event_msg" and payload.get("type") == "token_count":
+                observed = _usage_from_line(record)
+                counter = asdict(observed) if observed else None
                 if not usage_seen:
                     usage_seen = True
-                    usage = _usage_from_line(record)
-                    result["usage"] = asdict(usage) if usage is not None else None
-            if (not usage_seen and record.get("type") == "token_usage_record"
-                    and payload.get("turn_id") == turn_id
+                    result["usage"] = counter
+                    result["usage_end"] = line_end
+            if (record.get("type") == "token_usage_record" and payload.get("turn_id") == turn_id
                     and "thread_token_usage" in payload):
-                usage_seen = True
-                result["usage"] = _request_thread_counter(payload, identity, turn_id)
-            if (
-                record.get("type") == "turn_context"
-                and payload.get("turn_id") == turn_id
-                and len(contexts) < 16
-            ):
-                effort = payload.get("effort", payload.get("reasoning_effort"))
-                tier = payload.get("service_tier")
-                contexts.append(
-                    {
-                        "model": _model(payload.get("model")),
-                        "reasoning_effort": effort
-                        if effort
-                        in ("none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra")
-                        else None,
-                        "fast_mode": True
-                        if tier == "fast"
-                        else False
-                        if tier == "standard"
-                        else None,
-                    }
-                )
-        result["contexts"] = contexts
+                cumulative = _request_thread_counter(payload, identity, turn_id)
+                counter = cumulative
+                if not usage_seen:
+                    usage_seen = True
+                    result["usage"] = cumulative
+                    result["usage_end"] = line_end
+                if not turn_usage_seen:
+                    turn_usage_seen = True
+                    if cumulative and cumulative == result.get("usage"):
+                        result["turn_usage"] = {
+                            key: payload["turn_token_usage"][key + "_tokens"] for key in cumulative
+                        }
+                if cumulative:
+                    native_turn = {key: payload["turn_token_usage"][key + "_tokens"]
+                                   for key in cumulative}
+                    if later_turn_usage and any(native_turn[key] > later_turn_usage[key]
+                                                for key in native_turn):
+                        turn_counter_invalid = True
+                    later_turn_usage = native_turn
+                else:
+                    turn_counter_invalid = True
+            if counter:
+                if later_counter and any(counter[key] > later_counter[key] for key in counter):
+                    result.setdefault("counter_reset_end", later_counter_end)
+                later_counter, later_counter_end = counter, line_end
+        if turn_counter_invalid or result.get("invalid_records"):
+            result.pop("turn_usage", None)
+        result["contexts"], result["contexts_limited"] = _turn_contexts(
+            list(reversed(records)), identity, turn_id,
+            limited=bool(offset or result.get("invalid_records")),
+        )
         result["requested_turn_hash"] = stable_hash(turn_id)
         first, fresh = (False, False)
         if not offset and not result.get("invalid_records"):
@@ -349,7 +492,22 @@ def _delta(before: dict[str, Any], after: dict[str, Any]) -> tuple[dict[str, int
         return None, "source_changed"
     if after["size"] < before["size"]:
         return None, "source_truncated"
+    if after.get("invalid_records"):
+        return None, "snapshot_incomplete"
+    if after.get("counter_reset_end", 0) > before["size"]:
+        return None, "counter_reset_or_inconsistent"
     first, last = before.get("usage"), after.get("usage")
+    if first and last and any(last[key] < first[key] for key in first):
+        return None, "counter_reset_or_inconsistent"
+    if (after.get("turn_usage") is not None
+            and before.get("requested_turn_hash") == after.get("requested_turn_hash")):
+        return after["turn_usage"], "native_turn_counter"
+    if before.get("invalid_records"):
+        return None, "snapshot_incomplete"
+    if (first and first == last
+            and after.get("usage_end", after["size"] + 1) <= before["size"]):
+        # Re-reading the previous turn's last counter is not observed zero work.
+        return None, "turn_usage_pending"
     verified_first = (
         first is None and before.get("fresh_turn_start") is True
         and after.get("first_turn_only") is True
@@ -410,8 +568,9 @@ def _documents(receipt: dict[str, Any]) -> tuple[str, str]:
 
     rows = [
         (text("elapsed_wait"), text.duration(receipt['elapsed_seconds'], minutes=False)),
+        (text("task_total"), text.number((receipt.get("task_usage") or {}).get("total"))),
         (text("total" if complete else "subtotal"), number("total")),
-        (text("parent_delta"),
+        (text("turn_delta"),
          text.number(receipt['usage']['total'] if receipt["usage"] else None)),
         (text("children"), text("na") if children.get("status") == "none" else
          text.number(children['usage']['total'] if children.get("usage") else None)),
@@ -420,8 +579,6 @@ def _documents(receipt: dict[str, Any]) -> tuple[str, str]:
         (text("cached"), number("cached_input")),
         (text("output"), number("output")),
         (text("reasoning"), number("reasoning_output")),
-        (text("start_model"), receipt["start_model"] or text("unknown")),
-        (text("stop_model"), receipt["stop_model"] or text("unknown")),
     ]
     notes = [text("note_" + key) for key in (
         "stop", "usage", "counter", "subsets", "scope", "children", "render"
@@ -429,19 +586,14 @@ def _documents(receipt: dict[str, Any]) -> tuple[str, str]:
     contexts = receipt["stop_contexts"]
     context_lines = []
     for context in contexts:
-        fast = (
-            text("on")
-            if context["fast_mode"] is True
-            else text("off")
-            if context["fast_mode"] is False
-            else text("unknown")
-        )
         context_lines.append(
-            text("context", model=context['model'] or text("unknown_model"),
-                 effort=context['reasoning_effort'] or text("unknown"), fast=fast)
+            text("context_pair", model=context['model'] or text("unknown_model"),
+                 effort=context['reasoning_effort'] or text("unknown"))
         )
     if not context_lines:
         context_lines = [text("context_missing")]
+    context_lines.append(text("context_partial" if receipt.get("contexts_limited")
+                              else "context_note"))
     title = text("title")
     task = receipt.get("task") or {}
     label = task.get("display_name") or f"{text('unnamed')} · {receipt['task_hash'][:12]}"
@@ -468,7 +620,7 @@ def _documents(receipt: dict[str, Any]) -> tuple[str, str]:
             "| --- | --- |",
             *(f"| {k} | {v} |" for k, v in rows),
             "",
-            "## " + text("settings_heading"),
+            "## " + text("context_heading"),
             "",
             *context_lines,
             "",
@@ -494,7 +646,7 @@ def _documents(receipt: dict[str, Any]) -> tuple[str, str]:
         "border-bottom:1px solid light-dark(#d3ded8,#394640)}td{text-align:right;"
         "font-variant-numeric:tabular-nums}li{margin:8px 0}</style><main>"
         f"<h1>{title}</h1><p>{escape(identity)}</p><p>{escape(period)}</p><table>{body}</table>"
-        f"<h2>{escape(text('settings_heading'))}</h2>"
+        f"<h2>{escape(text('context_heading'))}</h2>"
         + "".join(f"<p>{escape(line)}</p>" for line in context_lines)
         + f"<p>{escape(text('status', value=receipt['usage_status']))}</p>"
         + f"<h2>{escape(text('limits'))}</h2><ul>"
@@ -660,10 +812,12 @@ def handle(
                 "started_at": datetime.fromtimestamp(row["started"], timezone.utc).isoformat(),
                 "stopped_at": datetime.fromtimestamp(now, timezone.utc).isoformat(),
                 "usage": usage,
+                "task_usage": stopped.get("usage"),
                 "usage_status": status,
                 "start_model": started.get("hook_model"),
                 "stop_model": _model(payload.get("model")),
                 "stop_contexts": stopped["contexts"],
+                "contexts_limited": stopped.get("contexts_limited", False),
                 "snapshot_scan_bytes": started.get("scan_bytes", 0) + stopped.get("scan_bytes", 0),
                 "stop_tail_limited": stopped.get("tail_limited"),
                 "stop_hook_active": payload.get("stop_hook_active") is True,

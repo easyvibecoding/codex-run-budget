@@ -13,9 +13,10 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins/codex-run-budget/lib"))
 
-from codex_run_budget.auto_preview import preview  # noqa: E402
+from codex_run_budget.auto_preview import preview, render_card  # noqa: E402
 from codex_run_budget.auto_report import configure, handle, observed_total, recent  # noqa: E402
 from codex_run_budget.governor import Governor  # noqa: E402
+from codex_run_budget.util import stable_hash  # noqa: E402
 from test_auto_report import counter, native_counter  # noqa: E402
 
 TASK = "12345678-1234-1234-1234-123456789abc"
@@ -66,8 +67,11 @@ class AutoPreviewTest(unittest.TestCase):
         target = next(self.output.glob("*.html"))
         self.assertIn(str(target), result["reference"])
         content = target.read_text()
-        for expected in ("500", "450", "400", "50", "25", "gpt-6-astra", "xhigh", "未知"):
+        for expected in ("500", "450", "400", "50", "25", "gpt-6-astra", "xhigh"):
             self.assertIn(expected, content)
+        self.assertIn('data-metric="task-total">1,500</dd>', content)
+        self.assertIn('data-metric="turn-delta">+500</dd>', content)
+        self.assertNotIn("Fast", content)
         self.assertIn("改善 &lt;報告&gt; $total", content)
         for forbidden in (TASK, "secret-source", "<!doctype", "<html", "<script", "fetch("):
             self.assertNotIn(forbidden, content)
@@ -98,7 +102,8 @@ class AutoPreviewTest(unittest.TestCase):
         self.transcript.write_text(json.dumps(self.meta) + "\n")
         self.preview()
         card = next(self.output.glob("*.html")).read_text()
-        self.assertIn('class="viz-stat-value tabular-nums">未觀測</div>', card)
+        self.assertIn('data-metric="task-total">未觀測</dd>', card)
+        self.assertIn('data-metric="turn-delta">未觀測</dd>', card)
         link = self.root / "link"
         link.symlink_to(self.output)
         with self.assertRaises(ValueError):
@@ -126,9 +131,10 @@ class AutoPreviewTest(unittest.TestCase):
         self.assertEqual(result["status"], "preview")
         card_path = next(self.output.glob("*.html"))
         card = card_path.read_text()
-        self.assertIn('class="viz-stat-value tabular-nums">等待用量寫入</div>', card)
+        self.assertIn('data-metric="task-total">未觀測</dd>', card)
+        self.assertIn('data-metric="turn-delta">等待用量寫入</dd>', card)
         self.assertIn("首筆請求用量尚未寫入", card)
-        self.assertNotIn('class="viz-stat-value tabular-nums">0</div>', card)
+        self.assertNotIn('data-metric="turn-delta">0</dd>', card)
         with self.transcript.open("a") as output:
             output.write(json.dumps(counter(1200)) + "\n")
         handle({**payload, "hook_event_name": "Stop"}, self.data, home=self.root)
@@ -152,7 +158,8 @@ class AutoPreviewTest(unittest.TestCase):
         self.assertEqual(result["status"], "preview")
         card_path = next(self.output.glob("*.html"))
         card = card_path.read_text()
-        self.assertIn('class="viz-stat-value tabular-nums">1,200</div>', card)
+        self.assertIn('data-metric="task-total">1,200</dd>', card)
+        self.assertIn('data-metric="turn-delta">+1,200</dd>', card)
         self.assertNotIn("等待用量寫入", card)
         with self.transcript.open("a") as output:
             output.write(json.dumps(counter(1500)) + "\n")
@@ -190,6 +197,9 @@ class AutoPreviewTest(unittest.TestCase):
         card = next(self.output.glob("*.html")).read_text()
         for expected in ("700", "500", "200", "&lt;測試代理&gt; $total", "改善 &lt;報告&gt;"):
             self.assertIn(expected, card)
+        self.assertIn('data-metric="task-total">1,500</dd>', card)
+        self.assertIn('data-metric="turn-delta">+500</dd>', card)
+        self.assertNotIn('data-metric="turn-delta">+700</dd>', card)
         for private in (child, "private-child", "private-response"):
             self.assertNotIn(private, card)
         handle({**self.payload, "hook_event_name": "Stop"}, self.data, home=self.root)
@@ -198,6 +208,53 @@ class AutoPreviewTest(unittest.TestCase):
         self.assertEqual(receipt["subagents"]["usage"]["total"], 200)
         self.assertEqual(receipt["usage"]["total"], 500)
         self.assertEqual(next(self.output.glob("*.html")).read_text(), card)
+
+    def test_card_preserves_paired_turn_switches_and_does_not_render_fast(self):
+        contexts = [
+            {"model": "example-a", "reasoning_effort": "low", "fast_mode": True},
+            {"model": "example-b", "reasoning_effort": "high", "fast_mode": False},
+            {"model": "example-a", "reasoning_effort": "low", "fast_mode": None},
+        ]
+        zero = dict.fromkeys(("total", "input", "cached_input", "output", "reasoning_output"), 0)
+        current = {"task_hash": stable_hash(TASK), "usage": {**zero, "total": 1500},
+                   "contexts": contexts, "contexts_limited": True}
+        with patch("codex_run_budget.auto_preview.snapshot", return_value=current), patch(
+            "codex_run_budget.auto_preview._delta", return_value=({**zero, "total": 500}, "test")
+        ), patch("codex_run_budget.auto_preview.render_card", wraps=render_card) as renderer:
+            self.preview()
+        self.assertEqual(renderer.call_args.args[0]["task_usage"], {**zero, "total": 1500})
+        self.assertTrue(renderer.call_args.args[0]["contexts_limited"])
+        card = next(self.output.glob("*.html")).read_text()
+        ordered = (
+            '<ol class="report-context-list"><li>example-a · 思考 low</li>'
+            '<li>example-b · 思考 high</li><li>example-a · 思考 low</li></ol>'
+        )
+        self.assertIn(ordered, card)
+        self.assertIn("切換紀錄可能不完整", card)
+        self.assertNotIn("Fast", card)
+
+    def test_legacy_card_missing_task_total_and_empty_context_remain_unknown(self):
+        receipt = {
+            "key": "example", "task_name": "Example task", "locale": "zh-Hant",
+            "usage": {key: 0 for key in (
+                "total", "input", "cached_input", "output", "reasoning_output"
+            )}, "contexts": [], "elapsed_seconds": 0, "captured_at": "12:00:00 UTC",
+            "subagents": {"status": "none"},
+        }
+        card = render_card(receipt)
+        self.assertIn('data-metric="task-total">未觀測</dd>', card)
+        self.assertIn('data-metric="turn-delta">0</dd>', card)
+        self.assertIn('<p class="report-context-single">未觀測</p>', card)
+        self.assertNotIn("Fast", card)
+
+    def test_old_task_counter_without_this_turn_write_is_pending_not_zero(self):
+        lines = self.transcript.read_text().splitlines()
+        self.transcript.write_text("\n".join(lines[:-1]) + "\n")
+        self.preview()
+        card = next(self.output.glob("*.html")).read_text()
+        self.assertIn('data-metric="task-total">1,000</dd>', card)
+        self.assertIn('data-metric="turn-delta">等待用量寫入</dd>', card)
+        self.assertNotIn('data-metric="turn-delta">0</dd>', card)
 
     def test_disabled_child_capture_and_governor_decision_are_preserved(self):
         event = {**self.payload, "hook_event_name": "SubagentStop", "agent_id": "child"}

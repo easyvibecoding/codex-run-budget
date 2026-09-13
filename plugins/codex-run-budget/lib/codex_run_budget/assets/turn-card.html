@@ -4,39 +4,62 @@
       color: var(--foreground); overflow-wrap: anywhere; box-sizing: border-box;
       border: 1px solid var(--border); border-radius: 16px; padding: clamp(16px, 3vw, 24px);
     }
-    #run-budget-$key .report-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; }
+    #run-budget-$key .report-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; }
     #run-budget-$key .report-head h2 { margin: 0; }
-    #run-budget-$key .report-config { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+    #run-budget-$key .report-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; margin: 8px 0 20px; }
+    #run-budget-$key .report-meta p { margin: 0; }
+    #run-budget-$key .report-meta .text-small { color: var(--muted-foreground); }
+    #run-budget-$key .report-totals { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; margin: 0; padding: 16px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+    #run-budget-$key .report-totals > div + div { border-left: 1px solid var(--border); padding-left: 16px; }
+    #run-budget-$key .report-totals dt { color: var(--foreground); }
+    #run-budget-$key .report-scope { margin: 12px 0 20px; }
+    #run-budget-$key .report-scope p { margin: 4px 0; }
+    #run-budget-$key .report-context h3 { margin: 0; }
+    #run-budget-$key .report-context-list { margin: 8px 0; padding-left: 1.5em; }
+    #run-budget-$key .report-context-list li + li { margin-top: 6px; }
+    #run-budget-$key .report-context-single { margin: 8px 0; }
+    #run-budget-$key .report-context .text-small { color: var(--muted-foreground); margin: 6px 0; }
     #run-budget-$key dt { color: var(--muted-foreground); }
     #run-budget-$key dd { margin: 4px 0 0; }
+    #run-budget-$key details { margin-top: 20px; }
     #run-budget-$key summary { cursor: pointer; }
     #run-budget-$key .report-detail { display: grid; grid-template-columns: 1fr auto; gap: 8px 16px; }
     #run-budget-$key .report-detail dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
     #run-budget-$key .report-agent { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; padding: 12px 0; border-top: 1px solid var(--border); }
+    @media (max-width: 480px) {
+      #run-budget-$key .report-totals { grid-template-columns: minmax(0, 1fr); }
+      #run-budget-$key .report-totals > div + div { border-left: 0; padding-left: 0; }
+    }
   </style>
   <div class="report-head">
     <h2>$label_card_title</h2>
     <span class="text-small">$label_pre_final · $captured</span>
   </div>
-  <p>$task</p>
-  <div class="viz-grid">
-    <div class="card viz-stat">
-      <div>$total_label</div>
-      <div class="viz-stat-value tabular-nums">$total</div>
-      <div class="text-small">$usage_label</div>
-    </div>
-    <div class="card viz-stat">
-      <div>$label_elapsed</div>
-      <div class="viz-stat-value tabular-nums">$elapsed</div>
-      <div class="text-small">$label_includes_wait</div>
-    </div>
+  <div class="report-meta">
+    <p>$task</p>
+    <p class="text-small">$label_elapsed_wait: $elapsed</p>
   </div>
-  <p class="text-small">$coverage</p>
-  <dl class="report-config">
-    <div><dt>$label_parent_model</dt><dd>$model</dd></div>
-    <div><dt>$label_parent_effort</dt><dd>$effort</dd></div>
-    <div><dt>$label_parent_fast</dt><dd>$fast</dd></div>
+  <dl class="report-totals">
+    <div>
+      <dt>$label_task_total</dt>
+      <dd class="viz-stat-value tabular-nums" data-metric="task-total">$task_total</dd>
+    </div>
+    <div>
+      <dt>$label_turn_delta</dt>
+      <dd class="viz-stat-value tabular-nums" data-metric="turn-delta">$turn_delta</dd>
+    </div>
   </dl>
+  <div class="report-scope text-small">
+    <p>$total_label ($label_combined): <strong class="tabular-nums">$total</strong></p>
+    <p>$usage_label</p>
+    <p>$coverage</p>
+  </div>
+  <div class="report-context">
+    <h3>$label_context_heading</h3>
+    $contexts
+    <p class="text-small">$label_context_note</p>
+    $context_partial
+  </div>
   <details>
     <summary>$label_details</summary>
     <dl class="report-detail">

@@ -104,7 +104,13 @@ class ReportI18nTest(unittest.TestCase):
             for document in (card, markdown, page):
                 self.assertIn(text.number(12345), document)
                 self.assertIn("Native &lt;Task&gt; $total", document)
-                self.assertIn(text("unknown"), document)
+            self.assertIn(text("not_observed"), card)
+            for document in (markdown, page):
+                self.assertTrue(text("unknown") in document or text("not_observed") in document)
+            self.assertIn(escape(text("task_total")), card)
+            self.assertIn(escape(text("turn_delta")), card)
+            self.assertIn(escape(text("context_heading")), card)
+            self.assertNotIn("Fast", card)
             self.assertIn('lang="' + locale + '"', card)
             self.assertIn('lang="' + locale + '"', page)
             self.assertIn(escape(text("card_title")), card)

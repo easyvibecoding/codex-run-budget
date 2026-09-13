@@ -210,7 +210,7 @@ class AutoReportTest(unittest.TestCase):
         self.append(request)  # A repeated cumulative snapshot is never added twice.
         self.event("Stop", 1)
         self.assertEqual(self.report()["usage"]["total"], 1200)
-        self.assertEqual(self.report()["usage_status"], "verified_first_turn_counter")
+        self.assertEqual(self.report()["usage_status"], "native_turn_counter")
 
     def test_request_counter_advances_old_event_without_double_counting(self):
         self.start()
@@ -256,7 +256,7 @@ class AutoReportTest(unittest.TestCase):
         self.event("Stop", 1)
         self.assertIsNone(self.report()["usage"])
 
-    def test_native_counter_uses_bounded_tail_but_never_invents_first_turn_baseline(self):
+    def test_native_turn_counter_does_not_need_an_invented_first_turn_baseline(self):
         self.fresh_page()
         self.start()
         self.append({"type": "response_item", "payload": {"type": "message",
@@ -267,7 +267,23 @@ class AutoReportTest(unittest.TestCase):
         self.assertTrue(observed["tail_limited"])
         self.assertFalse(observed["first_turn_only"])
         self.event("Stop", 1)
-        self.assertIsNone(self.report()["usage"])
+        self.assertEqual(self.report()["usage"]["total"], 1200)
+        self.assertEqual(self.report()["usage_status"], "native_turn_counter")
+
+    def test_segmented_task_native_turn_and_task_totals_remain_distinct(self):
+        self.fresh_page(extra_meta={"history_mode": "delta", "history_base": "example-base"})
+        self.start()
+        self.append(native_counter(self.payload["session_id"], self.payload["turn_id"],
+                                   90500, request=200, turn_total=500))
+        self.event("Stop", 1)
+        receipt = self.report()
+        self.assertEqual(receipt["task_usage"]["total"], 90500)
+        self.assertEqual(receipt["usage"]["total"], 500)
+        self.assertEqual(receipt["usage_status"], "native_turn_counter")
+        for path in (self.data / "auto-reports").glob("*.html"):
+            html = path.read_text()
+            self.assertIn("90,500", html)
+            self.assertNotIn("Fast", html)
 
     def test_first_turn_proof_rejects_history_forks_reset_and_incomplete_prefix(self):
         cases = {
@@ -275,6 +291,7 @@ class AutoReportTest(unittest.TestCase):
                 "type": "message", "role": "assistant", "content": []
             }},)},
             "forked": {"extra_meta": {"forked_from_id": "example-parent"}},
+            "segmented": {"extra_meta": {"history_base": "example-history-base"}},
             "prior_turn": {"prefix": ({"type": "event_msg", "payload": {
                 "type": "task_started", "turn_id": "earlier-turn"
             }},)},
@@ -416,6 +433,53 @@ class AutoReportTest(unittest.TestCase):
                 self.page.write_text(
                     json.dumps(self.meta) + "\n" + json.dumps(counter(1000)) + "\n"
                 )
+
+    def test_observed_reset_recovery_and_truncated_tail_are_not_valid_differences(self):
+        from codex_run_budget.auto_report import _delta
+
+        before = snapshot(str(self.page), self.payload["turn_id"])
+        self.append(counter(100))
+        self.append(counter(1500))
+        after = snapshot(str(self.page), self.payload["turn_id"])
+        self.assertIsNone(_delta(before, after)[0])
+        # A reset already present before the new boundary does not poison it.
+        self.append(counter(1600))
+        next_snapshot = snapshot(str(self.page), self.payload["turn_id"])
+        self.assertEqual(_delta(after, next_snapshot)[0]["total"], 100)
+        with self.page.open("a") as stream:
+            stream.write('{"type":"event_msg",')
+        self.assertEqual(_delta(after, snapshot(str(self.page), self.payload["turn_id"])),
+                         (None, "snapshot_incomplete"))
+
+    def test_partial_baseline_cannot_establish_boundary_difference(self):
+        from codex_run_budget.auto_report import _delta
+
+        pending = json.dumps(counter(1500)) + "\n"
+        with self.page.open("a") as stream:
+            stream.write(pending[:45])
+        before = snapshot(str(self.page), self.payload["turn_id"])
+        self.assertTrue(before["invalid_records"])
+        with self.page.open("a") as stream:
+            stream.write(pending[45:])
+        self.append(counter(1600))
+        after = snapshot(str(self.page), self.payload["turn_id"])
+        self.assertEqual(_delta(before, after), (None, "snapshot_incomplete"))
+        # A validated native turn counter does not depend on that baseline.
+        self.append(native_counter("private-task-id", self.payload["turn_id"], 1700,
+                                   request=100, turn_total=200))
+        usage, status = _delta(before, snapshot(str(self.page), self.payload["turn_id"]))
+        self.assertEqual((usage["total"], status), (200, "native_turn_counter"))
+
+    def test_repeated_prior_counter_is_pending_but_new_zero_observation_is_valid(self):
+        from codex_run_budget.auto_report import _delta
+
+        before = snapshot(str(self.page), self.payload["turn_id"])
+        self.append({"type": "turn_context", "payload": {"turn_id": self.payload["turn_id"]}})
+        self.assertEqual(_delta(before, snapshot(str(self.page), self.payload["turn_id"])),
+                         (None, "turn_usage_pending"))
+        self.append(counter(1000))
+        usage, status = _delta(before, snapshot(str(self.page), self.payload["turn_id"]))
+        self.assertEqual((usage["total"], status), (0, "boundary_counter_difference"))
 
     def test_context_is_exact_turn_unknown_fast_not_false_and_safe(self):
         self.start()
