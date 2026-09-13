@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here.
 
+## 0.13.4 - 2026-09-13
+
+- Fix inline report text disappearing when a remote host omits or misbinds its theme variables. Pair browser system foreground/background colors and scope text styles to each card.
+- Preserve report accounting, governance, and pinned runtimes. Start a new Task after updating to load the new template; existing cards remain unchanged.
+- Share the rendering fix with Codex Usage Reports 0.1.1. Browser regression covers Chromium/WebKit, mobile/desktop widths, both themes, and four locales; actual iPhone remote read-back remains unverified.
+
 ## 0.2.1 - 2026-09-06
 
 - Add an update helper that snapshots installed plugin versions and restores

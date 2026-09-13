@@ -1,5 +1,14 @@
 # Validation evidence
 
+## 2026-09-13: remote report text visibility (0.13.4)
+
+- Changed only the report presentation to use paired browser system colors and scoped typography, removing its dependency on host foreground tokens.
+- Verified template parity with Codex Usage Reports 0.1.1 except for the scoped root identifier. That project's fragment CI covers four locales, two widths, two themes, three host color configurations, and Chromium/WebKit (96 cases).
+- Rendered this package's own synthetic card and ran 24 additional Chromium/WebKit cases across two widths, two themes, and three host configurations. Collapsed/expanded text contrast, horizontal overflow, and keyboard disclosures passed.
+- All 330 Python tests, Ruff, repository validation, and plugin validation passed locally. The reporting counters and governance behavior were not changed.
+- This is browser evidence; actual iPhone remote app read-back remains unverified. Existing Tasks may keep their pinned runtime, and existing cards do not refresh. Begin a new Task after updating.
+
+
 ## Missing first-turn report recovery — 2026-09-13 Asia/Taipei
 
 Installed `0.13.3+codex.20260913104501`. All 330 tests passed, plus Ruff,
