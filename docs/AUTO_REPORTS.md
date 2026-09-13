@@ -17,6 +17,18 @@ The model is told not to read/analyze the report, invent numbers, or add another
 turn. The tool reads this exact Task and timing key, reconciles bounded descendant
 usage records in this turn's observation window, and renders a bundled HTML
 fragment into a task-owned writable visualization directory selected by the caller.
+Prefer the Task's visualization root explicitly supplied in writable roots;
+otherwise use `work/` inside its native working directory. The preview validates
+that destination against the native Task's working directory or its own
+`CODEX_HOME/visualizations/YYYY/MM/DD/<Task>/` root (UUIDv7 UTC date). Write access,
+including full access, does not itself authorize the desktop to read a file.
+Private state directories, other Tasks' visualization roots, traversal and
+symlinks are rejected before quota/child collection; no invalid reference is
+returned and no retry or fallback write is attempted. Extra sandbox roots are
+not accepted because this tool cannot verify the desktop's effective read policy.
+The check is repeated before writing. Existing snapshots and saved assistant
+messages are not rewritten; a previously broken reference needs a replacement
+reference to the same snapshot in an accepted, writable location.
 Its output is only status/reference, not the report body. The numeric card is a
 pre-final snapshot, excluding subsequent work; it is not overwritten by Stop.
 The bounded snapshot also accepts the native `thread_token_usage` counter in a

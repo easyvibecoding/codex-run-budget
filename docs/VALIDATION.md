@@ -1,5 +1,34 @@
 # Validation evidence
 
+## Desktop-readable preview paths — 2026-09-13 Asia/Taipei
+
+Installed `0.13.2+codex.20260913101056`. All 320 tests passed, plus Ruff,
+repository/plugin validation and reproducible runtime verification. New path
+regressions reject external state folders, sibling-prefix matches, another Task's
+visualization root, the wrong date, traversal and symlinks before quota/child
+collection. The destination is checked again immediately before writing.
+
+Read-only inspection of desktop `26.908.40834` identified a stricter visualization
+read policy than full filesystem access. An isolated execution of its unmodified
+path/read method, using schema-valid inputs and a local filesystem adapter,
+reproduced rejection of the reported external path and read the byte-identical
+snapshot from the proper Task visualization root. This is not a live desktop
+RPC or paint test. The recovered snapshot passed four browser cases (736/320px,
+light/dark), with a border, four closed disclosures, visible primary metrics and
+weekly quota, keyboard expansion/collapse, no overflow and no script errors.
+Its original partial/missing measurements were not recalculated or filled in.
+
+The installed hooks and pinned preview completed a synthetic start/preview/Stop
+round trip without a model: the invalid directory returned no reference or file,
+the canonical directory produced one card, and Stop preserved its bytes. Quota
+was deliberately unavailable in this isolated fixture. All 11 hooks read back
+enabled/trusted with zero issues; source/cache identities and 30 retained old
+versions matched. Report settings and unrelated configuration were unchanged.
+Runtime SHA-256:
+`a5b564a38388b11d7be258feba33c82e7f60e722a957959b9de77eea123c4e6b`.
+Existing Tasks keep pinned code; new Tasks load the fix. Previously sent references
+are not rewritten. No schedule, curation content, or native App guard was changed.
+
 ## Collapsible inline card sections — 2026-09-13 Asia/Taipei
 
 Installed `0.13.1+codex.20260913005626`. All 316 tests passed, plus Ruff and

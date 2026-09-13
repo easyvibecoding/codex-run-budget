@@ -19,7 +19,7 @@ from codex_run_budget.governor import Governor  # noqa: E402
 from codex_run_budget.util import stable_hash  # noqa: E402
 from test_auto_report import counter, native_counter  # noqa: E402
 
-TASK = "12345678-1234-1234-1234-123456789abc"
+TASK = "00000000-0000-7000-8000-000000000001"
 
 
 class AutoPreviewTest(unittest.TestCase):
@@ -36,7 +36,8 @@ class AutoPreviewTest(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name).resolve()
         self.data = self.root / "data"
-        self.output = self.root / "visuals"
+        self.workspace = self.root / "workspace"
+        self.output = self.workspace / "visuals"
         self.transcript = self.root / "secret-source.jsonl"
         self.meta = {"type": "session_meta", "payload": {"id": TASK}}
         self.transcript.write_text(json.dumps(self.meta) + "\n" + json.dumps(counter(1000)) + "\n")
@@ -48,6 +49,9 @@ class AutoPreviewTest(unittest.TestCase):
         )
         self.db.execute("INSERT INTO threads VALUES (?, ?, NULL, NULL, NULL, 'vscode', ?)",
                         (TASK, '改善 <報告> $total', str(self.transcript)))
+        self.db.commit()
+        self.db.execute("ALTER TABLE threads ADD COLUMN cwd TEXT")
+        self.db.execute("UPDATE threads SET cwd=? WHERE id=?", (str(self.workspace), TASK))
         self.db.commit()
         self.payload = {
             "session_id": TASK, "turn_id": "turn-1", "hook_event_name": "UserPromptSubmit",
@@ -111,6 +115,55 @@ class AutoPreviewTest(unittest.TestCase):
         link.symlink_to(self.output)
         with self.assertRaises(ValueError):
             preview(self.data, TASK, "turn-1", output_dir=link, home=self.root)
+
+    def test_desktop_readable_root_required_before_quota_or_child_collection(self):
+        outside = (
+            self.root / ".local/state/example/reports",
+            self.root / "workspace-other/reports",
+            self.root / "visualizations/1970/01/01/00000000-0000-7000-8000-000000000002",
+            self.root / "visualizations/1970/01/02" / TASK,
+            self.workspace / ".." / "private-reports",
+            Path("relative/reports"),
+        )
+        with patch("codex_run_budget.turn_quota.observe") as quota, patch(
+            "codex_run_budget.auto_preview.collect"
+        ) as children:
+            for directory in outside:
+                with self.subTest(directory=directory), self.assertRaises(ValueError):
+                    preview(self.data, TASK, "turn-1", output_dir=directory, home=self.root)
+                self.assertFalse(directory.exists())
+            quota.assert_not_called()
+            children.assert_not_called()
+        self.assertFalse(self.workspace.exists())
+
+    def test_native_visualization_root_uses_task_uuid_utc_date(self):
+        directory = self.root / "visualizations/1970/01/01" / TASK
+        self.db.execute("UPDATE threads SET cwd=NULL")
+        self.db.commit()
+        result = preview(self.data, TASK, "turn-1", output_dir=directory, home=self.root)
+        target = next(directory.glob("*.html"))
+        reference = json.loads(result["reference"].split("\ue202")[1][:-1])
+        self.assertEqual(reference, {"path": str(target)})
+        self.assertRegex(target.name, r"^[a-z0-9]+(?:-[a-z0-9]+)*\.html$")
+        self.assertEqual(target.stat().st_mode & 0o777, 0o600)
+        with self.assertRaises(ValueError):
+            self.preview()
+
+    def test_symlink_ancestor_does_not_authorize_an_external_directory(self):
+        self.workspace.mkdir()
+        (self.workspace / "alias").symlink_to(self.root, target_is_directory=True)
+        with self.assertRaises(ValueError):
+            preview(self.data, TASK, "turn-1", output_dir=self.workspace / "alias/reports",
+                    home=self.root)
+        self.assertFalse((self.root / "reports").exists())
+
+    def test_path_is_rechecked_after_collection(self):
+        self.workspace.mkdir()
+        with patch("codex_run_budget.turn_quota.observe", side_effect=lambda *a, **k:
+                   self.output.symlink_to(self.root, target_is_directory=True)):
+            with self.assertRaises(ValueError):
+                self.preview()
+        self.assertFalse(list(self.root.glob("*.html")))
 
     def test_incomplete_scope_is_not_promoted_to_complete_or_zero(self):
         zero = {key: 0 for key in ("total", "input", "cached_input", "output", "reasoning_output")}
@@ -188,7 +241,7 @@ class AutoPreviewTest(unittest.TestCase):
                 "type": "task_complete", "turn_id": "child-turn"}},
         ]
         transcript.write_text("".join(json.dumps(row) + "\n" for row in records))
-        self.db.execute("INSERT INTO threads VALUES (?, ?, ?, NULL, NULL, ?, ?)",
+        self.db.execute("INSERT INTO threads VALUES (?, ?, ?, NULL, NULL, ?, ?, NULL)",
                         (child, None, '<測試代理> $total', json.dumps(source), str(transcript)))
         self.db.commit()
         child_stop = {"session_id": TASK, "turn_id": "child-turn", "agent_id": child,

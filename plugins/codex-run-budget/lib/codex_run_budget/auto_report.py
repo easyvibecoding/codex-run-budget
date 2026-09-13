@@ -54,7 +54,7 @@ def _footer(directory: Path, key: str, payload: dict[str, Any], locale="zh-Hant"
         "hookEventName": "UserPromptSubmit",
         "additionalContext": (
             "Before final, run once: " + command
-            + " --output-dir <absolute task-owned writable dir>. "
+            + " --output-dir <Task visualization root from writable roots; else cwd/work>. "
             "Append its visualize reference unchanged on a final-answer line. "
             "Do not read/analyze the card or load skills for it; no retries. "
             "Skip if disabled or the answer format conflicts."

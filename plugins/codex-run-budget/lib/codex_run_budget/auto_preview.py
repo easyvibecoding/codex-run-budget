@@ -12,7 +12,8 @@ import os
 import pkgutil
 import sqlite3
 import time
-from datetime import datetime
+import uuid
+from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
 from string import Template
@@ -23,6 +24,31 @@ from .child_usage import collect
 from .report_i18n import ReportText, resolve_locale
 from .task_catalog import TaskCatalog, _uuid
 from .util import stable_hash
+
+
+def _checked_output_dir(output_dir: Path, session: str, home: Path, workspace) -> Path:
+    """Accept only known desktop-readable Task roots, before collecting usage.
+
+    Full filesystem access is not the desktop visualization read policy. The
+    native root uses the UUIDv7's UTC date, not today's date or a mutable cwd.
+    Explicit extra sandbox roots are intentionally unsupported here: the preview
+    tool cannot independently verify the desktop's effective policy for them.
+    """
+    identifier = uuid.UUID(session)
+    if identifier.version != 7:
+        raise ValueError("inline preview requires a native UUIDv7 Task")
+    day = datetime.fromtimestamp(int(identifier.hex[:12], 16) / 1000, timezone.utc)
+    native = home / "visualizations" / day.strftime("%Y/%m/%d") / session
+    roots = [native]
+    if isinstance(workspace, str) and Path(workspace).is_absolute():
+        roots.append(Path(workspace))
+    if (not output_dir.is_absolute() or ".." in output_dir.parts
+            or any(p.is_symlink() for p in (output_dir, *output_dir.parents))):
+        raise ValueError("output must be an absolute nonsymlink Task directory")
+    if not any(root.is_absolute() and ".." not in root.parts
+               and output_dir.is_relative_to(root) for root in roots):
+        raise ValueError("output is outside the Task's desktop-readable roots")
+    return output_dir
 
 
 def render_card(receipt: dict) -> str:
@@ -148,6 +174,15 @@ def preview(root: Path, session: str, turn: str, *, output_dir: Path, home=None)
         native = catalog.connection.execute(
             "SELECT rollout_path FROM threads WHERE id=?", (session,)
         ).fetchone()
+        # Optional column on older catalogs; absence cannot authorize another root.
+        columns = {r[1] for r in catalog.connection.execute("PRAGMA table_info(threads)")}
+        workspace = catalog.connection.execute(
+            "SELECT cwd FROM threads WHERE id=?", (session,)
+        ).fetchone() if "cwd" in columns else None
+        native_home = Path(home or os.environ.get("CODEX_HOME") or Path.home() / ".codex")
+        output_dir = _checked_output_dir(
+            output_dir, session, native_home, workspace[0] if workspace else None,
+        )
         current = snapshot(native[0] if native else None, turn)
     if current.get("task_hash") != stable_hash(session):
         return {"status": "source_unavailable"}
@@ -169,10 +204,8 @@ def preview(root: Path, session: str, turn: str, *, output_dir: Path, home=None)
         "subagents": children, "quota": quota,
         **locale,
     }
-    if not output_dir.is_absolute() or any(
-        p.is_symlink() for p in (output_dir, *output_dir.parents)
-    ):
-        raise ValueError("output must be an absolute nonsymlink task-owned directory")
+    # Recheck immediately before writing, after potentially slow collection.
+    _checked_output_dir(output_dir, session, native_home, workspace[0] if workspace else None)
     output_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     target = output_dir / ("codex-turn-" + key[:16] + "-" + str(time.time_ns()) + ".html")
     content = render_card(receipt)

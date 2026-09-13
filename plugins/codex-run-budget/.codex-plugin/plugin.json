@@ -1,6 +1,6 @@
 {
   "name": "codex-run-budget",
-  "version": "0.13.1+codex.20260913005626",
+  "version": "0.13.2+codex.20260913101056",
   "description": "Shared token governance, native account quota sensing, and recent-task telemetry for Codex.",
   "author": {
     "name": "EasyVibeCoding",

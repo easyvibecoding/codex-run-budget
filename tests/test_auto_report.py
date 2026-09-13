@@ -177,7 +177,8 @@ class AutoReportTest(unittest.TestCase):
         directory.mkdir()
         specific = _footer(directory, "example", self.payload)["hookSpecificOutput"]
         context = specific["additionalContext"]
-        self.assertLess(len(context.split("--output-dir", 1)[-1]), 240)
+        self.assertLess(len(context.split("--output-dir", 1)[-1]), 300)
+        self.assertIn("Task visualization root from writable roots; else cwd/work", context)
         self.assertIn("Do not read", context)
         self.assertIn("no retries", context)
         self.assertNotIn(ReportText("zh-Hant")("card_note"), context)
