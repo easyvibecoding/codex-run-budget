@@ -3,4 +3,4 @@
 from .governor import Governor
 
 __all__ = ["Governor"]
-__version__ = "0.13.2+codex.20260913101056"
+__version__ = "0.13.3+codex.20260913104501"

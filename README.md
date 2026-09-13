@@ -136,6 +136,11 @@ provides a short instruction to run one deterministic preview command before the
 normal final answer. That command returns only a native `visualize` reference:
 the answer displays an inline usage card rather than a clickable report link.
 Its HTML fragment uses a fixed bundled template, not model-generated markup.
+If the prompt hook missed a start, the first eligible supported tool hook can
+recover that exact active turn's native start and issue the same instruction once.
+Duplicate tool events do not reread the transcript or add more report context.
+Recovery needs a valid start in the bounded local record; no hooks/no tools and
+missing or stale records cannot guarantee an inline card.
 The first eligible `Stop` separately fills the Markdown target and writes HTML/JSON. The
 default threshold is **zero**: elapsed time is information, not a cost gate.
 This is a turn-stop receipt, not proof the whole Task is complete. It makes no

@@ -24,7 +24,8 @@ from .util import stable_hash
 
 SCAN_BYTES = 8 * 1024 * 1024
 MAX_ROWS = 10_000
-EVENTS = {"UserPromptSubmit", "Stop", "Interrupt", "SessionEnd", "SubagentStop"}
+START_EVENTS = {"UserPromptSubmit", "PreToolUse", "PostToolUse"}
+EVENTS = START_EVENTS | {"Stop", "Interrupt", "SessionEnd", "SubagentStop"}
 
 
 def _pending(key: str, locale="zh-Hant") -> str:
@@ -51,7 +52,7 @@ def _footer(directory: Path, key: str, payload: dict[str, Any], locale="zh-Hant"
         "--data-dir", str(directory.parent.absolute()),
     ])
     return {"hookSpecificOutput": {
-        "hookEventName": "UserPromptSubmit",
+        "hookEventName": payload.get("hook_event_name", "UserPromptSubmit"),
         "additionalContext": (
             "Before final, run once: " + command
             + " --output-dir <Task visualization root from writable roots; else cwd/work>. "
@@ -357,7 +358,7 @@ def _first_turn_proof(records, turn: str) -> tuple[bool, bool]:
     return began, began and not model_seen and not usage_seen
 
 
-def snapshot(path_value: Any, turn_id: str) -> dict[str, Any]:
+def snapshot(path_value: Any, turn_id: str, *, at_turn_start: bool = False) -> dict[str, Any]:
     """Only header identity and a bounded tail are read; no text is persisted."""
     result: dict[str, Any] = {"status": "unavailable", "usage": None, "contexts": []}
     if not isinstance(path_value, str) or not path_value:
@@ -418,6 +419,7 @@ def snapshot(path_value: Any, turn_id: str) -> dict[str, Any]:
         later_counter = None
         later_counter_end = None
         records = []
+        seeking_start = at_turn_start
         for line, line_end in reversed(lines):
             if not line.strip():
                 continue
@@ -433,6 +435,25 @@ def snapshot(path_value: Any, turn_id: str) -> dict[str, Any]:
             if not isinstance(record.get("type"), str) or not isinstance(payload, dict):
                 result["invalid_records"] = True
                 continue
+            if seeking_start:
+                # Reconstruct the baseline, never substitute a mid-turn counter.
+                # A stale event must not recover a completed or different turn.
+                kind, event = record["type"], payload.get("type")
+                if (kind == "event_msg" and event in ("task_complete", "turn_aborted")
+                        or kind == "turn_context" and payload.get("turn_id") != turn_id):
+                    return {"status": "unavailable", "usage": None, "contexts": []}
+                if kind != "event_msg" or event != "task_started":
+                    continue
+                if (payload.get("turn_id") != turn_id
+                        or payload.get("thread_id", identity) != identity
+                        or result.get("invalid_records")):
+                    return {"status": "unavailable", "usage": None, "contexts": []}
+                stamp = datetime.fromisoformat(record["timestamp"].replace("Z", "+00:00"))
+                if stamp.tzinfo is None or not math.isfinite(stamp.timestamp()):
+                    return {"status": "unavailable", "usage": None, "contexts": []}
+                result["native_started_at"] = stamp.timestamp()
+                result["size"] = line_end
+                seeking_start = False
             records.append(record)
             counter = None
             if record.get("type") == "event_msg" and payload.get("type") == "token_count":
@@ -469,6 +490,8 @@ def snapshot(path_value: Any, turn_id: str) -> dict[str, Any]:
                 if later_counter and any(counter[key] > later_counter[key] for key in counter):
                     result.setdefault("counter_reset_end", later_counter_end)
                 later_counter, later_counter_end = counter, line_end
+        if seeking_start:
+            return {"status": "unavailable", "usage": None, "contexts": []}
         if turn_counter_invalid or result.get("invalid_records"):
             result.pop("turn_usage", None)
         result["contexts"], result["contexts_limited"] = _turn_contexts(
@@ -481,7 +504,8 @@ def snapshot(path_value: Any, turn_id: str) -> dict[str, Any]:
             first, fresh = _first_turn_proof(list(reversed(records)), turn_id)
         result.update(first_turn_only=first, fresh_turn_start=fresh)
         return result
-    except (OSError, ValueError, TypeError, AttributeError, RecursionError):
+    except (OSError, ValueError, TypeError, AttributeError, RecursionError,
+            KeyError, OverflowError):
         return {"status": "unavailable", "usage": None, "contexts": []}
 
 
@@ -708,7 +732,7 @@ def handle(
     monotonic: float | None = None,
     home: Path | None = None,
 ) -> dict[str, Any] | None:
-    """One start-time footer instruction; Stop never requests continuation."""
+    """One footer per turn; recover missing starts at supported tool boundaries."""
     event = payload.get("hook_event_name")
     if event not in EVENTS:
         return None
@@ -729,18 +753,38 @@ def handle(
         now = time.time() if wall is None else wall
         ticks = time.monotonic() if monotonic is None else monotonic
         key = stable_hash([session, turn])
-        observed = None
-        if event == "UserPromptSubmit":
-            # Keep bounded transcript I/O outside the cross-Task write lock.
-            observed = snapshot(payload.get("transcript_path"), turn)
-            if observed["status"] == "subagent":
-                return None
-            if observed.get("task_hash") != stable_hash(session):
-                observed["fresh_turn_start"] = False
-            observed["hook_model"] = _model(payload.get("model"))
-            observed["report_locale"] = resolve_locale(home=home)["locale"]
-        connection = _connect(root)
+        connection = None
         try:
+            observed = None
+            started, start_ticks = now, ticks
+            if event in START_EVENTS:
+                # The common path does no transcript or locale work. Recheck
+                # under the write lock to deduplicate concurrent tool events.
+                if (root / "auto-reports/timing.sqlite3").exists():
+                    connection = _connect(root)
+                    if connection.execute("SELECT 1 FROM turns WHERE key=?", (key,)).fetchone():
+                        return None
+                recovery = event != "UserPromptSubmit"
+                observed = snapshot(payload.get("transcript_path"), turn, at_turn_start=recovery)
+                if observed["status"] == "subagent":
+                    return None
+                if recovery:
+                    native_start = observed.get("native_started_at")
+                    if (observed.get("task_hash") != stable_hash(session)
+                            or observed.get("invalid_records")
+                            or native_start is None or not 0 <= now - native_start <= ticks):
+                        return None
+                    started = native_start
+                    start_ticks = ticks - (now - started)
+                    observed["recovered_at"] = now
+                if observed.get("task_hash") != stable_hash(session):
+                    observed["fresh_turn_start"] = False
+                observed["start_event"] = event
+                # A later tool's model is not evidence of the original start model.
+                observed["hook_model"] = None if recovery else _model(payload.get("model"))
+                observed["report_locale"] = resolve_locale(home=home)["locale"]
+            if connection is None:
+                connection = _connect(root)
             connection.execute("BEGIN IMMEDIATE")
             if event == "SessionEnd":
                 connection.execute(
@@ -751,7 +795,7 @@ def handle(
                 connection.commit()
                 return None
             row = connection.execute("SELECT * FROM turns WHERE key=?", (key,)).fetchone()
-            if event == "UserPromptSubmit":
+            if event in START_EVENTS:
                 footer = None
                 if row is None:
                     if connection.execute("SELECT count(*) FROM turns").fetchone()[0] >= MAX_ROWS:
@@ -762,8 +806,8 @@ def handle(
                             key,
                             stable_hash(session),
                             stable_hash(turn),
-                            now,
-                            ticks,
+                            started,
+                            start_ticks,
                             json.dumps(observed, separators=(",", ":")),
                         ),
                     )
@@ -816,6 +860,8 @@ def handle(
                 "turn_hash": row["turn_hash"],
                 "elapsed_seconds": round(elapsed, 3),
                 "started_at": datetime.fromtimestamp(row["started"], timezone.utc).isoformat(),
+                "start_event": started.get("start_event", "UserPromptSubmit"),
+                "start_recovered": "recovered_at" in started,
                 "stopped_at": datetime.fromtimestamp(now, timezone.utc).isoformat(),
                 "usage": usage,
                 "task_usage": stopped.get("usage"),
@@ -849,7 +895,8 @@ def handle(
                 + f"[{text('report_link')}](<{report}>) ({text('stop_note')})"
             }
         finally:
-            connection.close()
+            if connection is not None:
+                connection.close()
     except Exception:
         # A failed receipt must never HALT, bypass a HALT, or continue the model.
         try:

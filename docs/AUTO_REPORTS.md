@@ -47,6 +47,31 @@ Disabling reports or an incompatible
 exact-output request takes precedence. The same persistent switch controls both
 generation and this presentation instruction; an explicit off is not overridden.
 
+From v0.13.3, a missing prompt-hook start can be recovered by the first eligible
+`PreToolUse` or `PostToolUse`. The same Governor interface checks budget decisions
+first, then atomically creates at most one timing row and one event-correct
+context instruction. Existing rows (including terminal states) do not trigger
+another transcript read, locale lookup, or instruction. Reporting never changes
+tool permission, input or output, or requests a Stop continuation.
+
+Recovery requires the exact parent Task and active turn's native `task_started`
+record, with a valid timezone-aware timestamp, within the existing 8 MiB scan.
+The baseline is reconstructed at that record, not from the first tool's already
+spent tokens. Earlier counters or verified fresh-first-turn evidence may establish
+the baseline; an explicit native turn counter can still supply usage without it.
+Missing counters stay unknown. Timing and child coverage use the recovered native
+start, and the private Stop receipt records `start_event` and `start_recovered`.
+Malformed, foreign, completed, future, before-current-boot or out-of-scan starts
+are not recovered. The report switch is rechecked and subagents are excluded.
+
+This uses the documented
+[PreToolUse](https://learn.chatgpt.com/docs/hooks#pretooluse) and
+[PostToolUse](https://learn.chatgpt.com/docs/hooks#posttooluse) context outputs.
+It covers an omitted prompt hook when a supported tool hook does run; it does
+not establish why any particular scheduler omitted a hook. A turn with neither
+a prompt start nor an eligible tool event cannot be guaranteed a card. Missing
+or disabled hooks, unavailable runtime and model noncompliance remain host limits.
+
 `Stop` claims that key before generating private Markdown, HTML and
 JSON files under the budget data directory's `auto-reports/`. Files are mode
 0600 and use opaque names; no prompt, transcript text or raw transcript path is
@@ -320,8 +345,9 @@ not start a budget, change native subscriptions or alter models. An optional
 it is unnecessary for saving model-generation cost and is not the default.
 
 The switch is checked at each relevant hook, so turning it off also suppresses
-a pending Stop receipt. Turning it on cannot recreate a start that happened
-while reporting was off; future user turns establish their own baselines.
+a pending Stop receipt. Turning it on does not backfill completed turns. An active
+turn can recover its native start at its next eligible tool event; future user
+turns otherwise establish their own baselines. Recovery never changes the switch.
 Users may ask Codex to turn automatic per-turn reports on/off; the skill runs
 these same commands and reads back `status`. Such a conversational configuration
 request uses a normal model turn; subsequent report generation itself does not.

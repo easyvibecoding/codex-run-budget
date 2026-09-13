@@ -1,5 +1,47 @@
 # Validation evidence
 
+## Missing first-turn report recovery — 2026-09-13 Asia/Taipei
+
+Installed `0.13.3+codex.20260913104501`. All 330 tests passed, plus Ruff,
+repository/plugin validation, reproducible runtime verification and the worktree
+sensitive-data gate. New regressions exercise the Governor interface with no
+prompt event: both tool boundaries, original first/later-turn baselines, unknown
+counters, native turn counters, duplicate/concurrent deliveries, terminal and
+foreign starts, invalid timestamps, bounded scans, disabled/subagent exclusion,
+threshold timing and preservation of budget decisions/context.
+
+Three real first-turn canaries on candidate `0.13.3+codex.20260913103738`
+deliberately omitted `UserPromptSubmit` only in
+their isolated process configuration. Codex CLI `0.154.0` recovered through
+`PreToolUse` and, with that hook also omitted, `PostToolUse`. The desktop-bundled
+`0.154.0-alpha.6.2` engine separately recovered through `PreToolUse`. Each executed
+one `pwd` plus one preview, persisted exactly one report instruction and one
+inline reference in its final answer, and produced a Stop receipt whose recovered
+start and usage matched the native records. Each used three model requests
+(ordinary tool round trip, preview round trip, final), not zero-token rendering.
+An earlier test override did not omit the prompt hook and is excluded from these
+recovery results. No saved hook was disabled and no curation schedule was edited.
+
+These are live engine/CLI lifecycle tests with controlled missing-hook injection,
+not a replay of the original scheduler, proof of its missing-hook cause, or native
+desktop paint verification. A run without any eligible hook remains unsupported.
+Persisted final-answer read-back found the reference in the final (not merely
+commentary), four closed disclosures, and an existing Task-owned HTML file.
+The installed deterministic hook/preview fixture also rejected an external path,
+recovered the original first-turn counter, deduplicated subsequent hooks, and
+confirmed that Stop did not overwrite the inline snapshot.
+
+All 11 hooks read back enabled/trusted with zero issues. Source/cache identities
+matched and all 32 prior cache versions were preserved. Report settings and
+unrelated configuration were unchanged. Runtime SHA-256:
+`9b7897e58475420c955844491b546107ad353fcad50d177b09925142cd027710`.
+The final build additionally leaves the original hook-start model unknown on
+recovery: a later tool's current model is not historical start-model evidence.
+That metadata-only correction has regression and installed-runtime coverage;
+the recovery lifecycle and native per-turn settings reader are unchanged.
+New Tasks load this fix; existing Tasks retain pinned runtimes. Previously sent
+cards and assistant messages are not rewritten.
+
 ## Desktop-readable preview paths — 2026-09-13 Asia/Taipei
 
 Installed `0.13.2+codex.20260913101056`. All 320 tests passed, plus Ruff,
