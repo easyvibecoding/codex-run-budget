@@ -10,6 +10,14 @@ counters, native turn counters, duplicate/concurrent deliveries, terminal and
 foreign starts, invalid timestamps, bounded scans, disabled/subagent exclusion,
 threshold timing and preservation of budget decisions/context.
 
+The first CI attempt exposed a pre-existing cold-ledger WAL setup race when the
+test started eight fresh Governors before any SessionStart (`database is locked`
+at `PRAGMA journal_mode=WAL`, not duplicate report instructions). The concurrency
+fixture now matches the live missing-prompt lifecycle: SessionStart initializes
+the shared budget ledger, then eight tool hooks race with no report timing row.
+This does not change or claim to fix simultaneous first-ever ledger bootstrap;
+the original fail-closed behavior remains in that separate failure condition.
+
 Three real first-turn canaries on candidate `0.13.3+codex.20260913103738`
 deliberately omitted `UserPromptSubmit` only in
 their isolated process configuration. Codex CLI `0.154.0` recovered through

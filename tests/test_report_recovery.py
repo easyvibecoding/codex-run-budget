@@ -81,10 +81,15 @@ class ReportRecoveryTest(unittest.TestCase):
         self.assertEqual(recent(self.data)[0]["state"], "interrupted")
 
     def test_concurrent_tool_events_inject_exactly_once(self):
+        # Match the live missing-prompt canary: SessionStart initializes the
+        # shared budget ledger, but does not create any report timing state.
+        # The concurrent first report starts below still race from an empty index.
+        self.assertIsNone(self.event("SessionStart"))
+        self.assertEqual(recent(self.data), [])
         with ThreadPoolExecutor(max_workers=8) as pool:
             results = list(pool.map(lambda n: self.event(
                 "PreToolUse" if n % 2 else "PostToolUse"), range(8)))
-        self.assertEqual(sum(bool(value) for value in results), 1)
+        self.assertEqual(sum(bool(value) for value in results), 1, results)
         self.assertEqual(len(recent(self.data)), 1)
 
     def test_later_turn_recovers_prior_counter_not_midturn_value(self):
