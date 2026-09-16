@@ -1,6 +1,6 @@
 ---
 name: workflow-observe
-description: Find related Codex Tasks from a plain-language description of work, observe their workflow and agents, and investigate efficiency problems. Use when the user describes a process to inspect or improve without Task IDs. On-demand by default; changes and recurring observation follow the user's explicit scope.
+description: Inspect project codex exec activity and launcher attribution. Find related Codex Tasks from a plain-language description of work, observe their workflow and agents, and investigate efficiency problems. Use when the user describes a process to inspect or improve without Task IDs. On-demand by default; changes and recurring observation follow the user's explicit scope.
 ---
 
 # Workflow observer
@@ -73,3 +73,25 @@ distinction between turn completion and workflow acceptance. Do not create cron,
 launchd, shell loops or a background model polling process as a workaround.
 
 Invocation: `/skills` → `workflow-observe`, or `$workflow-observe`.
+
+## Project exec activity
+
+For extra `codex exec` activity, select one project directory (the current workspace
+when unambiguous), then run from the plugin root:
+
+```sh
+python3 scripts/run_budget.py exec-activity list --project "$PROJECT_DIR" --format json
+python3 scripts/run_budget.py exec-activity watch --project "$PROJECT_DIR" --duration 60
+python3 scripts/run_budget.py exec-activity run --project "$PROJECT_DIR" -- --ephemeral "Summarize the repository"
+```
+
+Set `PROJECT_DIR` to the selected project, not the plugin directory.
+Default to `list` for investigation. Use foreground `watch` only when monitoring is
+requested. `run` is an opt-in launcher for an already authorized exec invocation;
+an inspection request does not authorize starting model work. Explicit
+`--parent-task` or inherited `CODEX_THREAD_ID` records launcher evidence, not native
+child lineage. Same-directory activity never establishes parent ownership.
+Session cumulative tokens and invocation usage stay separate from parent usage
+and the shared budget ledger. Last-turn events do not prove process liveness.
+Missing records and scan caps remain unknown/partial. Hooks notify at tool-return
+boundaries; this feature installs no daemon, schedule or enforcement extension.

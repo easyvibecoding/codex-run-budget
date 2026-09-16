@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.15.0
+
+- Add project-scoped exec activity lists, foreground change monitoring and an optional
+  launcher with private start/exit receipts, including ephemeral runs.
+- Add nonblocking, deduplicated hook notices at tool-return boundaries.
+- Keep launcher attribution, native child lineage and usage scopes distinct;
+  preserve unknown/partial observations and all existing budget decisions.
+
+
 All notable changes to this project are documented here.
 
 ## 0.14.1 - 2026-09-13

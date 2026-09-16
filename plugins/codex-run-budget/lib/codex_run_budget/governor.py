@@ -142,7 +142,8 @@ class Governor:
                         ) if value
                     )
                     result["hookSpecificOutput"] = specific
-        return result
+        from .exec_activity import add_notice
+        return add_notice(result, payload, self.root)
 
     def _handle_budget(self, payload: dict[str, Any]) -> dict[str, Any] | None:
         event = self._text(payload, "hook_event_name", 100)

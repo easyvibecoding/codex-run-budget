@@ -17,6 +17,10 @@ nine bundled languages and an English fallback. Machine JSON, commands, evidence
 codes and model/native names stay unchanged; no model translates output at runtime.
 See [localization scope](docs/LOCALIZATION.md) and [sensitive-data protection](SECURITY.md).
 
+## Project exec activity
+
+Inspect extra `codex exec` sessions by working directory, watch for changes in the foreground, or use the optional launcher to retain start/exit and usage receipts for ephemeral runs. Hooks notify at tool-return boundaries after an updated hook review and a new Task. Launcher attribution stays distinct from native child lineage; exec usage is separate from parent totals. [Commands and coverage](docs/EXEC_ACTIVITY.md).
+
 ## What it does
 
 - Uses Codex's parent `session_id` as a shared run key for the main agent and

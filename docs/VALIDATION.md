@@ -1,5 +1,36 @@
 # Validation evidence
 
+## 0.15.0 project exec activity
+
+Validated on macOS, Python 3.12.8 and Codex CLI 0.154.0 on 2026-09-16.
+
+- All 393 unit/integration tests passed. New coverage uses synthetic catalogs
+  and real local subprocesses for exact project scope, foreign metadata, symlinks,
+  native/legacy counter separation, same-source resets, distinct resume launch
+  attribution, private hashed state, hook notice deduplication, partial rendering,
+  exit propagation, ambiguous JSON usage and nonblocking telemetry failures.
+- Ruff, repository/runtime validation and Plugin Creator validation passed.
+- Fresh isolated Codex homes installed the plugin from its local marketplace.
+  The installed bootstrap and pinned runtime emitted one exec notice after a
+  synthetic catalog insertion and none on repetition. The post-tool call took
+  0.0842 seconds in this small fixture; this is not a production latency bound.
+- Installed CLI list/render and source identity read-back passed. An installed
+  launcher invoked the real Codex binary with `exec --help`, forwarded its output
+  and recorded start/exit with status 0. This smoke made no model request.
+- Read-only parsing of one selected real native exec session found its metadata
+  and completion event. Parent ownership and missing usage stayed unknown. No
+  real transcript, identifier, path or generated report is included here.
+
+Installed runtime SHA-256:
+`aefdd45c2d5c664b736a9b33a0f36adfaaa24e874ab40fd6ee931ef6ff44976c`.
+
+The hook test uses synthetic native state and actual installed hook commands; it
+does not prove every Desktop host delivers or displays every hook event. Native
+turn completion does not prove process exit. Only instrumented launches retain
+receipts for ephemeral runs; no background service or shared-budget enforcement
+was added. The maintainer's active plugin setup was not changed.
+
+
 ## 2026-09-13: counter-source isolation (0.14.1)
 
 - Installed `0.14.1+codex.20260913150757` into a fresh isolated Codex home and invoked its actual bootstrap hooks. The installed runtime bytes matched the freshly built package.
