@@ -2,6 +2,9 @@
 
 ## 0.16.0
 
+- Fix the repository retention updater to recognize and validate the separate
+  reminder hook without changing trust or relaxing runtime identity checks.
+
 - Add first-prompt update and native hook-trust notices with private deduplication,
   a bounded version cache, and separate unknown states.
 - Keep a standalone reminder definition stable across main-runtime updates so it

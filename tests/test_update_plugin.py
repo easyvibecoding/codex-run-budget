@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -158,3 +159,43 @@ class UpdateTest(unittest.TestCase):
             (plugin / "runtime/hook.pyz").symlink_to(missing)
             with self.assertRaises(ValueError):
                 prewarm_runtime(plugin, root / "data")
+
+    def test_packaged_runtime_prewarms_with_standalone_reminder(self):
+        plugin = Path(__file__).resolve().parents[1] / "plugins/codex-run-budget"
+        with tempfile.TemporaryDirectory() as directory:
+            data = Path(directory) / "data"
+            with mock.patch("update_plugin.subprocess.run") as run:
+                self.assertTrue(prewarm_runtime(plugin, data))
+            run.assert_not_called()
+            runtime = (plugin / "runtime/hook.pyz").read_bytes()
+            digest = hashlib.sha256(runtime).hexdigest()
+            self.assertEqual((data / "runtimes" / (digest + ".pyz")).read_bytes(), runtime)
+
+    def test_reminder_must_match_exact_source_event_and_count(self):
+        source = Path(__file__).resolve().parents[1] / "plugins/codex-run-budget"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plugin = root / "plugin"
+            for relative in ("runtime/hook.pyz", "scripts/bootstrap.py", "hooks/hooks.json",
+                             "lib/codex_run_budget/update_notice.py"):
+                target = plugin / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source / relative, target)
+            config = plugin / "hooks/hooks.json"
+            original = config.read_text()
+            for invalid in ("arguments", "event", "duplicate", "no_runtime"):
+                with self.subTest(invalid=invalid):
+                    hooks = json.loads(original)
+                    handlers = hooks["hooks"]["UserPromptSubmit"][0]["hooks"]
+                    if invalid == "arguments":
+                        handlers[1]["command"] += " extra"
+                    elif invalid == "event":
+                        hooks["hooks"]["Stop"][0]["hooks"].append(handlers.pop())
+                    elif invalid == "duplicate":
+                        handlers.append(handlers[1])
+                    else:
+                        hooks["hooks"] = {"UserPromptSubmit": [{"hooks": [handlers[1]]}]}
+                    config.write_text(json.dumps(hooks))
+                    with self.assertRaises(ValueError):
+                        prewarm_runtime(plugin, root / "data")
+                    self.assertFalse((root / "data").exists())

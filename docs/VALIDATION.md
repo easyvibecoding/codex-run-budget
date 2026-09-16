@@ -1,5 +1,17 @@
 # Validation evidence
 
+## 0.16.0 repository updater compatibility
+
+The repository-side retention updater now validates the standalone reminder's
+exact embedded source and event independently of the pinned main runtime.
+Unknown commands, extra arguments, duplicate reminders, and missing main
+runtime commands remain rejected. No plugin package or hook definition changed.
+
+All 407 tests, Ruff and repository validation passed. A fresh isolated Codex
+home ran the actual `scripts/update_plugin.py`, installed 0.16.0, and prewarmed
+runtime `ceb2314b78ea03ed25fdb2e678fb2075ff85c42a4291afa7f4570f848f089664`.
+Installed and retained bytes matched source; no native trusted hashes were set.
+
 ## 0.16.0 first-prompt update and trust notices
 
 Validated on macOS, Python 3.12.8 and Codex CLI 0.154.0 on 2026-09-17.

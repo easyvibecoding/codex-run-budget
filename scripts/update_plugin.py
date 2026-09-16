@@ -355,9 +355,27 @@ def prewarm_runtime(plugin: Path, data_root: Path) -> bool:
     ]
     if not commands:
         raise ValueError("missing runtime commands")
+    main_commands = 0
+    reminder_seen = False
     for event, command in commands:
-        if shlex.split(command) != ["python3", "-I", "-c", bootstrap, event, digest]:
-            raise ValueError("runtime and trusted command identities differ")
+        parsed = shlex.split(command)
+        if parsed == ["python3", "-I", "-c", bootstrap, event, digest]:
+            main_commands += 1
+            continue
+        # The independently trusted reminder embeds its source, not the zipapp.
+        # Verify its exact identity too; never execute it or alter native trust.
+        if event == "UserPromptSubmit" and not reminder_seen:
+            source = _validate_path(
+                plugin / "lib/codex_run_budget/update_notice.py", "update reminder"
+            )
+            if _lexists(source):
+                reminder = _read_regular(source).decode("utf-8")
+                if parsed == ["python3", "-I", "-c", reminder, "codex-run-budget"]:
+                    reminder_seen = True
+                    continue
+        raise ValueError("runtime and trusted command identities differ")
+    if not main_commands:
+        raise ValueError("missing runtime commands")
     data_root = _validate_path(data_root, "runtime data directory")
     directory = _validate_path(data_root / "runtimes", "runtime directory")
     if data_root.is_symlink() or directory.is_symlink():
