@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from string import Formatter
 
-from build_hook_runtime import artifacts
+from build_hook_runtime import MODULES, artifacts
 
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "plugins" / "codex-run-budget"
@@ -105,11 +105,16 @@ def main() -> int:
     source_files = sorted((PLUGIN / "lib").rglob("*.py")) + sorted(
         (PLUGIN / "scripts").glob("*.py")
     )
+    sentinel = PLUGIN / "lib/codex_run_budget/update_notice.py"
+    if "update_notice.py" in MODULES or "update_cli.py" in MODULES:
+        fail("update checker must remain outside the governance hook runtime")
     for source in source_files:
         text = source.read_text(encoding="utf-8")
         if "[TODO:" in text:
             fail(f"placeholder remains in {source.relative_to(ROOT)}")
-        if "import requests" in text or "urllib.request" in text or "import socket" in text:
+        # Only the independently trusted sentinel may fetch a public version manifest.
+        if ("import requests" in text or "import socket" in text
+                or ("urllib.request" in text and source != sentinel)):
             fail(f"runtime network dependency found in {source.relative_to(ROOT)}")
         py_compile.compile(str(source), doraise=True)
 

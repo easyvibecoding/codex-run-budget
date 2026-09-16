@@ -1,5 +1,35 @@
 # Validation evidence
 
+## 0.16.0 first-prompt update and trust notices
+
+Validated on macOS, Python 3.12.8 and Codex CLI 0.154.0 on 2026-09-17.
+
+- All 405 tests passed, including first-prompt/installation deduplication,
+  cache expiry and failure backoff, unknown trust, disabled hooks, scoped plugin
+  identity, private hashed state, bounded/reaped native RPC, independent embedded
+  commands, CLI fallback, and verified TLS with the macOS system-CA fallback.
+- Ruff, repository/runtime validation and Plugin Creator/skill validation passed.
+- A fresh isolated Codex home installed 0.16.0; installed runtime and hook bytes
+  matched source. Its actual installed CLI fetched the public GitHub manifest
+  successfully and read native pending trust. No model request was made.
+- A separate native upgrade canary installed synthetic versions 9.0.0 and 9.0.1
+  using the real plugin CLI. Trust was seeded only in disposable isolated homes.
+  `hooks/list` observed all 12 hooks trusted before the upgrade; afterwards the
+  11 changed main hooks were `modified`, while the standalone reminder retained
+  exactly the same native hash and remained `trusted` across cache-version paths.
+- Invoking that installed reminder emitted both update and reauthorization
+  notices, then no duplicate on the next prompt. After isolated re-trust, the
+  trust warning disappeared. The cached-release/native-trust fixture took
+  0.131 seconds; this is an observation, not a production latency guarantee.
+
+Installed runtime SHA-256:
+`ceb2314b78ea03ed25fdb2e678fb2075ff85c42a4291afa7f4570f848f089664`.
+
+The test proves native trust classification and the actual handler's output. It
+is not a model-driven Desktop rendering test, nor evidence that untrusted hooks
+can execute. First installation of the reminder still requires user review.
+The maintainer's active installation and hook grants were not changed.
+
 ## 0.15.0 project exec activity
 
 Validated on macOS, Python 3.12.8 and Codex CLI 0.154.0 on 2026-09-16.

@@ -50,6 +50,15 @@ tools do not trigger the repeat guard (all other ceilings still apply). Ledger
 upgrades automatically back up v1 data before the additive migration. See
 [hardening design and evidence](docs/HARDENING.md).
 
+## Update reminders
+
+The first prompt in each Task checks for plugin updates and hooks awaiting trust.
+After updating, open a terminal, run `codex`, enter `/hooks`, and review/trust the
+changed hooks. A separate reminder can stay trusted across routine updates;
+**trust this new reminder once when first installing this version**. Checks are
+cached, nonblocking, and make no model calls. No update or trust is automatic.
+[Coverage, manual checks, and disabling notices](docs/UPDATE_NOTICES.md).
+
 ## Install from GitHub
 
 ```sh

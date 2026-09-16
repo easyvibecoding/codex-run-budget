@@ -310,3 +310,14 @@ cache. Do not claim that installing new code updates an already captured old
 command. Preserve hook settings unless enabling them is authorized, and review
 new command hashes before trusting them. Never clear HALT or silently turn
 enforcement off to recover from a missing runtime.
+
+## Plugin updates and hook authorization
+
+For update or missing-hook questions, run `python3 scripts/run_budget.py updates check --refresh --cwd "$PROJECT_DIR"`
+from the selected installed plugin directory. Use the user's project for
+`PROJECT_DIR`. Keep release status and native hook trust separate; unknown does
+not mean current or trusted. The first-prompt notice has a six-hour version cache.
+Tell the user to run `codex` in a terminal, enter `/hooks`, and review/trust the
+updated hooks. Never edit trusted hashes or grant hook trust automatically.
+The standalone reminder needs one initial trust review; if it is itself changed
+or disabled it cannot notify. No model run or repeated background check is needed.

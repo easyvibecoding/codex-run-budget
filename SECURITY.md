@@ -24,6 +24,12 @@ Hook enforcement is not a complete sandbox. Hosted tools and specialized tool
 paths may bypass local tool hooks, and model calls are not directly intercepted
 by the plugin. See the limitations section in the README before relying on it.
 
+The separate first-prompt update checker fetches only this plugin's public
+GitHub manifest, with a six-hour cache. No Task ID, project path, prompt, or usage
+is sent. Its embedded command does not execute newly installed plugin code and
+never changes native hook trust. Set `CODEX_PLUGIN_UPDATE_NOTICES=0` to disable
+automatic checks. See [update notices](docs/UPDATE_NOTICES.md) for scope and limits.
+
 ## Repository secret and private-data gate
 
 The repository includes a deterministic, standard-library scanner at

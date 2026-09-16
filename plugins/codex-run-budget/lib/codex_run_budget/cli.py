@@ -110,6 +110,8 @@ def build_parser(
     sub = parser.add_subparsers(dest="command", required=True)
     from .exec_activity_cli import add_parser
     add_parser(sub, native_home_option=True)
+    from .update_cli import add_parser as add_update_parser
+    add_update_parser(sub, native_home_option=True)
 
     audit = sub.add_parser("audit", help=text("cli_audit_help"))
     audit.add_argument("transcript", type=Path, nargs="+")
@@ -230,6 +232,9 @@ def main(argv: list[str] | None = None) -> int:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     parser_text = human_text("cli") if _help_requested(raw_argv) else None
     args = build_parser(parser_text, include_help=parser_text is not None).parse_args(raw_argv)
+    if args.command == "updates":
+        from .update_cli import run
+        return run(args, args.data_dir or data_path())
     if args.command == "exec-activity":
         from .exec_activity_cli import run
         return run(args, args.data_dir or data_path())

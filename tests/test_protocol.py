@@ -36,12 +36,15 @@ class ProtocolTest(unittest.TestCase):
             result = json.loads(completed.stdout)
             self.assertEqual(result["hookSpecificOutput"]["hookEventName"], "UserPromptSubmit")
 
-    def test_hooks_file_uses_plugin_root_and_no_network(self) -> None:
+    def test_governance_hooks_use_plugin_root_and_no_network(self) -> None:
         hooks = json.loads((PLUGIN / "hooks" / "hooks.json").read_text(encoding="utf-8"))
         commands: list[str] = []
-        for groups in hooks["hooks"].values():
-            for group in groups:
-                for hook in group["hooks"]:
+        for event, groups in hooks["hooks"].items():
+            for group_index, group in enumerate(groups):
+                for index, hook in enumerate(group["hooks"]):
+                    # Only the separately trusted update sentinel reads public versions.
+                    if (event, group_index, index) == ("UserPromptSubmit", 0, 1):
+                        continue
                     commands.append(hook["command"])
         self.assertTrue(commands)
         self.assertTrue(all("PLUGIN_ROOT" in command for command in commands))
