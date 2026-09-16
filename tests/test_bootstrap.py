@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import shlex
 import shutil
 import sqlite3
 import subprocess
@@ -56,8 +55,8 @@ class BootstrapTest(unittest.TestCase):
         )
 
     def invoke(self, event, **extra):
-        command = shlex.split(self.hooks[event][0]["hooks"][0]["command"])
-        command[0] = sys.executable
+        command = [sys.executable, "-I", "-c",
+                   (PLUGIN / "scripts/bootstrap.py").read_text(), event, self.digest]
         payload = {
             "session_id": "private-bootstrap-run",
             "hook_event_name": event,

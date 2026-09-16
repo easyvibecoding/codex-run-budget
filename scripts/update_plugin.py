@@ -355,11 +355,33 @@ def prewarm_runtime(plugin: Path, data_root: Path) -> bool:
     ]
     if not commands:
         raise ValueError("missing runtime commands")
+    # The new native definition trusts an embedded publisher key, not a version digest.
+    # This installer only retains verified bytes; it never grants native hook trust.
+    signed_entry = None
+    signed_source = plugin / "scripts/publisher_bootstrap.py"
+    if signed_source.exists():
+        from publisher_release import load, validate
+        verifier, source_bytes, policy = load(
+            Path(__file__).resolve().parents[1] / "plugins/codex-run-budget")
+        installed_source = _read_regular(_validate_path(signed_source, "publisher bootstrap"))
+        if installed_source != source_bytes:
+            raise ValueError("publisher bootstrap requires the matching installer")
+        installed_policy = json.loads(_read_regular(_validate_path(
+            plugin / "runtime/publisher.json", "publisher policy")))
+        signed_entry = verifier.entry(source_bytes, installed_policy)
+        # validate() imports source only after the exact trusted-source comparison above.
+        validate(plugin)
+        publisher = verifier.Publisher(data_root, installed_policy, source_bytes)
+        try:
+            publisher.seed(plugin)
+        finally:
+            publisher.close()
     main_commands = 0
     reminder_seen = False
     for event, command in commands:
         parsed = shlex.split(command)
-        if parsed == ["python3", "-I", "-c", bootstrap, event, digest]:
+        if (parsed == ["python3", "-I", "-c", bootstrap, event, digest]
+                or signed_entry and parsed == ["python3", "-I", "-c", signed_entry, event]):
             main_commands += 1
             continue
         # The independently trusted reminder embeds its source, not the zipapp.

@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "plugin": "codex-run-budget",
+  "rsa_n": "a10975d59131a63d459f3070a632e802c8915defdcc04c2b7969356cceecf2aa2f87fa8533b0b851b6ed1c9ea999adc46f66a0445f8ed3f9b2ac70ad057e06d7b5eaee6bc9abde690ccd1c8d0d657b917ed6a8dd9d5f54bd5c7e8d37c910f0f5821ac7932ad3c8190f310e17d4fceb4f86e97572cfc24e6601308c9b5db33ae7acdbf1d13d8554a8b7cb63747fb8d15851eb609b13d27eb75d2a38646376553e1f46fcb598c75473761cb90ef65e7deb8be5aa9b0a5f467ef7ce30d8993818fc2fc6edd06cf4a0a64cfa0679ed916553da58e353b1463727d850ffadb5b5fdbdce41141af4b05c52a27ea9af023a5c029b1858aac84d712ef46f72ffcd4465e007632976b90d0d6dc21332419beee09753be42ca7ccb0c62ba187bb986a181cc9a3ef8f31543f24c8a395cfeef8bb0f8fb66bcdcfecfd40837c000aee845139d253e440334008c3a67f463337032a07a05b6c2000b41ffc5260051eaf900eac61542046bc1ffc536d54a814cb45808595cc0685d4bcdd5f8001f2f9ed27e5d89",
+  "rsa_e": 65537,
+  "events": [
+    "SessionStart",
+    "UserPromptSubmit",
+    "PreToolUse",
+    "PostToolUse",
+    "SubagentStart",
+    "SubagentStop",
+    "PreCompact",
+    "PostCompact",
+    "Stop",
+    "SessionEnd",
+    "Interrupt"
+  ]
+}

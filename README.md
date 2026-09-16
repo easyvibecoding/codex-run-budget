@@ -50,14 +50,23 @@ tools do not trigger the repeat guard (all other ceilings still apply). Ledger
 upgrades automatically back up v1 data before the additive migration. See
 [hardening design and evidence](docs/HARDENING.md).
 
-## Update reminders
+## Automatic signed runtime updates
 
-The first prompt in each Task checks for plugin updates and hooks awaiting trust.
-After updating, open a terminal, run `codex`, enter `/hooks`, and review/trust the
-changed hooks. A separate reminder can stay trusted across routine updates;
-**trust this new reminder once when first installing this version**. Checks are
-cached, nonblocking, and make no model calls. No update or trust is automatic.
-[Coverage, manual checks, and disabling notices](docs/UPDATE_NOTICES.md).
+Trust the fixed publisher entry once in CLI `codex` → `/hooks`. Routine runtime
+and CLI updates then retain the same native hook definitions and need no new
+trust review. By default, a prompt can start a bounded background check at most
+once every six hours. Only releases signed by this plugin's pinned publisher key
+are activated. New Tasks use the update; existing Tasks retain their version.
+The first hook in a new Task reports its verified runtime version.
+
+This authorizes future signed program changes from the same publisher. New hook
+events, a changed entry/key, or plugin/skill structure still require a normal
+plugin update and review of changed hooks. Nothing edits Codex's trust records.
+Use `python3 scripts/publisher_updates.py status|on|off|update|rollback` from the
+installed plugin directory (choose one action). `status` reports the runtime
+version; the Plugins page may still show the older installed package version.
+[Controls, verification and release process](docs/SIGNED_UPDATES.md).
+[Hook trust reminders](docs/UPDATE_NOTICES.md).
 
 ## Install from GitHub
 

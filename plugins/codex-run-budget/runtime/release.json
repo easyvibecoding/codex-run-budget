@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "plugin": "codex-run-budget",
+  "channel": "stable",
+  "version": "0.17.0",
+  "sequence": 1789578570,
+  "bootstrap_sha256": "d1f34957b13da9f03db60e3c658bafe05081b2cee8be10b8906fba95b5b1780a",
+  "runtime_sha256": "98c46fa2be03e57874c43c93b0ef267f1bec832260979ad9e1f2a71b69c811a7",
+  "runtime_size": 893885,
+  "signature": "Ti9Ql/vlj8ESau31PsKLwRp1QV1wldITGes7j7vrpbP6Pclh1kqa/dkwkvbCZ/KLShcybdyg/1OYgC5MA1VE90gGt9mbvzfnOvfBTan0CvPv949i+zHdPWHgzmWRJZLZGLTkn4csNIG74a8e2eaqIPHRCIMf5ly02w2tunNoCrFb9W6RLdp/kf8tRn8x646+V8j+lfqtYSimQ+IWpyj/9JH1+BwCMEf+kx3LPy4MnsX6qFEsNL9Pevi4ARaq2AUvUnHF3fQdeg9aYE7Pi/LNhHqgKeW1Hxs+Xxt77Sd3sgBflyr2Vrrw8HyWCbnOGPutVNthdO9z9TxUMWQ/MhWA0xmjDW1cB09ogdF7LCqqwzQenBgFa4zRQAbgwx7hO5//WK6SVd07jjYMFjkFZ/49TzUrEQVJWLBUFbzGYmeM/hqODaoweRcNiyAHmWZy8PVUYG/Bdh99rgoJ9YmU2bPrcBn+bMW3HA8PqO14avhTzTjdWukmJbiEriEnKNShajWY"
+}

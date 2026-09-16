@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 import json
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -47,7 +49,13 @@ class ProtocolTest(unittest.TestCase):
                         continue
                     commands.append(hook["command"])
         self.assertTrue(commands)
-        self.assertTrue(all("PLUGIN_ROOT" in command for command in commands))
+        source = (PLUGIN / "scripts/publisher_bootstrap.py").read_bytes()
+        encoded = base64.b64encode(source).decode()
+        self.assertTrue(all(encoded in shlex.split(command)[3] for command in commands))
+        # Downloads run only in a separate bounded worker; the policy module stays offline.
+        governor = (PLUGIN / "lib/codex_run_budget/governor.py").read_text()
+        self.assertNotIn("urllib", governor)
+        self.assertIn('if event == "UserPromptSubmit"', source.decode())
         self.assertTrue(all(command.startswith("python3 -I -c ") for command in commands))
         self.assertTrue(all("http" not in command for command in commands))
 

@@ -9,10 +9,10 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import pkgutil
 import re
 from datetime import datetime, timezone
 from html import escape
-from pathlib import Path
 from typing import Any
 
 
@@ -469,9 +469,8 @@ def render_html(
     text=None,
 ) -> str:
     labels = _labels(locale=locale, text=text)
-    assets = Path(__file__).with_name("report_assets")
-    script = (assets / "report.js").read_text(encoding="utf-8")
-    style = (assets / "report.css").read_text(encoding="utf-8")
+    script = pkgutil.get_data(__package__, "report_assets/report.js").decode("utf-8")
+    style = pkgutil.get_data(__package__, "report_assets/report.css").decode("utf-8")
     digest = base64.b64encode(hashlib.sha256(script.encode()).digest()).decode()
     selected_scope = (
         labels("scope_selected")

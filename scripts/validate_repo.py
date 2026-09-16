@@ -9,6 +9,7 @@ from pathlib import Path
 from string import Formatter
 
 from build_hook_runtime import MODULES, artifacts
+from publisher_release import validate as validate_release
 
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "plugins" / "codex-run-budget"
@@ -114,7 +115,8 @@ def main() -> int:
             fail(f"placeholder remains in {source.relative_to(ROOT)}")
         # Only the independently trusted sentinel may fetch a public version manifest.
         if ("import requests" in text or "import socket" in text
-                or ("urllib.request" in text and source != sentinel)):
+                or ("urllib.request" in text and source not in {
+                    sentinel, PLUGIN / "scripts/publisher_bootstrap.py"})):
             fail(f"runtime network dependency found in {source.relative_to(ROOT)}")
         py_compile.compile(str(source), doraise=True)
 
@@ -129,6 +131,7 @@ def main() -> int:
         if phrase not in readme:
             fail(f"README is missing required disclosure: {phrase}")
 
+    validate_release(PLUGIN)
     validate_catalogs()
     print("Repository validation passed.")
     return 0
