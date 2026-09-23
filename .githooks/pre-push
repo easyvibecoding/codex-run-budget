@@ -2,5 +2,13 @@
 set -eu
 
 repo=$(git rev-parse --show-toplevel)
+set --
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$local_sha" in
+    0000000000000000000000000000000000000000) continue ;;
+  esac
+  set -- "$@" --history-ref "$local_sha"
+done
+[ "$#" -gt 0 ] || exit 0
 exec python3 "$repo/scripts/check_sensitive_data.py" \
-  --history --fail-on-findings --repo "$repo"
+  --history --fail-on-findings --repo "$repo" "$@"

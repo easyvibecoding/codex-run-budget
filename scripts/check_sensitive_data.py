@@ -555,9 +555,12 @@ def scan_index(repo: Path) -> list[Finding]:
     return sorted(set(findings))
 
 
-def _history_blobs(repo: Path) -> Iterator[tuple[str, bytes]]:
+def _history_blobs(repo: Path, refs: Sequence[str] | None = None) -> Iterator[tuple[str, bytes]]:
     seen: set[str] = set()
-    raw = _git(repo, "rev-list", "--objects", "--all")
+    if refs is not None and any(not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", ref)
+                                for ref in refs):
+        raise ScanError("invalid history ref")
+    raw = _git(repo, "rev-list", "--objects", *(refs if refs is not None else ["--all"]))
     for record in raw.splitlines():
         parts = record.split(None, 1)
         if len(parts) != 2:
@@ -576,14 +579,15 @@ def _history_blobs(repo: Path) -> Iterator[tuple[str, bytes]]:
             raise ScanError("history source unavailable") from exc
 
 
-def scan_history(repo: Path) -> list[Finding]:
+def scan_history(repo: Path, refs: Sequence[str] | None = None) -> list[Finding]:
     findings: list[Finding] = []
-    for name, blob in _history_blobs(repo):
+    for name, blob in _history_blobs(repo, refs):
         findings.extend(scan_bytes(blob, "history/" + name))
     return sorted(set(findings))
 
 
-def scan(repo: Path, scopes: Sequence[str]) -> list[Finding]:
+def scan(repo: Path, scopes: Sequence[str], history_refs: Sequence[str] | None = None
+         ) -> list[Finding]:
     findings: list[Finding] = []
     for scope in scopes:
         if scope == "worktree":
@@ -591,7 +595,7 @@ def scan(repo: Path, scopes: Sequence[str]) -> list[Finding]:
         elif scope == "index":
             findings.extend(scan_index(repo))
         elif scope == "history":
-            findings.extend(scan_history(repo))
+            findings.extend(scan_history(repo, history_refs))
         else:
             raise ValueError(f"unknown scan scope: {scope}")
     return sorted(set(findings))
@@ -604,6 +608,8 @@ def _parser() -> argparse.ArgumentParser:
     scope.add_argument("--index", action="store_true", help="scan the Git index blobs")
     scope.add_argument("--history", action="store_true", help="scan every reachable Git blob")
     scope.add_argument("--all", action="store_true", help="scan worktree, index, and history")
+    parser.add_argument("--history-ref", action="append", dest="history_refs",
+                        help="scan history reachable from this exact commit (repeatable)")
     parser.add_argument("--repo", type=Path, default=Path.cwd(), help=argparse.SUPPRESS)
     parser.add_argument("--json", action="store_true", help="emit only redacted JSON")
     parser.add_argument(
@@ -645,7 +651,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         else ["index"]
     )
     try:
-        findings = scan(args.repo.resolve(), scopes)
+        if args.history_refs and scopes != ["history"]:
+            parser.error("--history-ref requires --history")
+        findings = scan(args.repo.resolve(), scopes, args.history_refs)
     except (OSError, ScanError, ValueError):
         if args.json:
             print(

@@ -5,6 +5,7 @@
 - Mark cross-project Task coordination experimental, with a global switch and a switch for each pair.
 - Let users register multiple named pairs of exact local Codex project roots; each pair keeps its own remote-main cursors, pending reviews, and one-to-one Task bindings. A project may appear in several pairs.
 - Preserve the existing single pair and its private state as `default`; fresh named pairs start disabled.
+- Scope the pre-push history audit to pushed commits while keeping CI's full reachable-history audit; make the detached report-reader test wait for cleanup.
 
 ## 0.19.1
 

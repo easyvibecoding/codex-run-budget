@@ -5,6 +5,45 @@ This file preserves dated release checks. The current package version is in
 [changelog](../CHANGELOG.md) for later changes. Historical installed canaries
 do not establish the trust or active runtime of a current installation.
 
+## 0.19.2 experimental paired-project review — 2026-09-24
+
+The 0.19.2 signed runtime was built and verified locally; its SHA-256 is
+`4909b41f1076803d448b1d4e0f62911331617076d6679bb2a5637685f8422a64`.
+The installed Codex plugin cache and publisher status reported 0.19.2. A new
+real Codex Task was pinned to that digest. The experimental global switch and
+the existing `default` pair were enabled. The new named-pair path, overlapping
+pairs, isolated cursors and bindings, disabled switches, and unregistered-root
+rejection were checked with synthetic local Git projects and the native catalog
+fixture; no additional private pair was registered for the live test.
+
+The real Task's Stop observed Run Budget remote `main` advance
+`bf38b15..3987435`, reserved the event, then created exactly one Usage Reports
+review Task through Codex App. The receiving Task verified the exact source
+diff and both remote heads, found the destination contract and four README
+languages already aligned, and returned `no-alignment-needed`. The source
+Task recorded one-to-one binding and the decision; read-back showed its cursor
+at `3987435` and no pending source range. On a later independent Stop, it sent
+one summary to that same bound Task and `relay-sent` returned `sent`.
+
+The converse Usage Reports advance `60b6d7c..c0e6033` was then delivered from
+the already bound Usage Reports Task to the same Run Budget Task. No third Task
+was created. Run Budget verified that the change was documentation-only and
+its own contract already matched, recorded `no-alignment-needed`, advanced
+the Usage Reports cursor to `c0e6033`, and cleared pending state. The old
+Codex project-list paths were symlinks to the moved Git roots; path identity
+was checked by resolving both roots before Task creation. This live test covers
+the existing `default` pair; multi-pair fan-out and off-switch behavior remain
+unit-tested rather than live-Task verified.
+
+The full local suite passed 439 tests, Ruff, repository validation, Plugin
+Creator validation, and staged sensitive-data scan. The first remote CI run
+exposed a test-only race during temporary-directory cleanup of a detached
+report completion reader; the test now waits for that reader to settle. The
+pre-push history gate now audits the refs being pushed so private local Codex
+checkpoint refs cannot block a clean public branch. Its exact-ref behavior was
+checked against a synthetic private checkpoint, while the pushed `main`
+history passed the same sensitive-data scan with zero findings.
+
 ## 0.18.0 documentation and isolated installation read-back
 
 Checked on 2026-09-24 in this checkout. Ruff, all 422 unit tests, repository

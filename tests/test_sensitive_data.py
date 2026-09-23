@@ -256,6 +256,35 @@ class SensitiveDataTest(unittest.TestCase):
             self.assertTrue(any(item.rule == "provider-token" for item in findings))
             self.assertTrue(all(secret not in item.fingerprint for item in findings))
 
+    def test_history_ref_ignores_unpushed_codex_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = Path(temporary)
+            _git(repo, "init", "-q")
+            env = {
+                **os.environ,
+                "GIT_AUTHOR_NAME": "Scanner Test",
+                "GIT_AUTHOR_EMAIL": "scanner@example.invalid",
+                "GIT_COMMITTER_NAME": "Scanner Test",
+                "GIT_COMMITTER_EMAIL": "scanner@example.invalid",
+            }
+            (repo / "safe.txt").write_text("token_count=1\n", encoding="utf-8")
+            _git(repo, "add", "safe.txt")
+            _git(repo, "commit", "-qm", "safe", env=env)
+            main_head = subprocess.check_output(
+                ["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+            _git(repo, "checkout", "--detach", "-q")
+            (repo / "private.txt").write_text(
+                "api_key = \"" + "sk" + "-" + ("e" * 28) + "\"\n", encoding="utf-8")
+            _git(repo, "add", "private.txt")
+            _git(repo, "commit", "-qm", "checkpoint", env=env)
+            checkpoint = subprocess.check_output(
+                ["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+            _git(repo, "update-ref", "refs/codex/checkpoint", checkpoint)
+            self.assertTrue(any(item.rule == "provider-token" for item in scan_history(repo)))
+            self.assertEqual(scan_history(repo, [main_head]), [])
+            with self.assertRaises(ScanError):
+                scan_history(repo, ["--all"])
+
     def test_cli_json_is_redacted_and_history_is_explicit(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             repo = Path(temporary)

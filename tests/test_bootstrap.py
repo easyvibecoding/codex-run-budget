@@ -8,6 +8,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -115,6 +116,20 @@ class BootstrapTest(unittest.TestCase):
         self.assertEqual(len(list((self.data / "auto-reports").glob("*.md"))), 1)
         self.assertFalse((self.data / "auto-report.json").exists())
         self.assertEqual(self.invoke("Stop"), {})
+        # Stop may launch a detached completion reader. Let it settle before
+        # TemporaryDirectory cleanup removes the report store on CI runners.
+        (self.data / "auto-report.json").write_text(
+            json.dumps({"enabled": False, "threshold_seconds": 0}))
+        timing = self.data / "auto-reports/timing.sqlite3"
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            with sqlite3.connect(timing) as connection:
+                row = connection.execute("SELECT state FROM reconciliations").fetchone()
+            if row is None or row[0] not in {"queued", "running"}:
+                break
+            time.sleep(0.05)
+        else:
+            self.fail("detached completion reader did not settle")
 
     def test_missing_runtime_has_structured_denial_and_no_stop_retry(self):
         self.evict_cache()
