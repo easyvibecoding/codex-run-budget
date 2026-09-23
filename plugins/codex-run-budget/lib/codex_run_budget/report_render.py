@@ -236,12 +236,16 @@ def _md_table(headers: list[str], rows: list[list[Any]], labels) -> str:
 def _window_summary(window: dict[str, Any], labels) -> list[Any]:
     usage = window["usage"] or {}
     scenario = window["credit_scenarios"]
+    share = window.get("cache_observation", {}).get("read_share_percent")
+    cached = _number(usage.get("cached_input_tokens"), labels)
+    if share is not None:
+        cached += f" ({share:g}%)"
     return [
         window["name"],
         _number(len(window["tasks"]), labels),
         _number(usage.get("unique_responses"), labels),
         _number(usage.get("total_tokens"), labels),
-        _number(usage.get("cached_input_tokens"), labels),
+        cached,
         _text(scenario["standard_scenario_credits"], labels),
         _text(scenario["fast_scenario_credits"], labels),
     ]
@@ -297,11 +301,23 @@ def render_markdown(
         *(_md(v, labels) for v in _native_lines(report, labels)),
     ]
     for window in report["windows"]:
+        cache = window.get("cache_observation") or {}
+        changes = cache.get("observed_setting_changes") or {}
         lines += [
             "",
             labels("window_details_heading", name=window["name"]),
             "",
             window["since"] + " → " + window["until"],
+            "",
+            labels(
+                "cache_observation_note",
+                share=(f"{cache['read_share_percent']:g}%" if cache.get("read_share_percent")
+                       is not None else labels("not_observed")),
+                pairs=_number(cache.get("adjacent_pairs"), labels),
+                model=_number(changes.get("model"), labels),
+                effort=_number(changes.get("reasoning_effort"), labels),
+                tier=_number(changes.get("service_tier"), labels),
+            ),
             "",
             _md_table(
                 [
@@ -576,6 +592,8 @@ def render_html(
         f'<noscript>{escape(labels("noscript"))}</noscript>',
     ]
     for i, window in enumerate(report["windows"]):
+        cache = window.get("cache_observation") or {}
+        changes = cache.get("observed_setting_changes") or {}
         article_heading = labels(
             "window_article_heading",
             name=window["name"],
@@ -599,6 +617,15 @@ def render_html(
         )
         pieces += [
             f'<article data-window="{i}"><h3>{escape(article_heading)}</h3>',
+            '<p class="caption">' + escape(labels(
+                "cache_observation_note",
+                share=(f"{cache['read_share_percent']:g}%" if cache.get("read_share_percent")
+                       is not None else labels("not_observed")),
+                pairs=_number(cache.get("adjacent_pairs"), labels),
+                model=_number(changes.get("model"), labels),
+                effort=_number(changes.get("reasoning_effort"), labels),
+                tier=_number(changes.get("service_tier"), labels),
+            )) + '</p>',
             _table(
                 [
                     labels("column_task_agent"),

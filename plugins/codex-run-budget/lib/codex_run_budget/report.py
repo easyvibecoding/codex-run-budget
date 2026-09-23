@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from .cache_observation import observe_cache
 from .meter import _selected_threads, compare_snapshots, load_snapshots
 from .meter_policy import credit_scenarios, pricing_context
 from .survey import survey_transcripts
@@ -337,6 +338,7 @@ def build_report(
             {
                 **period,
                 "usage": _usage(rows),
+                "cache_observation": observe_cache(rows),
                 "status": "observed_only" if rows else "no_observations",
                 "tasks": _group(rows, ("thread_hash", "role")),
                 "contexts": contexts[:detail_limit],
@@ -414,6 +416,9 @@ def build_report(
             "Task and turn IDs are hashed. No prompt/title/preview fallback "
             "or transcript content is exported.",
             "Input includes cached input; output includes reasoning. Do not double-count subsets.",
+            "Cache read share and observed setting changes are local evidence,"
+            " not server cache-miss reasons."
+            " Cache writes may be unavailable even when a native field is present.",
             "Unknown Fast, effort and plans are not backfilled from current settings.",
             "Native quota is saved account data; observed subintervals are not entire windows.",
             "Standard/Fast credits are counterfactuals, not actual charges or quota percentages.",

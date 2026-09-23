@@ -110,5 +110,6 @@
   "summary_tree_limited": "エージェントツリーが件数／深さ上限に達しました。子孫の使用量は不完全です。",
   "report_output_link": "レポートを開く",
   "decimal": ".",
-  "group": ","
+  "group": ",",
+  "cache_observation_note": "キャッシュ読み取り率 {share}、隣接リクエストの組 {pairs}、確認された設定変更：モデル {model}、推論 {effort}、サービス階層 {tier}。これは手掛かりであり、公式のミス理由ではありません。"
 }

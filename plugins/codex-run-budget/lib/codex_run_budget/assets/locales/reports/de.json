@@ -110,5 +110,6 @@
   "summary_tree_limited": "Der Agentenbaum hat die Anzahl-/Tiefengrenze erreicht; Nachkommen-Nutzung ist unvollständig.",
   "report_output_link": "Bericht öffnen",
   "decimal": ",",
-  "group": "."
+  "group": ".",
+  "cache_observation_note": "Cache-Leseanteil {share}; benachbarte Anfragepaare {pairs}; beobachtete Einstellungswechsel: Modell {model}, Reasoning {effort}, Stufe {tier}. Dies sind Hinweise, keine offiziellen Ursachen für Cache-Fehler."
 }

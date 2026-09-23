@@ -128,6 +128,8 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(long["usage"]["total_tokens"], 3000)
         self.assertEqual(long["usage"]["reasoning_output_tokens"], 60)
         self.assertEqual(long["usage"]["uncached_input_tokens"], 300)
+        self.assertEqual(long["cache_observation"]["read_share_percent"], 88.89)
+        self.assertEqual(long["cache_observation"]["requests_with_cache_read"], 3)
         self.assertTrue(short["contexts"][0]["fast_mode"])
         self.assertEqual(short["contexts"][0]["reasoning_effort"], "high")
         self.assertEqual(short["turns"][0]["contexts"][0]["service_tier"], "fast")

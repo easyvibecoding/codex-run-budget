@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.18.0
+
+- Add per-window cache-read share and request counts to Task reports, with localized Markdown and HTML summaries.
+- Count explicitly observed model, reasoning-effort, and service-tier changes between ordered adjacent requests in the same Task.
+- Keep missing settings and timestamp ties unresolved; local observations do not diagnose server-side cache misses or estimate savings.
+
 ## 0.17.0
 
 - Add fixed publisher-trust hooks with signed runtime and CLI updates, enabled by default.

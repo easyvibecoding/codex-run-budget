@@ -69,6 +69,15 @@ Names can reveal work topics: keep exports private and review before sharing.
   Deduplicate response IDs before grouping. Disagreeing duplicate timestamps
   are excluded with a visible counter, including attribution-conflicted replays.
   Unplaceable-time counts describe selected pages, not an allocated time window.
+- Each window now includes `cache_observation` in JSON. `read_share_percent` is
+  observed cached input divided by observed input; zero input gives `null`.
+  `observed_setting_changes` counts model, reasoning-effort, and service-tier
+  changes only between time-ordered adjacent requests in the same Task with
+  explicit observed settings. Timestamp ties and missing settings are not
+  classified. These changes are investigation signals, not official cache-miss
+  diagnoses. A zero cached-input request is not by itself a cache miss. Cache
+  writes are deliberately omitted from this observation because local native
+  write counts may be unavailable even when their field exists.
 - CLI discovery is bounded to the newest 20 matching local pages, up to 4 GiB,
   using existing survey limits. `--limit` supports 1–1000. This can make a
   30-day and 7-day cohort identical: it does not prove there was no older usage.

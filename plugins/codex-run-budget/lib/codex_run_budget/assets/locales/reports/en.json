@@ -110,5 +110,6 @@
   "summary_tree_limited": "Agent tree reached its count/depth limit; descendant usage is incomplete.",
   "report_output_link": "Open report",
   "decimal": ".",
-  "group": ","
+  "group": ",",
+  "cache_observation_note": "Cache read share {share}; adjacent request pairs {pairs}; observed setting changes: model {model}, reasoning {effort}, tier {tier}. These are signals, not official cache-miss reasons."
 }

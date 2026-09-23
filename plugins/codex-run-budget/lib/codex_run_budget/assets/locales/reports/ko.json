@@ -110,5 +110,6 @@
   "summary_tree_limited": "에이전트 트리가 개수/깊이 한도에 도달했습니다. 하위 사용량은 불완전합니다.",
   "report_output_link": "보고서 열기",
   "decimal": ".",
-  "group": ","
+  "group": ",",
+  "cache_observation_note": "캐시 읽기 비율 {share}, 인접 요청 쌍 {pairs}, 확인된 설정 변경: 모델 {model}, 추론 {effort}, 서비스 계층 {tier}. 이는 단서이며 공식 캐시 미스 사유가 아닙니다."
 }

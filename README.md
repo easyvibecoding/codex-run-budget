@@ -129,6 +129,8 @@ implicit fallback. `--full` explicitly opts into full stdout output.
 
 Includes Task/turn and model/Fast/reasoning evidence, independent time windows,
 saved native account quota, and clearly separated Standard/Fast credit scenarios.
+Each window also reports observed cache-read share and setting-change signals;
+these do not claim the server's cache-miss reason. See [report semantics](docs/REPORTS.md).
 Markdown (the default) works in Codex's file viewer; HTML adds offline filtering
 and print/save-as-PDF; JSON preserves the evidence schema. Exact `--thread`
 filters accept exact UUIDs or listed selectors and run before transcript analysis.

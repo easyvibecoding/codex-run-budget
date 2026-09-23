@@ -110,5 +110,6 @@
   "summary_tree_limited": "El árbol de agentes alcanzó el límite de cantidad/profundidad; el uso de descendientes es incompleto.",
   "report_output_link": "Abrir informe",
   "decimal": ",",
-  "group": "."
+  "group": ".",
+  "cache_observation_note": "Porcentaje de lectura de caché {share}; pares de solicitudes adyacentes {pairs}; cambios observados: modelo {model}, razonamiento {effort}, nivel de servicio {tier}. Son indicios, no causas oficiales de fallos de caché."
 }

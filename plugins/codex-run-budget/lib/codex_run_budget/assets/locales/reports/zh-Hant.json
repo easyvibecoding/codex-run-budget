@@ -110,5 +110,6 @@
   "summary_tree_limited": "代理樹已達數量或深度上限；不是完整後代用量。",
   "report_output_link": "開啟報告",
   "decimal": ".",
-  "group": ","
+  "group": ",",
+  "cache_observation_note": "快取讀取占比 {share}；相鄰請求配對 {pairs}；已觀測設定變動：模型 {model}、思考強度 {effort}、服務層級 {tier}。這些是線索，非官方未命中原因。"
 }

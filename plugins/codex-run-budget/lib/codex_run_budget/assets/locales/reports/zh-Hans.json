@@ -110,5 +110,6 @@
   "summary_tree_limited": "代理树已达到数量或深度上限；不是完整后代用量。",
   "report_output_link": "打开报告",
   "decimal": ".",
-  "group": ","
+  "group": ",",
+  "cache_observation_note": "缓存读取占比 {share}；相邻请求配对 {pairs}；已观察到的设置变化：模型 {model}、推理强度 {effort}、服务层级 {tier}。这些是线索，并非官方未命中原因。"
 }
