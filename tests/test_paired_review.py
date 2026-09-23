@@ -182,6 +182,7 @@ class PairedReviewTest(unittest.TestCase):
             connection.execute("CREATE TABLE threads (id TEXT, thread_source TEXT, name TEXT)")
             connection.executemany("INSERT INTO threads VALUES (?,?,?)", [
                 ("review", "agent_created_thread", "Review counterpart changes: left abc1234"),
+                ("alternate-review", "agent_created_thread", "Review left paired change abc1234"),
                 ("ordinary", "agent_created_thread", "Verify paired review Stop hook"),
             ])
 
@@ -190,6 +191,7 @@ class PairedReviewTest(unittest.TestCase):
 
         with patch("codex_run_budget.exec_activity._native", native):
             self.assertTrue(paired_review._is_receiving_review_task("review"))
+            self.assertTrue(paired_review._is_receiving_review_task("alternate-review"))
             self.assertFalse(paired_review._is_receiving_review_task("ordinary"))
 
     def test_bound_tasks_relay_once_per_turn_without_echo_or_new_task(self):

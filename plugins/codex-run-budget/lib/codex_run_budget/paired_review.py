@@ -219,9 +219,11 @@ def _is_receiving_review_task(session_id: str) -> bool:
         try:
             row = connection.execute("SELECT thread_source,name FROM threads WHERE id=?",
                                      (session_id,)).fetchone()
-            return bool(row and row[0] == "agent_created_thread"
-                        and isinstance(row[1], str)
-                        and row[1].startswith("Review counterpart changes:"))
+            if not row or row[0] != "agent_created_thread" or not isinstance(row[1], str):
+                return False
+            title = row[1]
+            return (title.startswith("Review counterpart changes:")
+                    or (title.startswith("Review ") and " paired change " in title))
         finally:
             connection.close()
     except (OSError, ValueError, sqlite3.Error):
@@ -385,7 +387,8 @@ def stop_decision(root: Path, payload: dict[str, Any]) -> dict[str, str] | None:
         "Use the native Codex App create_thread tool to open a read-only review Task "
         "in the destination project. First run "
         f"python3 {script} prompt {name} and reserve {name} {pending['head']}; "
-        "then create the Task, record its real threadId with dispatched to bind "
+        "then create the Task with title 'Review counterpart changes: "
+        f"{name} {pending['head'][:7]}', record its real threadId with dispatched to bind "
         "this Task one-to-one with that counterpart, and "
         "resolve only after reading its evidenced decision. Pin the created "
         "Task for sidebar visibility. If the native tool is unavailable, "
