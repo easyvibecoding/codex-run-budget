@@ -111,6 +111,17 @@ def main() -> int:
             schedule(payload, data_path())
         except Exception:
             pass
+        if not result or (result.get("continue") is not False
+                          and result.get("decision") != "block"):
+            try:
+                from .paired_review import stop_decision
+                from .util import data_path
+
+                paired = stop_decision(data_path(), payload)
+                if paired:
+                    result = {**(result or {}), **paired}
+            except Exception:
+                pass
     if result is not None:
         print(json.dumps(result, separators=(",", ":"), ensure_ascii=True))
     return 0

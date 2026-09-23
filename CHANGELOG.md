@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.19.1
+
+- Replace timed paired-repository polling with a deterministic, project-scoped `Stop` hook check. Only an observed source change continues the existing Task to open a native receiving-project review Task.
+- Keep manual remote scans for changes that occur outside a paired Task; remove the ten-minute model heartbeat and local periodic scanner from the supported setup.
+
 ## 0.19.0
 
 - Add an opt-in paired-project watcher that checks two remote `main` branches and queues an exact source range for a Codex App heartbeat to open a review Task in the opposite project.

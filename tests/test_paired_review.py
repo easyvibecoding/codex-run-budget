@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import subprocess
 import sys
@@ -13,7 +14,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins/codex-run-budget/lib"))
-from codex_run_budget import paired_review  # noqa: E402
+from codex_run_budget import hook_adapter, paired_review  # noqa: E402
 
 
 class PairedReviewTest(unittest.TestCase):
@@ -106,6 +107,72 @@ class PairedReviewTest(unittest.TestCase):
             self.assertTrue(all(row["status"] == "remote-unavailable" for row in
                                 paired_review.scan(self.data)))
         self.assertEqual(self.state(), before)
+
+    def test_stop_hook_is_silent_until_exact_project_changes(self):
+        payload = {"hook_event_name": "Stop", "cwd": str(self.projects[0]),
+                   "stop_hook_active": False}
+        self.assertIsNone(paired_review.stop_decision(self.data, payload))
+        head = self.advance()
+        # A source Task Stop uses only the local origin/main tracking ref.
+        decision = paired_review.stop_decision(self.data, payload)
+        self.assertEqual(decision["decision"], "block")
+        self.assertIn(head, decision["reason"])
+        self.assertEqual(self.state()["pending"]["left"]["destination"], "right")
+        self.assertIsNone(paired_review.stop_decision(
+            self.data, {**payload, "stop_hook_active": True}))
+        self.assertIsNone(paired_review.stop_decision(
+            self.data, {**payload, "cwd": str(self.root)}))
+
+    def test_stop_hook_does_not_repeat_after_reservation(self):
+        head = self.advance()
+        payload = {"hook_event_name": "Stop", "cwd": str(self.projects[0])}
+        self.assertEqual(paired_review.stop_decision(self.data, payload)["decision"], "block")
+        paired_review.reserve_pending(self.data, "left", head)
+        self.assertIsNone(paired_review.stop_decision(self.data, payload))
+
+    def test_stop_hook_accepts_worktree_of_configured_project(self):
+        worktree = self.root / "isolated" / "left"
+        worktree.parent.mkdir()
+        self.git("-C", str(self.projects[0]), "worktree", "add", "--detach", str(worktree))
+        head = self.advance()
+        result = paired_review.stop_decision(
+            self.data, {"hook_event_name": "Stop", "cwd": str(worktree)})
+        self.assertEqual(result["decision"], "block")
+        self.assertIn(head, result["reason"])
+
+    def test_receiving_review_task_does_not_dispatch_another_review(self):
+        first_head = self.advance(0)
+        second_head = self.advance(1)
+        paired_review.scan(self.data)
+        paired_review.reserve_pending(self.data, "left", first_head)
+        paired_review.mark_dispatched(self.data, "left", first_head,
+                                      "synthetic-review-session")
+        result = paired_review.stop_decision(self.data, {
+            "hook_event_name": "Stop", "cwd": str(self.projects[1]),
+            "session_id": "synthetic-review-session"})
+        self.assertIsNone(result)
+        self.assertEqual(self.state()["pending"]["right"]["head"], second_head)
+        with patch.object(paired_review, "_is_agent_created_task", return_value=True):
+            self.assertIsNone(paired_review.stop_decision(self.data, {
+                "hook_event_name": "Stop", "cwd": str(self.projects[1]),
+                "session_id": "different-native-session"}))
+
+    def test_stop_hook_adapter_preserves_budget_output_and_adds_review(self):
+        self.advance()
+        payload = {"hook_event_name": "Stop", "session_id": "synthetic-session",
+                   "cwd": str(self.projects[0]), "stop_hook_active": False}
+        stdin = io.TextIOWrapper(io.BytesIO(json.dumps(payload).encode()))
+        stdout = io.StringIO()
+        with (patch.object(sys, "argv", ["hook", "--event", "Stop"]),
+              patch.object(sys, "stdin", stdin), patch.object(sys, "stdout", stdout),
+              patch.object(hook_adapter.Governor, "dispatch",
+                           return_value={"systemMessage": "budget unchanged"}),
+              patch("codex_run_budget.reconcile.schedule"),
+              patch("codex_run_budget.util.data_path", return_value=self.data)):
+            self.assertEqual(hook_adapter.main(), 0)
+        result = json.loads(stdout.getvalue())
+        self.assertEqual(result["decision"], "block")
+        self.assertEqual(result["systemMessage"], "budget unchanged")
 
 
 if __name__ == "__main__":
