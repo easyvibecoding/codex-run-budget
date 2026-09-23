@@ -1,5 +1,20 @@
 # Validation evidence
 
+This file preserves dated release checks. The current package version is in
+[pyproject.toml](../pyproject.toml) and the plugin manifest; see the
+[changelog](../CHANGELOG.md) for later changes. Historical installed canaries
+do not establish the trust or active runtime of a current installation.
+
+## 0.18.0 documentation and isolated installation read-back
+
+Checked on 2026-09-24 in this checkout. Ruff, all 422 unit tests, repository
+validation, and local-link checks across 26 Markdown files passed. A fresh,
+disposable `CODEX_HOME` installed this checkout's marketplace and plugin
+0.18.0. The installed CLI exposed the documented command groups, and signed
+runtime status reported active version 0.18.0. This check did not grant native
+hook trust or run a model, so it verifies installation and local CLI selection,
+not current-host enforcement or Desktop rendering.
+
 ## 0.17.0 signed updates and native trust continuity
 
 Validated on macOS, Python 3.12.8 and Codex CLI 0.154.0 on 2026-09-17.

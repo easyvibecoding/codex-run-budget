@@ -14,7 +14,9 @@ All lifecycle events enter one deep module:
 Governor.dispatch(hook_payload) -> dict | None
 ```
 
-Callers do not coordinate SQLite transactions, transcript reconciliation,
+The instance `Governor.handle(payload)` evaluates one hook event;
+`Governor.dispatch(payload)` is the failure-aware bootstrap used by the hook
+adapter. Callers do not coordinate SQLite transactions, transcript reconciliation,
 idempotency, leases, lineage, or policy ordering. The hook runner and tests use
 the same interface. The CLI is a read-only adapter over the same ledger except
 for explicit operator halt, resume, and disable commands.
@@ -40,6 +42,30 @@ Codex hook event
 parent session id, so parent and descendant agents use one ledger row. Each
 transcript is a lineage source identified by a SHA-256 hash; its cumulative
 token counter is converted to a delta exactly once.
+
+## Operator control lines
+
+Put a control line at the beginning of the user's Task message. The parser
+accepts `start`, `status`, `halt`, `resume`, and `off`; quoted examples later
+in a message do not run. `start` begins a new epoch while retaining earlier
+audit events. `resume tokens=` sets an absolute ceiling above observed spend.
+
+```text
+run-budget:start tokens=100k warn=80% block_agents=90% tools=200 agents=4 inflight=8 output=50k repeat_steer=3 repeat_halt=5 fail=closed
+run-budget:status
+run-budget:halt reason="operator pause"
+run-budget:resume tokens=200k
+run-budget:off
+```
+
+All start options belong on one line. Counts accept `k` and `m`; ratios
+accept decimals or percentages. Unknown or duplicate options are rejected.
+`tokens` is required; the displayed values are the defaults for the other
+options. `block_agents` must be at least `warn`, and `repeat_halt` must
+exceed `repeat_steer`. `fail=closed` pauses supported admissions when ledger
+or usage evidence is unavailable; `fail=open` is an explicit operator choice.
+The ceiling must leave room for a full request because the plugin has no
+pre-model hook for every request.
 
 ## Policy order
 

@@ -22,7 +22,7 @@ different native catalog. `--data-dir` selects independent private plugin state.
 
 ## Notifications
 
-After reviewing the updated hooks and starting a new Task, hooks establish a
+After trusting the relevant hooks and starting a new Task, hooks establish a
 baseline at prompt submission or the first pre-tool event. At post-tool/Stop
 boundaries they report newly created exec sessions in that directory, once per
 observer turn. They exclude the observing Task itself. If the initial hooks were
