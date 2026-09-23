@@ -116,6 +116,15 @@ python3 plugins/codex-run-budget/scripts/run_budget.py exec-activity list --proj
 
 `survey` reads a bounded recent local cohort; `audit` reads only explicitly supplied transcript paths. The `workflow-observe` skill can resolve a work description to exact Tasks and capture a private, read-only change report. `workflow observe` defaults to the current Task; descendants require `--include-agents` and a later comparison uses the returned `--after` cursor. Neither observation starts a daemon or a recurring automation. `exec-activity watch` runs only in the foreground; `exec-activity run` is an opt-in launcher that starts the supplied Codex invocation. [Survey](docs/SURVEY.md) · [Audit](docs/AUDIT.md) · [Workflow observation](docs/WORKFLOW_OBSERVATIONS.md) · [Exec activity](docs/EXEC_ACTIVITY.md).
 
+### Review paired project changes
+
+```sh
+python3 plugins/codex-run-budget/scripts/paired_review.py status
+python3 plugins/codex-run-budget/scripts/paired_review.py scan
+```
+
+The opt-in scanner queues remote `main` changes for two separately registered Codex projects. A Codex App automation creates a read-only Task in the receiving project, where it decides whether alignment is needed. No Task is opened by the scanner alone; a review never copies code automatically. [Shared decision contract](docs/CROSS_REPO_REVIEW.md) · [Setup and recovery](docs/PAIRED_REVIEW_AUTOMATION.md).
+
 ### Check or change installed software
 
 ```sh

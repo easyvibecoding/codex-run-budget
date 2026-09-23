@@ -50,10 +50,19 @@ A heartbeat for this conversation should:
    `Review counterpart changes: <source> <short SHA>`. Do not use `codex exec`
    as a substitute for an app-visible project Task.
 4. Once a real `threadId` is returned, call
-   `dispatched <source> <head> <threadId>`. Do not store that native ID in a
-   repository or private queue; the command stores only its hash. If Task
-   creation is uncertain or returns only a pending client ID, keep the event
-   `dispatching` and reconcile it before any retry.
+   `dispatched <source> <head> <threadId>`. Pin the created Task so it is
+   visible in the app sidebar; unpinning currently removes it from the sidebar
+   list. Do not store that native ID in a repository or private queue; the
+   command stores only its hash. If Task creation is uncertain or returns only
+   a pending client ID, keep the event `dispatching` and reconcile it with
+   the app and its local Task record before any retry.
+   If `create_thread` returns only `clientThreadId`, the app may finish worktree
+   setup asynchronously. Read the local native Task catalog for candidates with
+   the exact title prefix, receiving Git remote, and a creation time after the
+   reservation; then use `read_thread` to verify the full source SHA before
+   recording its real `threadId`. If the candidate is ambiguous or unavailable,
+   leave the event `dispatching`. Native catalog layouts can change across Codex
+   versions; never guess an ID or open a second Task to recover.
 5. Read the receiving Task's final decision. Call `resolve <source> <decision>`
    only for a supported, evidenced `alignment-needed` or
    `no-alignment-needed` decision. Leave `blocked` and unfinished reviews
