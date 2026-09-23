@@ -48,7 +48,7 @@ Automatic usage cards are enabled by default even when no budget is active. [Tur
 | Native meter | Reads account quota and saved snapshots, local Task configuration history, dated rates, and Standard/Fast credit scenarios. | Account percentages and estimated credits are not Task charges or actual billing. |
 | Diagnostics | Audits exact local transcripts, surveys a bounded recent cohort, and captures explicit workflow observations with cursors. | Observation does not imply a live process, completed work, or recurring monitoring. |
 | Project exec activity | Lists or watches extra `codex exec` sessions for one working directory; an optional launcher records ephemeral invocation receipts. | Exec invocation usage is separate from native child lineage and the shared budget ledger. |
-| Paired project reviews | A trusted `Stop` hook checks the paired Git projects after a Task and continues only when a remote-tracking `main` change needs a review Task in the other project. | No timed model polling; remote-only changes need a later paired Task or manual scan. Review does not copy code or change budgets. |
+| Paired project reviews | A trusted `Stop` hook opens one Task in the other Git project, binds the two Tasks, then relays later Stop summaries to that same counterpart. | No timed polling; remote-only changes need a later paired Task or manual scan. A relay-triggered turn does not echo back. |
 | Signed runtime updates | Activates compatible publisher-signed runtime and CLI changes for new Tasks while existing Tasks keep their pinned version. | New hook, entry, key, or plugin structure still needs normal installation and trust review. |
 
 Human-readable cards, reports, menus, and summaries use nine bundled languages; commands, JSON, status codes, native names, and model IDs remain unchanged. [Localization](docs/LOCALIZATION.md).
@@ -123,7 +123,7 @@ python3 plugins/codex-run-budget/scripts/paired_review.py status
 python3 plugins/codex-run-budget/scripts/paired_review.py scan
 ```
 
-The trusted `Stop` hook checks a paired Task’s Git project and continues that Task only for a newly observed `main` range. It then opens a read-only review Task through Codex App in the other project. Manual `scan` queues remote-only changes without waking a model; a review never copies code automatically. [Shared decision contract](docs/CROSS_REPO_REVIEW.md) · [Setup and recovery](docs/PAIRED_REVIEW_AUTOMATION.md).
+The trusted `Stop` hook checks a paired Task’s Git project. A new `main` range opens one read-only review Task through Codex App in the other project and binds the two Tasks. Each later Stop sends a concise summary to the same bound Task, with an echo guard for relayed messages. Manual `scan` queues remote-only changes without waking a model; a review never copies code automatically. [Shared decision contract](docs/CROSS_REPO_REVIEW.md) · [Setup and recovery](docs/PAIRED_REVIEW_AUTOMATION.md).
 
 ### Check or change installed software
 

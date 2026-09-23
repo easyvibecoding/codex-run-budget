@@ -6,15 +6,16 @@ checkouts or their worktrees. The check is local and deterministic: it compares
 each source's observed `refs/remotes/origin/main` with a private reviewed cursor.
 When the source advances, it queues the exact SHA range and asks the already
 running source Task to continue once. That Task uses Codex App's native tool to
-open a read-only review Task in the **other** project. This does not wake a model
-on a timer; unchanged Tasks end normally. The receiving Task follows the
+open a read-only review Task in the **other** project and binds the two Tasks.
+Later Stops in either bound Task send a concise summary to the same counterpart.
+The receiving Task follows the
 [shared contract](CROSS_REPO_REVIEW.md) and verifies the remote head before
 settling the review.
 
 This mechanism sees a push or fetch reflected in a configured checkout when a
 Task from that repo reaches `Stop`. A remote-only update with no subsequent
-paired Task is not noticed automatically. A Task running without the native
-Codex App `create_thread` tool leaves the event queued and reports it; it must
+paired Task is not noticed automatically. An unbound Task running without the
+native Codex App `create_thread` tool leaves the event queued and reports it; it must
 not substitute `codex exec`, which did not register as a visible project Task
 in our local test. No code or budget policy is copied across projects.
 
@@ -49,8 +50,9 @@ Task to:
    If setup returns only `clientThreadId`, wait for a real `threadId`; verify
    the receiving repo and full source SHA before recording it. Do not open a
    second Task while creation is uncertain.
-3. Run `dispatched <source> <head> <threadId>`. This stores only a hash of
-   the native Task ID. Pin the Task for sidebar visibility; unpinning currently
+3. Run `dispatched <source> <head> <threadId>`. This binds the source and
+   destination Task one-to-one, storing only hashed Task IDs. Pin the Task for
+   sidebar visibility; unpinning currently
    removes it from the sidebar list.
 4. Read the Task's evidenced `alignment-needed`, `no-alignment-needed`, or
    `blocked` conclusion. Run `resolve <source> <decision>` only for the first
@@ -64,6 +66,26 @@ one-shot per turn, and a reserved or dispatched range is not opened again.
 The two projects keep independent data and controls; Usage Reports stays
 report-only.
 
+## Bound Task messages
+
+After binding, a Task Stop reserves its turn and asks that Task to use Codex
+App's native `send_message_to_thread` tool with a short factual summary. The
+recipient is resolved from the native Task catalog using the stored hash; raw
+Task IDs are not kept in the private state. After a confirmed send, run
+`relay-sent <source-project> <source-threadId> <turnId>`. The counterpart's next
+Stop is suppressed to prevent a message echo. A later independent turn can
+send again. A new source `main` range is passed through the same bound Task,
+not through a newly created Task. The receiving Task verifies the range and
+reports its alignment decision back to the source Task.
+
+The hook itself makes no network or model call. A bound Task's Stop may cause
+one model continuation to send its summary, so this event-driven exchange
+does use tokens when the Task actually stops. If sending is uncertain, the
+reserved turn stays held; inspect the recipient before manual recovery.
+If the message is confirmed absent, run
+`relay-retry <source-project> <source-threadId> <turnId>` and let a later
+independent turn relay again.
+
 ## Inspect and recover
 
 ```sh
@@ -73,7 +95,8 @@ python3 plugins/codex-run-budget/scripts/paired_review.py prompt codex-run-budge
 
 A manual `scan` fetches both remote `main` branches into private mirrors and
 queues changes even without a Task Stop. It does **not** wake a model or open a
-Task; the next paired Task Stop can dispatch the event. This is useful for
+Task; the next paired Task Stop can dispatch it to a new or already bound Task.
+This is useful for
 remote-only updates or after a network outage:
 
 ```sh

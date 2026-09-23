@@ -1,7 +1,7 @@
-"""Opt-in, local cross-project Git review queue.
+"""Opt-in, local cross-project Git review and paired Task relay state.
 
-This module does not start a model task. A Codex App automation consumes its
-private queue and creates a receiving project Task through the native tool.
+The Stop hook is mechanical. A source Task uses native Codex App tools to
+create its counterpart once and to send later summaries to that same Task.
 """
 
 from __future__ import annotations
@@ -95,7 +95,8 @@ def configure(root: Path, left: Path, right: Path) -> dict[str, Any]:
         raise ValueError("pair already configured; inspect status before replacing it")
     heads = {project["name"]: _fetch_head(root, project)[1] for project in projects}
     _private_write(root / "paired-review-config.json", {"schema": 1, "projects": projects})
-    state = {"schema": 1, "cursors": heads, "pending": {}, "reviews": []}
+    state = {"schema": 1, "cursors": heads, "pending": {}, "reviews": [],
+             "bindings": []}
     _private_write(root / "paired-review-state.json", state)
     return {"status": "configured", "baselines": heads}
 
@@ -209,20 +210,92 @@ def _source_for_cwd(projects: list[dict[str, str]], cwd: str) -> dict[str, str] 
     return None
 
 
-def _is_agent_created_task(session_id: str) -> bool:
-    """Avoid dispatch from a Task created by another agent."""
+def _is_receiving_review_task(session_id: str) -> bool:
+    """Use native Task metadata for a cycle guard; never persist its name."""
     try:
         from .exec_activity import _native
 
         connection = _native(None)
         try:
-            row = connection.execute("SELECT thread_source FROM threads WHERE id=?",
+            row = connection.execute("SELECT thread_source,name FROM threads WHERE id=?",
                                      (session_id,)).fetchone()
-            return bool(row and row[0] == "agent_created_thread")
+            return bool(row and row[0] == "agent_created_thread"
+                        and isinstance(row[1], str)
+                        and row[1].startswith("Review counterpart changes:"))
         finally:
             connection.close()
     except (OSError, ValueError, sqlite3.Error):
         return False
+
+
+def _task_hash(task_id: str) -> str:
+    return hashlib.sha256(task_id.encode()).hexdigest()[:16]
+
+
+def _bound_task(state: dict[str, Any], project: str, session_hash: str
+                ) -> dict[str, Any] | None:
+    for binding in state.get("bindings", []):
+        if binding.get("tasks", {}).get(project) == session_hash:
+            return binding
+    return None
+
+
+def _native_task_for_hash(task_hash: str) -> str | None:
+    """Resolve a hashed binding from Codex's native catalog only in memory."""
+    try:
+        from .exec_activity import _native
+
+        connection = _native(None)
+        try:
+            matches = [row[0] for row in connection.execute("SELECT id FROM threads")
+                       if _task_hash(row[0]) == task_hash]
+            return matches[0] if len(matches) == 1 else None
+        finally:
+            connection.close()
+    except (OSError, ValueError, sqlite3.Error):
+        return None
+
+
+def _reserve_relay(state: dict[str, Any], binding: dict[str, Any], source: str,
+                   turn_id: str, destination: str) -> bool:
+    """Reserve a turn before a model can send it; an uncertain send stays held."""
+    turn_hash = _task_hash(turn_id)
+    relay = binding.setdefault("relay", {})
+    side = relay.setdefault(source, {})
+    if side.get("suppress_next_stop"):
+        side["suppress_next_stop"] = False
+        side["last_turn_hash"] = turn_hash
+        return False
+    if side.get("status") == "dispatching" or side.get("last_turn_hash") == turn_hash:
+        return False
+    side.update({"last_turn_hash": turn_hash, "status": "dispatching",
+                 "destination": destination})
+    # Reserve the echo guard before sending: the receiver can finish before
+    # the source records delivery.
+    relay.setdefault(destination, {})["suppress_next_stop"] = True
+    return True
+
+
+def _cached_advance(state: dict[str, Any], source: dict[str, str],
+                    destination: str) -> dict[str, str] | None:
+    """Read only the local tracking ref; remote verification belongs to review."""
+    pending = state["pending"].get(source["name"])
+    if pending is not None:
+        return pending
+    try:
+        head = _run(["git", "-C", source["path"], "rev-parse",
+                     "refs/remotes/origin/main"], timeout=2)
+        base = state["cursors"][source["name"]]
+        if head == base or not SHA.fullmatch(head) or not SHA.fullmatch(base):
+            return None
+        _run(["git", "-C", source["path"], "merge-base", "--is-ancestor",
+              base, head], timeout=2)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    pending = {"base": base, "head": head, "destination": destination,
+               "status": "detected"}
+    state["pending"][source["name"]] = pending
+    return pending
 
 
 def stop_decision(root: Path, payload: dict[str, Any]) -> dict[str, str] | None:
@@ -250,46 +323,70 @@ def stop_decision(root: Path, payload: dict[str, Any]) -> dict[str, str] | None:
         source = _source_for_cwd(projects, payload.get("cwd", ""))
         if source is None:
             return None
-        if isinstance(session_id, str) and _is_agent_created_task(session_id):
-            return None
         name = source["name"]
         state = _read(state_path)
+        session_hash = _task_hash(session_id) if isinstance(session_id, str) else None
+        coordinator = next((p for p in projects if p["name"] == "codex-run-budget"),
+                           projects[0])
+        script = (Path(coordinator["path"]) / "plugins" / "codex-run-budget" /
+                  "scripts" / "paired_review.py")
+        binding = (_bound_task(state, name, session_hash) if session_hash else None)
+        if binding is not None:
+            turn_id = payload.get("turn_id")
+            peer = next(p["name"] for p in projects if p["name"] != name)
+            pending = _cached_advance(state, source, peer)
+            peer_hash = binding["tasks"].get(peer)
+            if not isinstance(turn_id, str) or not isinstance(peer_hash, str):
+                return None
+            peer_id = _native_task_for_hash(peer_hash)
+            if peer_id is None:
+                return None
+            should_send = _reserve_relay(state, binding, name, turn_id, peer)
+            _private_write(state_path, state)
+            if not should_send:
+                return None
+            range_note = (f"The source has pending remote-main range "
+                          f"{pending['base']}..{pending['head']}; verify it in the "
+                          "receiving Task and report an alignment decision. "
+                          if pending and pending.get("status") == "detected" else "")
+            return {"decision": "block", "reason": (
+                "Send a concise factual summary of this turn to the already bound "
+                f"counterpart Task {peer_id} in {peer} using the native Codex App "
+                f"send_message_to_thread tool. {range_note}"
+                "Include changed commit SHAs, alignment "
+                "decision or blocker when relevant; omit credentials and private "
+                "transcript text. Do not create another Task. Prefix the message "
+                "with 'Paired review relay:' and ask the receiver to review only "
+                "new evidence. After the send succeeds, run "
+                f"python3 {shlex.quote(str(script))} "
+                f"relay-sent {name} {session_id} {turn_id}. "
+                "If sending is uncertain, leave the relay reserved and report it."
+            )}
+        if isinstance(session_id, str) and _is_receiving_review_task(session_id):
+            return None
         if isinstance(session_id, str):
-            session_hash = hashlib.sha256(session_id.encode()).hexdigest()[:16]
             if any(item.get("task_hash") == session_hash for item in
                    [*state["pending"].values(), *state["reviews"]]):
                 return None
-        pending = state["pending"].get(name)
+        destination = next(p for p in projects if p["name"] != name)
+        pending = _cached_advance(state, source, destination["name"])
         if pending is None:
-            try:
-                head = _run(["git", "-C", source["path"], "rev-parse",
-                             "refs/remotes/origin/main"], timeout=2)
-                base = state["cursors"][name]
-                if head == base or not SHA.fullmatch(head) or not SHA.fullmatch(base):
-                    return None
-                _run(["git", "-C", source["path"], "merge-base", "--is-ancestor",
-                      base, head], timeout=2)
-            except (OSError, ValueError, subprocess.SubprocessError):
-                return None
-            destination = next(p for p in projects if p["name"] != name)
-            pending = {"base": base, "head": head, "destination": destination["name"],
-                       "status": "detected"}
-            state["pending"][name] = pending
-            _private_write(state_path, state)
+            return None
+        _private_write(state_path, state)
         if pending.get("status") != "detected":
             return None
+        if session_hash and not pending.get("source_task_hash"):
+            pending["source_task_hash"] = session_hash
+            _private_write(state_path, state)
     _notify(name, "change detected; review Task pending")
-    coordinator = next((p for p in projects if p["name"] == "codex-run-budget"),
-                       projects[0])
-    script = (Path(coordinator["path"]) / "plugins" / "codex-run-budget" /
-              "scripts" / "paired_review.py")
     return {"decision": "block", "reason": (
         f"Paired repository review is pending: {name} "
         f"{pending['base']}..{pending['head']} → {pending['destination']}. "
         "Use the native Codex App create_thread tool to open a read-only review Task "
         "in the destination project. First run "
         f"python3 {script} prompt {name} and reserve {name} {pending['head']}; "
-        "then create the Task, record its real threadId with dispatched, and "
+        "then create the Task, record its real threadId with dispatched to bind "
+        "this Task one-to-one with that counterpart, and "
         "resolve only after reading its evidenced decision. Pin the created "
         "Task for sidebar visibility. If the native tool is unavailable, "
         "report the pending event and finish without starting codex exec. "
@@ -325,7 +422,7 @@ def reserve_pending(root: Path, source: str, head: str) -> dict[str, str]:
 
 
 def mark_dispatched(root: Path, source: str, head: str, task_id: str) -> dict[str, str]:
-    """Store only a hash of the created native Task identifier."""
+    """Bind source and receiving Tasks one-to-one when Stop claimed the event."""
     with (root / "paired-review.lock").open("a+") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         path = root / "paired-review-state.json"
@@ -333,10 +430,66 @@ def mark_dispatched(root: Path, source: str, head: str, task_id: str) -> dict[st
         pending = state["pending"].get(source)
         if not pending or pending["head"] != head or pending["status"] != "dispatching":
             raise ValueError("source/head is not reserved")
+        task_hash = _task_hash(task_id)
+        source_hash = pending.get("source_task_hash")
+        if source_hash:
+            if source_hash == task_hash:
+                raise ValueError("a Task cannot be paired with itself")
+            used = {value for binding in state.get("bindings", [])
+                    for value in binding.get("tasks", {}).values()}
+            if source_hash in used or task_hash in used:
+                raise ValueError("one of these Tasks is already bound")
+            state.setdefault("bindings", []).append({
+                "tasks": {source: source_hash, pending["destination"]: task_hash},
+                "relay": {}, "source_head": head})
         pending["status"] = "dispatched"
-        pending["task_hash"] = hashlib.sha256(task_id.encode()).hexdigest()[:16]
+        pending["task_hash"] = task_hash
         _private_write(path, state)
     return {"source": source, "head": head, "status": "dispatched"}
+
+
+def mark_relay_sent(root: Path, source: str, task_id: str, turn_id: str
+                    ) -> dict[str, str]:
+    """Finish an exact reserved send and suppress its receiving Task's next Stop."""
+    with (root / "paired-review.lock").open("a+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        path = root / "paired-review-state.json"
+        state = _read(path)
+        binding = _bound_task(state, source, _task_hash(task_id))
+        if binding is None:
+            raise ValueError("Task is not bound in this project")
+        side = binding.get("relay", {}).get(source, {})
+        if side.get("status") != "dispatching" or side.get("last_turn_hash") != _task_hash(turn_id):
+            raise ValueError("this turn has no reserved relay")
+        destination = side["destination"]
+        side["status"] = "sent"
+        pending = state["pending"].get(source)
+        if pending and pending["status"] == "detected":
+            pending["status"] = "dispatched"
+            pending["task_hash"] = binding["tasks"][destination]
+        _private_write(path, state)
+    return {"source": source, "status": "sent"}
+
+
+def retry_relay(root: Path, source: str, task_id: str, turn_id: str
+                ) -> dict[str, str]:
+    """Release an uncertain relay only after checking the recipient Task."""
+    with (root / "paired-review.lock").open("a+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        path = root / "paired-review-state.json"
+        state = _read(path)
+        binding = _bound_task(state, source, _task_hash(task_id))
+        if binding is None:
+            raise ValueError("Task is not bound in this project")
+        side = binding.get("relay", {}).get(source, {})
+        if side.get("status") != "dispatching" or side.get("last_turn_hash") != _task_hash(turn_id):
+            raise ValueError("this turn has no uncertain relay")
+        destination = side.pop("destination")
+        side.pop("last_turn_hash")
+        side["status"] = "retry-enabled"
+        binding["relay"].setdefault(destination, {})["suppress_next_stop"] = False
+        _private_write(path, state)
+    return {"source": source, "status": "retry-enabled"}
 
 
 def resolve_pending(root: Path, source: str, decision: str) -> dict[str, str]:
@@ -393,6 +546,14 @@ def main(argv: list[str] | None = None) -> int:
     dispatched.add_argument("source")
     dispatched.add_argument("head")
     dispatched.add_argument("task_id")
+    relay_sent = sub.add_parser("relay-sent", help="Complete one reserved bound-Task send")
+    relay_sent.add_argument("source")
+    relay_sent.add_argument("task_id")
+    relay_sent.add_argument("turn_id")
+    relay_retry = sub.add_parser("relay-retry", help="Release an inspected uncertain send")
+    relay_retry.add_argument("source")
+    relay_retry.add_argument("task_id")
+    relay_retry.add_argument("turn_id")
     resolve = sub.add_parser("resolve", help="Record a verified pending Task decision")
     resolve.add_argument("source")
     resolve.add_argument("decision", choices=("alignment-needed", "no-alignment-needed"))
@@ -413,6 +574,10 @@ def main(argv: list[str] | None = None) -> int:
             result = reserve_pending(args.state_dir, args.source, args.head)
         elif args.action == "dispatched":
             result = mark_dispatched(args.state_dir, args.source, args.head, args.task_id)
+        elif args.action == "relay-sent":
+            result = mark_relay_sent(args.state_dir, args.source, args.task_id, args.turn_id)
+        elif args.action == "relay-retry":
+            result = retry_relay(args.state_dir, args.source, args.task_id, args.turn_id)
         elif args.action == "resolve":
             result = resolve_pending(args.state_dir, args.source, args.decision)
         elif args.action == "retry":

@@ -2,8 +2,9 @@
 
 ## 0.19.1
 
-- Replace timed paired-repository polling with a deterministic, project-scoped `Stop` hook check. Only an observed source change continues the existing Task to open a native receiving-project review Task.
+- Replace timed paired-repository polling with a deterministic, project-scoped `Stop` hook check. An observed source change continues the existing Task to open a native receiving-project review Task.
 - Keep manual remote scans for changes that occur outside a paired Task; remove the ten-minute model heartbeat and local periodic scanner from the supported setup.
+- Bind newly paired Tasks one-to-one and relay later Stop summaries to the same counterpart. Hash stored Task identities, reserve sends before dispatch, and suppress the receiving Task's immediate echo.
 
 ## 0.19.0
 

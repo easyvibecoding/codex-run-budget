@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -51,7 +52,8 @@ class PairedReviewTest(unittest.TestCase):
 
     def advance(self, index=0):
         project = self.projects[index]
-        (project / "README.md").write_text("changed\n")
+        count = self.git("-C", str(project), "rev-list", "--count", "HEAD")
+        (project / "README.md").write_text(f"changed after {count} commits\n")
         self.git("-C", str(project), "add", "README.md")
         self.git("-C", str(project), "commit", "-m", "synthetic change")
         self.git("-C", str(project), "push", "origin", "main")
@@ -152,7 +154,7 @@ class PairedReviewTest(unittest.TestCase):
             "session_id": "synthetic-review-session"})
         self.assertIsNone(result)
         self.assertEqual(self.state()["pending"]["right"]["head"], second_head)
-        with patch.object(paired_review, "_is_agent_created_task", return_value=True):
+        with patch.object(paired_review, "_is_receiving_review_task", return_value=True):
             self.assertIsNone(paired_review.stop_decision(self.data, {
                 "hook_event_name": "Stop", "cwd": str(self.projects[1]),
                 "session_id": "different-native-session"}))
@@ -173,6 +175,72 @@ class PairedReviewTest(unittest.TestCase):
         result = json.loads(stdout.getvalue())
         self.assertEqual(result["decision"], "block")
         self.assertEqual(result["systemMessage"], "budget unchanged")
+
+    def test_only_named_receiving_task_is_excluded(self):
+        database = self.root / "native-synthetic.sqlite3"
+        with sqlite3.connect(database) as connection:
+            connection.execute("CREATE TABLE threads (id TEXT, thread_source TEXT, name TEXT)")
+            connection.executemany("INSERT INTO threads VALUES (?,?,?)", [
+                ("review", "agent_created_thread", "Review counterpart changes: left abc1234"),
+                ("ordinary", "agent_created_thread", "Verify paired review Stop hook"),
+            ])
+
+        def native(_home):
+            return sqlite3.connect(database)
+
+        with patch("codex_run_budget.exec_activity._native", native):
+            self.assertTrue(paired_review._is_receiving_review_task("review"))
+            self.assertFalse(paired_review._is_receiving_review_task("ordinary"))
+
+    def test_bound_tasks_relay_once_per_turn_without_echo_or_new_task(self):
+        head = self.advance()
+        source_id = "synthetic-source-task"
+        destination_id = "synthetic-destination-task"
+        source_stop = {"hook_event_name": "Stop", "cwd": str(self.projects[0]),
+                       "session_id": source_id, "turn_id": "first-source-turn"}
+        self.assertEqual(paired_review.stop_decision(self.data, source_stop)["decision"],
+                         "block")
+        paired_review.reserve_pending(self.data, "left", head)
+        paired_review.mark_dispatched(self.data, "left", head, destination_id)
+        state = self.state()
+        self.assertEqual(len(state["bindings"]), 1)
+        self.assertNotIn(source_id, json.dumps(state))
+        self.assertNotIn(destination_id, json.dumps(state))
+        self.assertEqual(state["bindings"][0]["tasks"], {
+            "left": paired_review._task_hash(source_id),
+            "right": paired_review._task_hash(destination_id),
+        })
+        paired_review.resolve_pending(self.data, "left", "no-alignment-needed")
+
+        def resolve(task_hash):
+            return {paired_review._task_hash(source_id): source_id,
+                    paired_review._task_hash(destination_id): destination_id}.get(task_hash)
+
+        with patch.object(paired_review, "_native_task_for_hash", side_effect=resolve):
+            receiver_stop = {"hook_event_name": "Stop", "cwd": str(self.projects[1]),
+                             "session_id": destination_id, "turn_id": "review-turn"}
+            decision = paired_review.stop_decision(self.data, receiver_stop)
+            self.assertEqual(decision["decision"], "block")
+            self.assertIn(source_id, decision["reason"])
+            self.assertIsNone(paired_review.stop_decision(self.data, receiver_stop))
+            paired_review.mark_relay_sent(self.data, "right", destination_id, "review-turn")
+            self.assertIsNone(paired_review.stop_decision(self.data, {
+                **source_stop, "turn_id": "inbound-source-turn"}))
+            self.assertIsNone(paired_review.stop_decision(self.data, {
+                **source_stop, "turn_id": "inbound-source-turn"}))
+
+            second_head = self.advance()
+            fresh_stop = {**source_stop, "turn_id": "new-source-turn"}
+            decision = paired_review.stop_decision(self.data, fresh_stop)
+            self.assertEqual(decision["decision"], "block")
+            self.assertIn(destination_id, decision["reason"])
+            self.assertIn(second_head, decision["reason"])
+            self.assertEqual(len(self.state()["bindings"]), 1)
+            paired_review.mark_relay_sent(self.data, "left", source_id,
+                                          "new-source-turn")
+            self.assertEqual(self.state()["pending"]["left"]["status"], "dispatched")
+            self.assertIsNone(paired_review.stop_decision(self.data, {
+                **receiver_stop, "turn_id": "inbound-review-turn"}))
 
 
 if __name__ == "__main__":
