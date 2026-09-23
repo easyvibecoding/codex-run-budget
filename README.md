@@ -1,5 +1,11 @@
 # Codex Run Budget
 
+**Shared token guardrails and local usage visibility for Codex Tasks and subagents.**
+
+[English](README.md) · [繁體中文](README.zh-Hant.md) · [简体中文](README.zh-Hans.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Deutsch](README.de.md) · [Français](README.fr.md) · [Español](README.es.md) · [Português](README.pt.md)
+
+![Codex Run Budget social preview: one shared budget for a parent Task and its agents](assets/social-preview.png)
+
 Codex Run Budget is a local Codex plugin for **one shared budget across a parent Task and its subagents**. It also provides automatic turn receipts, scoped usage reports, native account quota observations, and optional workflow and `codex exec` activity views. Budget decisions use a deterministic Python and SQLite ledger; reporting and observation features do not start a budget by themselves.
 
 This is an independent community project inspired by the run-scoped governance ideas in [Microsoft TokenOps](https://commandline.microsoft.com/tokenops-real-time-run-scoped-cost-control-ai-agents/). It is not an OpenAI or Microsoft product and is not a billing meter or a zero-overshoot guarantee. Python 3.10+ and the standard library are sufficient at runtime.
