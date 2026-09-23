@@ -300,13 +300,44 @@ def _cached_advance(state: dict[str, Any], source: dict[str, str],
     return pending
 
 
+def _clear_echo_after_hook_continuation(root: Path, payload: dict[str, Any]) -> None:
+    """An inbound relay can be handled by a turn already continued by Stop."""
+    session_id = payload.get("session_id")
+    if not isinstance(session_id, str):
+        return
+    config_path = root / "paired-review-config.json"
+    state_path = root / "paired-review-state.json"
+    if not config_path.is_file() or not state_path.is_file():
+        return
+    with (root / "paired-review.lock").open("a+") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return
+        config = _read(config_path)
+        source = _source_for_cwd(config.get("projects", []), payload.get("cwd", ""))
+        if source is None:
+            return
+        state = _read(state_path)
+        binding = _bound_task(state, source["name"], _task_hash(session_id))
+        if binding is None:
+            return
+        side = binding.get("relay", {}).get(source["name"], {})
+        if side.get("suppress_next_stop"):
+            side["suppress_next_stop"] = False
+            _private_write(state_path, state)
+
+
 def stop_decision(root: Path, payload: dict[str, Any]) -> dict[str, str] | None:
     """At a paired Task Stop, inspect local origin/main and continue only on change.
 
     This path makes no network or model call. The receiving Task must verify
     the source remote before settling the review.
     """
-    if payload.get("stop_hook_active") or payload.get("hook_event_name") != "Stop":
+    if payload.get("hook_event_name") != "Stop":
+        return None
+    if payload.get("stop_hook_active"):
+        _clear_echo_after_hook_continuation(root, payload)
         return None
     session_id = payload.get("session_id")
     config_path = root / "paired-review-config.json"

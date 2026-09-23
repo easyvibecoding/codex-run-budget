@@ -244,6 +244,33 @@ class PairedReviewTest(unittest.TestCase):
             self.assertIsNone(paired_review.stop_decision(self.data, {
                 **receiver_stop, "turn_id": "inbound-review-turn"}))
 
+    def test_hook_continuation_consumes_inbound_echo_guard(self):
+        head = self.advance()
+        source_id = "synthetic-source-task"
+        destination_id = "synthetic-destination-task"
+        source_stop = {"hook_event_name": "Stop", "cwd": str(self.projects[0]),
+                       "session_id": source_id, "turn_id": "initial-turn"}
+        paired_review.stop_decision(self.data, source_stop)
+        paired_review.reserve_pending(self.data, "left", head)
+        paired_review.mark_dispatched(self.data, "left", head, destination_id)
+        with patch.object(paired_review, "_native_task_for_hash", return_value=source_id):
+            paired_review.stop_decision(self.data, {
+                "hook_event_name": "Stop", "cwd": str(self.projects[1]),
+                "session_id": destination_id, "turn_id": "receiver-turn"})
+        paired_review.mark_relay_sent(self.data, "right", destination_id,
+                                      "receiver-turn")
+        binding = self.state()["bindings"][0]
+        self.assertTrue(binding["relay"]["left"]["suppress_next_stop"])
+        self.assertIsNone(paired_review.stop_decision(self.data, {
+            **source_stop, "stop_hook_active": True}))
+        binding = self.state()["bindings"][0]
+        self.assertFalse(binding["relay"]["left"]["suppress_next_stop"])
+        with patch.object(paired_review, "_native_task_for_hash",
+                          return_value=destination_id):
+            decision = paired_review.stop_decision(self.data, {
+                **source_stop, "turn_id": "later-independent-turn"})
+        self.assertEqual(decision["decision"], "block")
+
 
 if __name__ == "__main__":
     unittest.main()
