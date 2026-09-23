@@ -59,6 +59,114 @@ class PairedReviewTest(unittest.TestCase):
         self.git("-C", str(project), "push", "origin", "main")
         return self.git("-C", str(project), "rev-parse", "HEAD")
 
+    def extra_project(self, name):
+        bare = self.root / f"{name}.git"
+        project = self.root / name
+        self.git("init", "--bare", "-b", "main", str(bare))
+        self.git("clone", str(bare), str(project))
+        self.git("-C", str(project), "config", "user.name", "Synthetic Tester")
+        self.git("-C", str(project), "config", "user.email", "tester@example.invalid")
+        (project / "README.md").write_text("baseline\n")
+        self.git("-C", str(project), "add", "README.md")
+        self.git("-C", str(project), "commit", "-m", "synthetic baseline")
+        self.git("-C", str(project), "push", "origin", "main")
+        return project
+
+    def test_named_pairs_can_share_a_source_with_isolated_state(self):
+        third = self.extra_project("third")
+        with patch.object(paired_review, "_registered_codex_project", return_value=True):
+            result = paired_review.configure_pair(self.data, "left-third",
+                                                  self.projects[0], third)
+        self.assertEqual(result["pair"], "left-third")
+        self.assertFalse(paired_review.list_pairs(self.data)["pairs"][1]["enabled"])
+        self.assertEqual(paired_review.scan(self.data)[-1]["status"], "pair-disabled")
+        paired_review.set_pair_enabled(self.data, "left-third", True)
+        head = self.advance()
+        findings = paired_review.scan(self.data)
+        self.assertEqual({(row["pair"], row["destination"]) for row in findings
+                          if row["status"] == "detected"},
+                         {("default", "right"), ("left-third", "third")})
+        decision = paired_review.stop_decision(self.data, {
+            "hook_event_name": "Stop", "cwd": str(self.projects[0]),
+            "session_id": "synthetic-shared-source", "turn_id": "synthetic-turn"})
+        self.assertEqual(decision["decision"], "block")
+        self.assertIn("Pair default:", decision["reason"])
+        self.assertIn("Pair left-third:", decision["reason"])
+        self.assertIn("--pair left-third", decision["reason"])
+        self.assertEqual(self.state()["pending"]["left"]["head"], head)
+        named = json.loads((self.data / paired_review.PAIR_DIR / "left-third" /
+                            "paired-review-state.json").read_text())
+        self.assertEqual(named["pending"]["left"]["head"], head)
+        paired_review.reserve_pending(self.data, "left", head, "left-third")
+        paired_review.mark_dispatched(self.data, "left", head, "synthetic-third-task",
+                                      "left-third")
+        paired_review.resolve_pending(self.data, "left", "no-alignment-needed",
+                                      "left-third")
+        self.assertEqual(self.state()["cursors"]["left"],
+                         self.git("-C", str(self.projects[0]), "rev-list", "--max-parents=0",
+                                  "HEAD"))
+        named = json.loads((self.data / paired_review.PAIR_DIR / "left-third" /
+                            "paired-review-state.json").read_text())
+        self.assertEqual(named["cursors"]["left"], head)
+
+    def test_experimental_and_pair_switches_preserve_queued_state(self):
+        new_root = self.root / "new-private"
+        with patch.object(paired_review, "_registered_codex_project", return_value=True):
+            paired_review.configure_pair(new_root, "web-api", *self.projects)
+        self.assertFalse(paired_review.list_pairs(new_root)["enabled"])
+        self.assertEqual(paired_review.scan(new_root)[0]["status"],
+                         "experimental-disabled")
+        paired_review.set_feature(new_root, True)
+        self.assertEqual(paired_review.scan(new_root)[0]["status"], "pair-disabled")
+        paired_review.set_pair_enabled(new_root, "web-api", True)
+        head = self.advance()
+        self.assertEqual(paired_review.scan(new_root)[0]["status"], "detected")
+        before = (new_root / paired_review.PAIR_DIR / "web-api" /
+                  "paired-review-state.json").read_bytes()
+        paired_review.set_feature(new_root, False)
+        self.assertIsNone(paired_review.stop_decision(new_root, {
+            "hook_event_name": "Stop", "cwd": str(self.projects[0]),
+            "session_id": "synthetic-session"}))
+        self.assertEqual(paired_review.scan(new_root)[0]["status"],
+                         "experimental-disabled")
+        self.assertEqual((new_root / paired_review.PAIR_DIR / "web-api" /
+                          "paired-review-state.json").read_bytes(), before)
+        paired_review.set_feature(new_root, True)
+        paired_review.set_pair_enabled(new_root, "web-api", False)
+        self.assertEqual(paired_review.scan(new_root)[0]["status"], "pair-disabled")
+        paired_review.set_pair_enabled(new_root, "web-api", True)
+        self.assertEqual(paired_review.scan(new_root)[0]["status"], "pending-review")
+        self.assertEqual(json.loads(before)["pending"]["left"]["head"], head)
+
+    def test_named_pair_needs_two_registered_roots_and_unique_edge(self):
+        third = self.extra_project("third")
+        with patch.object(paired_review, "_registered_codex_project", return_value=False):
+            with self.assertRaisesRegex(ValueError, "registered Codex project roots"):
+                paired_review.configure_pair(self.data, "new-edge", self.projects[0], third)
+        with patch.object(paired_review, "_registered_codex_project", return_value=True):
+            with self.assertRaisesRegex(ValueError, "already paired"):
+                paired_review.configure_pair(self.data, "duplicate",
+                                             self.projects[1], self.projects[0])
+            with self.assertRaisesRegex(ValueError, "reserved"):
+                paired_review.configure_pair(self.data, "default", self.projects[0], third)
+            with self.assertRaisesRegex(ValueError, "lowercase slug"):
+                paired_review.configure_pair(self.data, "../bad", self.projects[0], third)
+
+    def test_catalog_check_uses_exact_registered_codex_root(self):
+        database = self.root / "projects-synthetic.sqlite3"
+        with sqlite3.connect(database) as connection:
+            connection.execute("CREATE TABLE project_roots (project_id TEXT, path TEXT)")
+            connection.execute("INSERT INTO project_roots VALUES (?,?)",
+                               ("synthetic-project", str(self.projects[0])))
+        with patch("codex_run_budget.exec_activity._native",
+                   return_value=sqlite3.connect(database)):
+            self.assertTrue(paired_review._registered_codex_project(
+                str(self.projects[0])))
+        with patch("codex_run_budget.exec_activity._native",
+                   side_effect=lambda _: sqlite3.connect(database)):
+            self.assertFalse(paired_review._registered_codex_project(
+                str(self.projects[1])))
+
     def test_remote_advance_queues_one_opposite_review(self):
         self.assertTrue(all(row["status"] == "unchanged" for row in
                             paired_review.scan(self.data)))

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.19.2
+
+- Mark cross-project Task coordination experimental, with a global switch and a switch for each pair.
+- Let users register multiple named pairs of exact local Codex project roots; each pair keeps its own remote-main cursors, pending reviews, and one-to-one Task bindings. A project may appear in several pairs.
+- Preserve the existing single pair and its private state as `default`; fresh named pairs start disabled.
+
 ## 0.19.1
 
 - Replace timed paired-repository polling with a deterministic, project-scoped `Stop` hook check. An observed source change continues the existing Task to open a native receiving-project review Task.

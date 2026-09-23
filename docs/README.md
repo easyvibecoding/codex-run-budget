@@ -38,7 +38,7 @@ observation does not automatically start or change a budget.
 | Reproduce current checks and read dated installed evidence | [Validation](VALIDATION.md) |
 | Read dated survey migration experiments | [Survey validation](SURVEY_VALIDATION.md) |
 | Review whether a change in the paired Usage Reports project needs alignment | [Paired repository review](CROSS_REPO_REVIEW.md) |
-| Configure Task Stop detection and receiving Task dispatch | [Paired review automation](PAIRED_REVIEW_AUTOMATION.md) |
+| Configure experimental multi-pair Task Stop detection, switches, and receiving Task dispatch | [Paired review automation](PAIRED_REVIEW_AUTOMATION.md) |
 
 The historical validation files describe their recorded versions and dates.
 They do not prove the state of a current installation. Check the live checkout,

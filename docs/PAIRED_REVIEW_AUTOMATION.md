@@ -1,121 +1,122 @@
-# Paired repository review at Task Stop
+# Experimental paired Codex projects
 
-Codex Run Budget can coordinate reviews between two **separate** Codex
-projects. Its trusted `Stop` hook checks only Tasks from the configured Git
-checkouts or their worktrees. The check is local and deterministic: it compares
-each source's observed `refs/remotes/origin/main` with a private reviewed cursor.
-When the source advances, it queues the exact SHA range and asks the already
-running source Task to continue once. That Task uses Codex App's native tool to
-open a read-only review Task in the **other** project and binds the two Tasks.
-Later Stops in either bound Task send a concise summary to the same counterpart.
-The receiving Task follows the
-[shared contract](CROSS_REPO_REVIEW.md) and verifies the remote head before
-settling the review.
+Codex Run Budget can coordinate change reviews across **user-selected local
+Codex projects**. Each pair is an independent edge: it has two exact project
+roots, its own remote-`main` cursors, pending reviews, and one-to-one Task
+bindings. A project can appear in several pairs, such as `web ↔ api` and
+`api ↔ shared`. This can connect work on a larger system while the projects
+remain separate in Codex; it does not create a parent project or a shared
+budget across projects.
 
-This mechanism sees a push or fetch reflected in a configured checkout when a
-Task from that repo reaches `Stop`. A remote-only update with no subsequent
-paired Task is not noticed automatically. An unbound Task running without the
-native Codex App `create_thread` tool leaves the event queued and reports it; it must
-not substitute `codex exec`, which did not register as a visible project Task
-in our local test. No code or budget policy is copied across projects.
+This feature is **experimental and opt-in**. A new named pair starts disabled,
+and a fresh installation has the global experimental switch off. Enable both
+the global switch and the desired pair. An existing single pair configured by
+an earlier version remains enabled until its maintainer switches it off; its
+private state and reviewed cursors are retained as the `default` pair.
 
-## Configure two checkouts
+## Configure the pair graph
 
-Run from the Run Budget checkout, with both paths registered as distinct Codex
-projects:
+The two paths must be distinct Git checkout roots registered as local Codex
+projects. They need an `origin` with a `main` branch. Use the paths returned by
+Codex's project list; aliases are resolved to the actual checkout. Run these
+commands from a Run Budget checkout, or use `scripts/paired_review.py` inside
+the installed plugin:
 
 ```sh
-python3 plugins/codex-run-budget/scripts/paired_review.py pair \
-  /path/to/codex-run-budget /path/to/codex-usage-reports
-python3 plugins/codex-run-budget/scripts/paired_review.py status
+python3 plugins/codex-run-budget/scripts/paired_review.py pair --id web-api \
+  /path/to/web /path/to/api
+python3 plugins/codex-run-budget/scripts/paired_review.py pair --id api-shared \
+  /path/to/api /path/to/shared
+python3 plugins/codex-run-budget/scripts/paired_review.py pairs
+python3 plugins/codex-run-budget/scripts/paired_review.py feature on
+python3 plugins/codex-run-budget/scripts/paired_review.py enable web-api
+python3 plugins/codex-run-budget/scripts/paired_review.py enable api-shared
 ```
 
-`pair` takes the current remote `main` heads as baselines and does not create
-retroactive Tasks. It writes private configuration, mirrors, cursors, and
-review decisions under `~/.codex/run-budget`, never in either repository. The
-Run Budget plugin's `Stop` hook must be enabled and trusted in Codex; its
-publisher-signed runtime carries the logic without changing the hook command
-or trust definition. If you move either checkout, update the private pair
-configuration to the exact new Git roots before relying on the hook.
+`pair --id` baselines the two current remote `main` heads. It does not open a
+Task or review earlier commits. Pair IDs are lowercase slugs and must be
+unique; the same two roots cannot be registered twice in either order. The
+plugin reads the local Codex project catalog at setup and stores no native
+project IDs. If the project catalog is unavailable, registration stops without
+changing existing pairs.
 
-## Task dispatch and decision
+The configuration and state stay under `~/.codex/run-budget`. Named pairs use
+`paired-review-pairs/<id>/`; the previous single pair keeps its existing files
+at the root as `default`. Git mirrors are private to each pair. Project paths
+and remotes are never committed to a repository.
 
-On a changed source, the hook's one-time continuation instructs the source
-Task to:
-
-1. Read `prompt <source>` and reserve the exact SHA with
-   `reserve <source> <head>`.
-2. Use Codex App's native `create_thread` in the receiving project's Git
-   worktree. The title is `Review counterpart changes: <source> <short SHA>`.
-   If setup returns only `clientThreadId`, wait for a real `threadId`; verify
-   the receiving repo and full source SHA before recording it. Do not open a
-   second Task while creation is uncertain.
-3. Run `dispatched <source> <head> <threadId>`. This binds the source and
-   destination Task one-to-one, storing only hashed Task IDs. Pin the Task for
-   sidebar visibility; unpinning currently
-   removes it from the sidebar list.
-4. Read the Task's evidenced `alignment-needed`, `no-alignment-needed`, or
-   `blocked` conclusion. Run `resolve <source> <decision>` only for the first
-   two. Keep blocked or unfinished work pending. If alignment is needed, the
-   review Task names the destination changes and verification; implementation
-   requires that Task's own authorization.
-
-The local cursor advances only after an evidenced decision. Multiple commits
-before resolution become the next bounded range. A `Stop` continuation is
-one-shot per turn, and a reserved or dispatched range is not opened again.
-The two projects keep independent data and controls; Usage Reports stays
-report-only.
-
-## Bound Task messages
-
-After binding, a Task Stop reserves its turn and asks that Task to use Codex
-App's native `send_message_to_thread` tool with a short factual summary. The
-recipient is resolved from the native Task catalog using the stored hash; raw
-Task IDs are not kept in the private state. After a confirmed send, run
-`relay-sent <source-project> <source-threadId> <turnId>`. The counterpart's next
-Stop is suppressed to prevent a message echo. A later independent turn can
-send again. A new source `main` range is passed through the same bound Task,
-not through a newly created Task. The receiving Task verifies the range and
-reports its alignment decision back to the source Task.
-
-The hook itself makes no network or model call. A bound Task's Stop may cause
-one model continuation to send its summary, so this event-driven exchange
-does use tokens when the Task actually stops. If sending is uncertain, the
-reserved turn stays held; inspect the recipient before manual recovery.
-If the message is confirmed absent, run
-`relay-retry <source-project> <source-threadId> <turnId>` and let a later
-independent turn relay again.
-
-## Inspect and recover
+## Switch or inspect the feature
 
 ```sh
+python3 plugins/codex-run-budget/scripts/paired_review.py feature status
 python3 plugins/codex-run-budget/scripts/paired_review.py status
-python3 plugins/codex-run-budget/scripts/paired_review.py prompt codex-run-budget
+python3 plugins/codex-run-budget/scripts/paired_review.py --pair web-api status
+python3 plugins/codex-run-budget/scripts/paired_review.py disable web-api
+python3 plugins/codex-run-budget/scripts/paired_review.py feature off
 ```
 
-A manual `scan` fetches both remote `main` branches into private mirrors and
-queues changes even without a Task Stop. It does **not** wake a model or open a
-Task; the next paired Task Stop can dispatch it to a new or already bound Task.
-This is useful for
-remote-only updates or after a network outage:
+`feature off` stops paired Stop decisions and scans for all pairs. `disable <id>`
+stops only that edge. Neither command deletes configuration, pending
+ranges, Task bindings, or cursors. Re-enable the pair and global switch to
+resume from the retained state. Budget enforcement, ordinary reporting, and
+the plugin's other hooks are unaffected. Run `pairs` to see which edges and
+switches are active; do not infer the state from the presence of a config file.
+
+## Task Stop behavior
+
+The trusted `Stop` hook checks only the configured Git checkout or its
+worktrees. It makes no network or model call. For a new cached remote-`main`
+range, it asks the source Task to continue once and use Codex App's native
+`create_thread` tool in the exact destination project. The source Task reads
+the pair-specific prompt, reserves the range, records the receiving real
+`threadId`, and pins the Task for sidebar visibility. The receiving Task
+verifies the source remote and decides `alignment-needed`,
+`no-alignment-needed`, or `blocked` from actual diffs and destination state.
+Only an evidenced decision advances that pair's cursor.
+
+The two Tasks are bound only within their pair. Their later Stops send short
+summaries through the native `send_message_to_thread` tool to the same bound
+counterpart. A relayed turn's Stop is suppressed so it does not echo back.
+An uncertain create or send remains reserved and must be inspected before a
+manual retry. When a source project belongs to several enabled pairs, a Stop
+can present several independent pair instructions in one continuation; a Task
+can therefore use tokens for each actual relay. There is no timer, heartbeat,
+or background model polling.
+
+Use `--pair <id>` before `prompt`, `reserve`, `dispatched`, `relay-sent`,
+`relay-retry`, `resolve`, or `retry` to address one named edge. For example:
+
+```sh
+python3 plugins/codex-run-budget/scripts/paired_review.py --pair web-api prompt web
+python3 plugins/codex-run-budget/scripts/paired_review.py --pair web-api scan
+```
+
+The existing `default` pair may omit `--pair default`. A receiving review Task
+does not fan out into another new Task just because its project belongs to
+another edge. User-started work in that project can trigger its other pairs.
+No code is copied automatically and no budget policy crosses project roots.
+
+## Remote-only changes and recovery
+
+A push unseen by either configured checkout needs a later Task Stop or an
+explicit `scan`. A manual scan fetches enabled pairs' remote `main` branches
+into private mirrors and queues exact forward ranges. It does not start a
+model or a Task:
 
 ```sh
 python3 plugins/codex-run-budget/scripts/paired_review.py scan
+python3 plugins/codex-run-budget/scripts/paired_review.py --pair web-api status
 ```
 
-When a Task creation is uncertain, inspect Codex for an existing receiving
-Task first. If no usable Task exists, explicitly allow retry and run a manual
-scan, or let the next paired Task Stop detect the source again:
+If creating a receiving Task is uncertain, inspect Codex for an existing
+Task before `retry <source>`. If sending a relay is uncertain, inspect the
+bound recipient before `relay-retry <source> <source-threadId> <turnId>`.
+These commands can duplicate work if the first operation actually succeeded.
+Failed fetches, non-forward updates, and blocked reviews do not advance a
+cursor. Native Codex project and Task catalogs are experimental integration
+surfaces; if an ID cannot be verified, keep the range pending.
 
-```sh
-python3 plugins/codex-run-budget/scripts/paired_review.py retry codex-run-budget
-python3 plugins/codex-run-budget/scripts/paired_review.py scan
-```
-
-`retry` takes the **source** name and can cause a duplicate Task if an earlier
-creation actually succeeded. Failed fetches and non-forward updates never
-advance the cursor. Native Task catalog formats can change across Codex
-versions; if an ID cannot be verified, keep the range pending.
-
-This coordinator does not change hook trust settings. A full plugin package
-update or hook definition change still requires normal Codex review.
+This coordinator does not alter hook trust. A full plugin package or hook
+definition change still needs the normal Codex review. The Run Budget and
+Usage Reports repositories use the [specific review contract](CROSS_REPO_REVIEW.md)
+as one example; other pairs follow their own `AGENTS.md` and project docs.
