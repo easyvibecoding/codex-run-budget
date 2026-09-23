@@ -37,6 +37,8 @@ observation does not automatically start or change a budget.
 | Check installed package version and native hook trust | [Update notices](UPDATE_NOTICES.md) |
 | Reproduce current checks and read dated installed evidence | [Validation](VALIDATION.md) |
 | Read dated survey migration experiments | [Survey validation](SURVEY_VALIDATION.md) |
+| Review whether a change in the paired Usage Reports project needs alignment | [Paired repository review](CROSS_REPO_REVIEW.md) |
+| Configure the local watcher and Codex App Task dispatcher | [Paired review automation](PAIRED_REVIEW_AUTOMATION.md) |
 
 The historical validation files describe their recorded versions and dates.
 They do not prove the state of a current installation. Check the live checkout,

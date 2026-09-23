@@ -44,6 +44,15 @@ The runtime must remain usable with Python 3.10+ and the standard library.
   internal hosts and workflow examples that a deterministic rule cannot
   classify reliably.
 
+## Paired repository review
+
+When this repository's remote `main` changes, apply
+[the paired repository contract](docs/CROSS_REPO_REVIEW.md) to request a review
+in Codex Usage Reports. When reviewing a change from that repository, decide
+whether alignment is needed here; never assume feature parity. Keep this review
+separate from budget enforcement and preserve the recorded source SHA and
+decision.
+
 ## Required verification
 
 Run before committing:

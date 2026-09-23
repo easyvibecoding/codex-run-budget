@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.19.0
+
+- Add an opt-in paired-project watcher that checks two remote `main` branches and queues an exact source range for a Codex App heartbeat to open a review Task in the opposite project.
+- Keep exact SHA cursors and uncertain dispatches pending so unattended scans do not duplicate Tasks; require an explicit decision or retry to recover.
+- Keep the coordinator outside hook execution and budget policy. It does not copy code or change either plugin's reporting and governance boundaries.
+
 ## 0.18.0
 
 - Add per-window cache-read share and request counts to Task reports, with localized Markdown and HTML summaries.

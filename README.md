@@ -48,6 +48,7 @@ Automatic usage cards are enabled by default even when no budget is active. [Tur
 | Native meter | Reads account quota and saved snapshots, local Task configuration history, dated rates, and Standard/Fast credit scenarios. | Account percentages and estimated credits are not Task charges or actual billing. |
 | Diagnostics | Audits exact local transcripts, surveys a bounded recent cohort, and captures explicit workflow observations with cursors. | Observation does not imply a live process, completed work, or recurring monitoring. |
 | Project exec activity | Lists or watches extra `codex exec` sessions for one working directory; an optional launcher records ephemeral invocation receipts. | Exec invocation usage is separate from native child lineage and the shared budget ledger. |
+| Paired project reviews | An opt-in local watcher queues exact remote `main` changes; a Codex App heartbeat opens a review Task in the other project. | Requires an awake Mac and an active app automation; review does not copy code or change budgets. |
 | Signed runtime updates | Activates compatible publisher-signed runtime and CLI changes for new Tasks while existing Tasks keep their pinned version. | New hook, entry, key, or plugin structure still needs normal installation and trust review. |
 
 Human-readable cards, reports, menus, and summaries use nine bundled languages; commands, JSON, status codes, native names, and model IDs remain unchanged. [Localization](docs/LOCALIZATION.md).
