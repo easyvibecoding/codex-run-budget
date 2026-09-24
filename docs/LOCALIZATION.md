@@ -12,13 +12,15 @@ different language without changing its meaning or numeric values.
 | Workflow observation reports and meter/survey summaries | Localized labels; original evidence codes retained |
 | JSON, database rows, event/status codes, flags and command names | Stable machine representation, not translated |
 | Model/reasoning identifiers and native Task/agent names | Original data, never translated or guessed |
-| Agent control instructions, skill instructions, developer scripts and docs | One canonical version, no runtime translation |
+| Agent control instructions, skill instructions, developer scripts and detailed docs | One canonical version, no runtime translation |
+| Public README | Four maintained editions: English, Traditional Chinese, Simplified Chinese and Japanese; no runtime translation |
 | Static plugin metadata and hook status metadata | One canonical version, no locale-specific duplicate plugins |
 
 Supported languages are English, Traditional/Simplified Chinese, Japanese,
 Korean, German, French, Spanish and Portuguese. Unsupported locale selections
 fall back to English. Regional codes normalize to these language catalogs;
 this is not a claim of a separate translation for every regional variant.
+The four README editions are separate from these nine runtime output catalogs.
 
 Human CLI routes resolve the saved Codex language once per operation. The existing
 read-only `desktop.localeOverride` resolver is shared with automatic reports;

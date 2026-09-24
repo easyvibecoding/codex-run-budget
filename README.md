@@ -2,7 +2,7 @@
 
 **Shared token guardrails and local usage visibility for Codex Tasks and subagents.**
 
-[English](README.md) · [繁體中文](README.zh-Hant.md) · [简体中文](README.zh-Hans.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Deutsch](README.de.md) · [Français](README.fr.md) · [Español](README.es.md) · [Português](README.pt.md)
+[English](README.md) · [繁體中文](README.zh-Hant.md) · [简体中文](README.zh-Hans.md) · [日本語](README.ja.md)
 
 ![Codex Run Budget social preview: one shared budget for a parent Task and its agents](assets/social-preview.png)
 
@@ -57,7 +57,7 @@ Automatic usage cards are enabled by default even when no budget is active. [Tur
 | Experimental paired project reviews | Users register named pairs of exact Codex project roots. A trusted `Stop` hook can open one review Task in the other project and bind the two Tasks for later summary relay. One project may belong to several pairs. | Global and per-pair switches control the feature. No timed polling; remote-only changes need a later paired Task or manual scan. |
 | Signed runtime updates | Activates compatible publisher-signed runtime and CLI changes for new Tasks while existing Tasks keep their pinned version. | New hook, entry, key, or plugin structure still needs normal installation and trust review. |
 
-Human-readable cards, reports, menus, and summaries use nine bundled languages; commands, JSON, status codes, native names, and model IDs remain unchanged. [Localization](docs/LOCALIZATION.md).
+This README is available in four languages. Human-readable cards, reports, menus, and summaries use nine bundled languages; commands, JSON, status codes, native names, and model IDs remain unchanged. [Localization](docs/LOCALIZATION.md).
 
 ## Commands by task
 
