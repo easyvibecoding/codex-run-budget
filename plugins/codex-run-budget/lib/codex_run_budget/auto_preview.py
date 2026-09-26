@@ -33,31 +33,55 @@ from .task_catalog import MAX_DEPTH, TaskCatalog, _uuid
 from .util import stable_hash
 
 
+def _native_visualization_root(session: str, home: Path) -> Path:
+    identifier = uuid.UUID(session)
+    if identifier.version != 7:
+        raise ValueError("inline preview requires a native UUIDv7 Task")
+    day = datetime.fromtimestamp(int(identifier.hex[:12], 16) / 1000, timezone.utc)
+    return home / "visualizations" / day.strftime("%Y/%m/%d") / session
+
+
+def _nonsymlink_directory(directory: Path) -> None:
+    if (not directory.is_absolute() or ".." in directory.parts
+            or any(p.is_symlink() for p in (directory, *directory.parents))):
+        raise ValueError("output must be an absolute nonsymlink Task directory")
+
+
 def _checked_output_dir(output_dir: Path, session: str, home: Path, workspace,
                         *, root_session: str | None = None) -> Path:
-    """Accept only known desktop-readable Task roots, before collecting usage.
+    """Resolve inherited roots to this Task's desktop-readable directory.
 
     Full filesystem access is not the desktop visualization read policy. The
     native root uses the UUIDv7's UTC date, not today's date or a mutable cwd.
+    A proven child's inherited root is input compatibility, never a write root.
     Explicit extra sandbox roots are intentionally unsupported here: the preview
     tool cannot independently verify the desktop's effective policy for them.
     """
-    roots = []
-    for candidate in {session, root_session or session}:
-        identifier = uuid.UUID(candidate)
-        if identifier.version != 7:
-            raise ValueError("inline preview requires a native UUIDv7 Task")
-        day = datetime.fromtimestamp(int(identifier.hex[:12], 16) / 1000, timezone.utc)
-        roots.append(home / "visualizations" / day.strftime("%Y/%m/%d") / candidate)
+    _nonsymlink_directory(output_dir)
+    own_root = _native_visualization_root(session, home)
+    if root_session and root_session != session:
+        inherited_root = _native_visualization_root(root_session, home)
+        if output_dir.is_relative_to(inherited_root):
+            output_dir = own_root / output_dir.relative_to(inherited_root)
+            _nonsymlink_directory(output_dir)
+    roots = [own_root]
     if isinstance(workspace, str) and Path(workspace).is_absolute():
         roots.append(Path(workspace))
-    if (not output_dir.is_absolute() or ".." in output_dir.parts
-            or any(p.is_symlink() for p in (output_dir, *output_dir.parents))):
-        raise ValueError("output must be an absolute nonsymlink Task directory")
     if not any(root.is_absolute() and ".." not in root.parts
                and output_dir.is_relative_to(root) for root in roots):
         raise ValueError("output is outside the Task's desktop-readable roots")
     return output_dir
+
+
+def _write_card(output_dir: Path, filename: str, content: str) -> Path:
+    _nonsymlink_directory(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    _nonsymlink_directory(output_dir)
+    target = output_dir / filename
+    descriptor = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(descriptor, "w") as output:
+        output.write(content)
+    return target
 
 
 def render_card(receipt: dict) -> str:
@@ -222,6 +246,7 @@ def preview(root: Path, session: str, turn: str, *, output_dir: Path, home=None)
             "SELECT cwd FROM threads WHERE id=?", (session,)
         ).fetchone() if "cwd" in columns else None
         native_home = Path(home or os.environ.get("CODEX_HOME") or Path.home() / ".codex")
+        requested_output_dir = output_dir
         output_dir = _checked_output_dir(
             output_dir, session, native_home, workspace[0] if workspace else None,
             root_session=root_task["id"],
@@ -259,17 +284,30 @@ def preview(root: Path, session: str, turn: str, *, output_dir: Path, home=None)
         "subagents": children, "quota": quota,
         **locale,
     }
-    # Recheck immediately before writing, after potentially slow collection.
-    _checked_output_dir(output_dir, session, native_home, workspace[0] if workspace else None,
-                        root_session=root_task["id"])
-    output_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-    target = output_dir / ("codex-turn-" + key[:16] + "-" + str(time.time_ns()) + ".html")
     content = render_card(receipt)
     if len(content.encode()) > 1_000_000:
         raise ValueError("card too large")
-    descriptor = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
-    with os.fdopen(descriptor, "w") as output:
-        output.write(content)
+    filename = "codex-turn-" + key[:16] + "-" + str(time.time_ns()) + ".html"
+    # Recheck after collection and rendering, immediately before either write.
+    _checked_output_dir(requested_output_dir, session, native_home,
+                        workspace[0] if workspace else None,
+                        root_session=root_task["id"])
+    try:
+        target = _write_card(output_dir, filename, content)
+    except PermissionError:
+        # Sandboxed children can inherit only their root Task's writable native
+        # directory. Reuse this snapshot in their own catalog workspace once.
+        child_workspace = workspace[0] if workspace else None
+        if (not child or output_dir == requested_output_dir
+                or not isinstance(child_workspace, str) or not child_workspace):
+            raise
+        _checked_output_dir(requested_output_dir, session, native_home, child_workspace,
+                            root_session=root_task["id"])
+        fallback = _checked_output_dir(
+            Path(child_workspace) / "work/codex-usage-cards", session, native_home,
+            child_workspace,
+        )
+        target = _write_card(fallback, filename, content)
     reference = (
         "\ue200visualize\ue202"
         + json.dumps({"path": str(target)}, ensure_ascii=False, separators=(",", ":")) + "\ue201"

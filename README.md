@@ -44,6 +44,8 @@ run-budget:off
 
 Automatic usage cards are enabled by default even when no budget is active. An eligible subagent can show its own card on its page; the parent card keeps a separate observed descendant subtotal. A matching hashed `@selector` identifies the child in both views. The child's card names its direct parent and distinguishes its own usage from descendants; conflicting lineage stays unverified. [Turn receipts](docs/AUTO_REPORTS.md).
 
+An inherited parent visualization directory is automatically relocated to the subagent's own directory. If the sandbox denies that write, the same snapshot can use the child's workspace at `work/codex-usage-cards`. Existing cards stay unchanged; start a new Task to load the updated runtime.
+
 ## Capabilities
 
 | Area | What it does | Boundary |

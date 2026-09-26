@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import sys
 import tempfile
@@ -14,6 +15,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins/codex-run-budget/lib"))
 
+from codex_run_budget import auto_preview  # noqa: E402
 from codex_run_budget.auto_preview import preview, render_card  # noqa: E402
 from codex_run_budget.auto_report import configure, handle, observed_total, recent  # noqa: E402
 from codex_run_budget.governor import Governor  # noqa: E402
@@ -68,9 +70,8 @@ class AutoPreviewTest(unittest.TestCase):
     def preview(self, **extra):
         return preview(self.data, TASK, "turn-1", output_dir=self.output, home=self.root, **extra)
 
-    def nested_child(self):
+    def nested_child(self, child="00000000-0000-7000-8000-000000000003"):
         parent = "00000000-0000-7000-8000-000000000002"
-        child = "00000000-0000-7000-8000-000000000003"
         turn = "synthetic-nested-turn"
         parent_source = {"subagent": {"thread_spawn": {"parent_thread_id": TASK}}}
         child_source = {"subagent": {"thread_spawn": {"parent_thread_id": parent}}}
@@ -119,6 +120,238 @@ class AutoPreviewTest(unittest.TestCase):
             self.assertIn(expected, content)
         for unexpected in ("<parent>", "<child>", "主代理", parent, child, TASK):
             self.assertNotIn(unexpected, content)
+
+    def test_inherited_root_moves_nested_child_to_own_uuid_date_and_preserves_parent(self):
+        child, _, turn, _ = self.nested_child("00000526-5c00-7000-8000-000000000003")
+        inherited = self.root / "visualizations/1970/01/01" / TASK / "cards/nested"
+        parent = preview(self.data, TASK, "turn-1", output_dir=inherited, home=self.root)
+        parent_path = Path(json.loads(parent["reference"].split("\ue202")[1][:-1])["path"])
+        parent_content = parent_path.read_bytes()
+
+        result = preview(self.data, child, turn, output_dir=inherited, home=self.root)
+        target = Path(json.loads(result["reference"].split("\ue202")[1][:-1])["path"])
+        own = self.root / "visualizations/1970/01/02" / child / "cards/nested"
+        self.assertEqual(target.parent, own)
+        self.assertIn('data-metric="turn-delta">+50</dd>', target.read_text())
+        self.assertEqual(list(inherited.glob("*.html")), [parent_path])
+        self.assertEqual(parent_path.read_bytes(), parent_content)
+        self.assertEqual(target.stat().st_mode & 0o777, 0o600)
+
+        direct = preview(self.data, child, turn, output_dir=own, home=self.root)
+        direct_path = Path(json.loads(direct["reference"].split("\ue202")[1][:-1])["path"])
+        self.assertEqual(direct_path.parent, own)
+        self.assertNotEqual(direct_path, target)
+
+    def test_inherited_root_does_not_bypass_missing_or_changed_source_evidence(self):
+        child, _, turn, transcript = self.nested_child()
+        inherited = self.root / "visualizations/1970/01/01" / TASK
+        transcript.write_text(json.dumps({"type": "session_meta", "payload": {
+            "id": TASK
+        }}) + "\n")
+        with patch("codex_run_budget.auto_preview.collect") as children, patch(
+            "codex_run_budget.turn_quota.observe"
+        ) as quota:
+            result = preview(self.data, child, turn, output_dir=inherited, home=self.root)
+        self.assertEqual(result["status"], "source_unavailable")
+        children.assert_not_called()
+        quota.assert_not_called()
+        self.assertFalse((self.root / "visualizations").exists())
+
+    def test_child_relocation_rejects_foreign_roots_and_unsafe_source_or_destination(self):
+        child, parent, turn, _ = self.nested_child()
+        roots = self.root / "visualizations/1970/01/01"
+        inherited = roots / TASK
+        own = roots / child
+        self.workspace.mkdir()
+        inherited.mkdir(parents=True)
+        (inherited / "alias").symlink_to(self.workspace, target_is_directory=True)
+        outside = (
+            roots / "00000000-0000-7000-8000-000000000099",
+            roots / parent,
+            self.root / "visualizations/1970/01/02" / TASK,
+            inherited / ".." / child,
+            inherited / "alias/cards",
+            Path("relative/cards"),
+        )
+        with patch("codex_run_budget.auto_preview.snapshot") as observed, patch(
+            "codex_run_budget.auto_preview.collect"
+        ) as children, patch("codex_run_budget.turn_quota.observe") as quota:
+            for directory in outside:
+                with self.subTest(directory=directory), self.assertRaises(ValueError):
+                    preview(self.data, child, turn, output_dir=directory, home=self.root)
+            own.symlink_to(self.workspace, target_is_directory=True)
+            with self.assertRaises(ValueError):
+                preview(self.data, child, turn, output_dir=inherited, home=self.root)
+            observed.assert_not_called()
+            children.assert_not_called()
+            quota.assert_not_called()
+        self.assertFalse(list(self.workspace.rglob("*.html")))
+        self.assertFalse(list(inherited.glob("*.html")))
+
+    def test_inherited_source_path_is_rechecked_after_collection(self):
+        child, _, turn, _ = self.nested_child()
+        roots = self.root / "visualizations/1970/01/01"
+        roots.mkdir(parents=True)
+        inherited = roots / TASK
+        with patch("codex_run_budget.turn_quota.observe", side_effect=lambda *a, **k:
+                   inherited.symlink_to(self.workspace, target_is_directory=True)):
+            with self.assertRaises(ValueError):
+                preview(self.data, child, turn, output_dir=inherited, home=self.root)
+        self.assertFalse((roots / child).exists())
+
+    def test_inherited_source_path_is_rechecked_after_rendering(self):
+        child, _, turn, _ = self.nested_child()
+        roots = self.root / "visualizations/1970/01/01"
+        roots.mkdir(parents=True)
+        inherited = roots / TASK
+
+        def replace_source(receipt):
+            inherited.symlink_to(self.workspace, target_is_directory=True)
+            return render_card(receipt)
+
+        with patch("codex_run_budget.auto_preview.render_card", side_effect=replace_source):
+            with self.assertRaises(ValueError):
+                preview(self.data, child, turn, output_dir=inherited, home=self.root)
+        self.assertTrue(inherited.is_symlink())
+        self.assertFalse((roots / child).exists())
+        self.assertFalse(self.workspace.exists())
+
+    def test_relocated_permission_error_falls_back_once_to_child_workspace_same_snapshot(self):
+        child, _, turn, _ = self.nested_child()
+        child_workspace = self.root / "child-workspace"
+        self.db.execute("UPDATE threads SET cwd=? WHERE id=?", (str(child_workspace), child))
+        self.db.commit()
+        roots = self.root / "visualizations/1970/01/01"
+        inherited = roots / TASK / "cards"
+        own = roots / child / "cards"
+        original_open = os.open
+        attempts = []
+
+        def deny_native(target, *args, **kwargs):
+            if Path(target).suffix == ".html":
+                attempts.append(Path(target))
+            if Path(target).parent == own:
+                raise PermissionError("synthetic native directory denial")
+            return original_open(target, *args, **kwargs)
+
+        with patch("codex_run_budget.auto_preview.os.open", side_effect=deny_native), patch(
+            "codex_run_budget.auto_preview.snapshot", wraps=auto_preview.snapshot
+        ) as observed, patch(
+            "codex_run_budget.auto_preview.collect", wraps=auto_preview.collect
+        ) as children, patch(
+            "codex_run_budget.turn_quota.observe", return_value=None
+        ) as quota, patch(
+            "codex_run_budget.auto_preview.render_card", wraps=render_card
+        ) as renderer:
+            result = preview(self.data, child, turn, output_dir=inherited, home=self.root)
+        target = Path(json.loads(result["reference"].split("\ue202")[1][:-1])["path"])
+        self.assertEqual(target.parent, child_workspace / "work/codex-usage-cards")
+        self.assertTrue(target.is_relative_to(child_workspace))
+        self.assertIn('data-metric="turn-delta">+50</dd>', target.read_text())
+        self.assertEqual(attempts, [own / target.name, target])
+        for reader in (observed, children, quota, renderer):
+            reader.assert_called_once()
+        self.assertFalse(list(own.glob("*.html")))
+        self.assertFalse(inherited.exists())
+        self.assertFalse(self.workspace.exists())
+
+    def test_relocated_mkdir_denial_falls_back_but_parent_or_own_root_denial_does_not(self):
+        child, _, turn, _ = self.nested_child()
+        roots = self.root / "visualizations/1970/01/01"
+        inherited = roots / TASK
+        own = roots / child
+        original_mkdir = Path.mkdir
+
+        def deny_native(directory, *args, **kwargs):
+            if directory in (own, inherited):
+                raise PermissionError("synthetic mkdir denial")
+            return original_mkdir(directory, *args, **kwargs)
+
+        with patch.object(Path, "mkdir", new=deny_native):
+            for task, task_turn, directory in ((TASK, "turn-1", inherited), (child, turn, own)):
+                with self.subTest(task=task), self.assertRaises(PermissionError):
+                    preview(self.data, task, task_turn, output_dir=directory, home=self.root)
+            self.assertFalse(self.workspace.exists())
+            result = preview(self.data, child, turn, output_dir=inherited, home=self.root)
+        target = Path(json.loads(result["reference"].split("\ue202")[1][:-1])["path"])
+        self.assertEqual(target.parent, self.workspace / "work/codex-usage-cards")
+        self.assertTrue(target.is_file())
+
+    def test_fallback_rejects_missing_relative_parent_or_symlink_workspace(self):
+        child, _, turn, _ = self.nested_child()
+        inherited = self.root / "visualizations/1970/01/01" / TASK
+        original_mkdir = Path.mkdir
+        own = self.root / "visualizations/1970/01/01" / child
+
+        def deny_native(directory, *args, **kwargs):
+            if directory == own:
+                raise PermissionError("synthetic mkdir denial")
+            return original_mkdir(directory, *args, **kwargs)
+
+        alias = self.root / "workspace-alias"
+        alias.symlink_to(self.workspace, target_is_directory=True)
+        workspaces = (None, "relative", str(self.workspace / ".." / "escape"), str(alias))
+        with patch.object(Path, "mkdir", new=deny_native):
+            for workspace in workspaces:
+                with self.subTest(workspace=workspace):
+                    self.db.execute("UPDATE threads SET cwd=? WHERE id=?", (workspace, child))
+                    self.db.commit()
+                    with self.assertRaises((PermissionError, ValueError)):
+                        preview(self.data, child, turn, output_dir=inherited, home=self.root)
+        self.assertFalse(self.workspace.exists())
+        self.assertFalse((self.root / "escape").exists())
+
+    def test_fallback_rechecks_inherited_source_after_permission_error(self):
+        child, _, turn, _ = self.nested_child()
+        roots = self.root / "visualizations/1970/01/01"
+        roots.mkdir(parents=True)
+        inherited = roots / TASK
+        own = roots / child
+        original_mkdir = Path.mkdir
+
+        def deny_native_and_replace_source(directory, *args, **kwargs):
+            if directory == own:
+                inherited.symlink_to(self.workspace, target_is_directory=True)
+                raise PermissionError("synthetic mkdir denial with source replacement")
+            return original_mkdir(directory, *args, **kwargs)
+
+        with patch.object(Path, "mkdir", new=deny_native_and_replace_source):
+            with self.assertRaises(ValueError):
+                preview(self.data, child, turn, output_dir=inherited, home=self.root)
+        self.assertTrue(inherited.is_symlink())
+        self.assertFalse(own.exists())
+        self.assertFalse(self.workspace.exists())
+
+    def test_fallback_rejects_symlink_subdirectory_and_never_overwrites_existing_card(self):
+        child, _, turn, _ = self.nested_child()
+        inherited = self.root / "visualizations/1970/01/01" / TASK
+        own = self.root / "visualizations/1970/01/01" / child
+        original_mkdir = Path.mkdir
+
+        def deny_native(directory, *args, **kwargs):
+            if directory == own:
+                raise PermissionError("synthetic mkdir denial")
+            return original_mkdir(directory, *args, **kwargs)
+
+        self.workspace.mkdir()
+        alias = self.workspace / "work"
+        alias.symlink_to(self.root, target_is_directory=True)
+        with patch.object(Path, "mkdir", new=deny_native):
+            with self.assertRaises(ValueError):
+                preview(self.data, child, turn, output_dir=inherited, home=self.root)
+        self.assertFalse((self.root / "codex-usage-cards").exists())
+        alias.unlink()
+        fallback = self.workspace / "work/codex-usage-cards"
+        fallback.mkdir(parents=True)
+        target = fallback / ("codex-turn-" + stable_hash([child, turn])[:16] + "-123.html")
+        target.write_text("synthetic existing card")
+        with patch.object(Path, "mkdir", new=deny_native), patch(
+            "codex_run_budget.auto_preview.time.time_ns", return_value=123
+        ):
+            with self.assertRaises(FileExistsError):
+                preview(self.data, child, turn, output_dir=inherited, home=self.root)
+        self.assertEqual(target.read_text(), "synthetic existing card")
+        self.assertFalse(inherited.exists())
 
     def test_child_preview_rejects_changed_ancestor_root_before_reading_usage(self):
         child, parent, turn, _ = self.nested_child()
@@ -500,7 +733,9 @@ class AutoPreviewTest(unittest.TestCase):
         root_visuals = self.root / "visualizations/1970/01/01" / TASK
         shared = preview(self.data, child, child_turn, output_dir=root_visuals, home=self.root)
         self.assertEqual(shared["status"], "preview")
-        self.assertEqual(len(list(root_visuals.glob("*.html"))), 1)
+        shared_path = Path(json.loads(shared["reference"].split("\ue202")[1][:-1])["path"])
+        self.assertEqual(shared_path.parent, root_visuals.parent / child)
+        self.assertFalse(root_visuals.exists())
 
         parent = self.preview()
         self.assertEqual(parent["status"], "preview")

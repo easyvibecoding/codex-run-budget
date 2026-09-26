@@ -5,6 +5,44 @@ This file preserves dated release checks. The current package version is in
 [changelog](../CHANGELOG.md) for later changes. Historical installed canaries
 do not establish the trust or active runtime of a current installation.
 
+## 0.19.9 subagent visualization output — 2026-09-26
+
+The compatible signed runtime has sequence `1790433141` and SHA-256
+`50171668c1536565dcebd35495536bcbb96f25e7c1f21352989a438ff0f81628`.
+Ruff, all 490 tests, repository and plugin validation, reproducible runtime
+checks and signature verification passed. The hook definitions and publisher
+bootstrap remain unchanged.
+
+The preview tests exercise verified nested-child relocation across UUIDv7 UTC
+dates, preserved relative subdirectories and parent snapshots, unchanged direct
+child/workspace output, and rejection of foreign roots, traversal, symlinks and
+unproven lineage. Relocation-only `PermissionError` cases cover mkdir and file
+creation, a single checked child-workspace fallback, the same collected snapshot
+and filename, and no overwrite. Source mutations during rendering or the denied
+native write are rejected before either destination is written. Independent
+review reproduced these two source-recheck gaps before the final fix and verified
+both regressions afterward; ordinary `OSError` does not trigger fallback.
+
+A disposable Codex home installed version 0.19.9. Its manifest, hook definitions,
+both runtime archives, release manifest and publisher policy matched the
+checkout byte-for-byte. All 36 preview tests passed with package modules loaded
+from the installed signed archive. Invoking the installed `SubagentStart` command
+against a synthetic native catalog/transcript and then its durable preview
+command produced the child's own dated path. A real OS permission denial
+(`EACCES`, directory mode 0500) produced the checked workspace fallback; the
+fixture's original permissions were restored. Both cards were mode 0600, kept
+the observed child counters, and left the parent sentinel unchanged.
+
+An offline harness executed the unmodified reader, schema and path-checking
+functions extracted from local Codex Desktop 26.924.22138 (build 11645), with
+minimal host adapters and real filesystem I/O. It accepted the installed
+runtime's child-root and workspace-fallback files and rejected the parent
+sentinel under the same child ID, with the workspace feature flag both enabled
+and disabled. The six direct-read checks preserved file hashes and mtimes.
+This establishes output-path compatibility for that installed reader; it is
+not native GUI painting or model-driven lifecycle verification. Existing Task
+runtime pins and previously emitted snapshots remain unchanged.
+
 ## 0.19.8 model compatibility matrix — 2026-09-26
 
 The compatible signed runtime has sequence `1790405688` and SHA-256

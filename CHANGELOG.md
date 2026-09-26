@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.19.9 - 2026-09-26
+
+- Relocate a verified subagent's inherited root-Task visualization directory into the subagent's own native visualization root, using the child's UUIDv7 UTC date and preserving safe subdirectories.
+- If that relocated destination is denied by the sandbox, attempt one checked write under the child's catalog workspace at `work/codex-usage-cards`, reusing the same snapshot and returning its actual file reference.
+- Preserve existing snapshots, parent output, native identity checks, budget enforcement and hook definitions; reject unrelated roots, traversal and symlinks without expanding Desktop read permissions.
+
 ## 0.19.8 - 2026-09-26
 
 - Put usage-card eligibility before its preview command. Exact-output, JSON-only, code-only, and schema-constrained answers explicitly skip both the preview and its reference.

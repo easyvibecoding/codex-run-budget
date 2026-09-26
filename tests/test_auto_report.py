@@ -670,6 +670,8 @@ class AutoReportTest(unittest.TestCase):
         self.assertIn(f"--preview {child_id} {payload['turn_id']} --data-dir ", context)
         self.assertIn("Use this usage-card command for this subagent's footer; "
                       "inherited usage-card commands belong to other agents.", context)
+        self.assertIn("Inherited parent visualization roots are automatically redirected "
+                      "to this subagent's output.", context)
         self.assertEqual(len(recent(self.data)), 1)
         native = native_counter(child_id, payload["turn_id"], 300,
                                 request=200, turn_total=200)

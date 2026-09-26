@@ -40,14 +40,19 @@ Prefer a visualization root explicitly supplied in writable roots; otherwise
 use `work/` inside the Task's native working directory. The preview validates
 that destination against the native Task's working directory or its own
 `CODEX_HOME/visualizations/YYYY/MM/DD/<Task>/` root (UUIDv7 UTC date). After
-verified native lineage, a child may also write under its root Task's native
-visualization root when that is the supplied writable directory. Write access,
-including full access, does not itself authorize the desktop to read a file.
+verified native lineage, a request under the root Task's native visualization
+directory is relocated into the child's own native root, preserving safe
+subdirectories and using the child's UUIDv7 UTC date. Desktop reads the card
+as the child. Write access, including full access, does not itself authorize
+the desktop to read a parent's file.
+If the sandbox denies the relocated write, one checked attempt can use the
+child's catalog workspace at `work/codex-usage-cards`. It reuses the same snapshot
+and returns the actual file reference. Other failures do not trigger fallback.
 Private state directories, unrelated Tasks' visualization roots, traversal and
-symlinks are rejected before quota/child collection; no invalid reference is
-returned and no retry or fallback write is attempted. Extra sandbox roots are
+symlinks are rejected before quota/child collection. Extra sandbox roots are
 not accepted because this tool cannot verify the desktop's effective read policy.
-The check is repeated before writing. Existing snapshots and saved assistant
+The original request and chosen directory are checked again before writing.
+Existing snapshots and saved assistant
 messages are not rewritten; a previously broken reference needs a replacement
 reference to the same snapshot in an accepted, writable location.
 Its output is only status/reference, not the report body. The numeric card is a
