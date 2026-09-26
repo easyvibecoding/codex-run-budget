@@ -18,13 +18,21 @@ the child path also verifies its native root and direct parent. Similar names
 or timestamps never establish ownership. The start creates a pending Markdown
 file and returns one short `additionalContext` instruction enclosed in
 `<run-budget-usage-card>` and `</run-budget-usage-card>`. It tells the model to
-continue the user's task normally, run one deterministic pre-final usage-card
-preview, and put its native `visualize` reference at the end of the normal final
-answer. Command ownership applies only to the usage-card footer: the parent uses
-its command, and each child uses its own command while identifying inherited
-usage-card commands as belonging to other agents. For this footer only, disabled
-or unavailable previews and incompatible answer formats are skipped quietly;
-card reading, analysis, skill loading and retries are excluded. The tool
+continue the user's task normally and places an eligibility gate before the
+command: the final answer must allow an extra usage-card line. For an exact final
+answer, JSON-only or code-only final output, or a final-answer schema, the
+instruction says to skip the entire footer, including both the preview and its
+reference. JSON, code and schema file work remains eligible when the final answer
+permits the extra line. If eligible, run one deterministic pre-final usage-card
+preview and append only that agent's own native `visualize` reference unchanged on
+its own line after the answer, including subagent replies. Other agents' references
+must not be relayed into that answer.
+The reference uses compact JSON separators while preserving its path payload.
+Command ownership applies only to the usage-card footer: the parent uses its
+command, and each child uses its own command while identifying inherited
+usage-card commands as belonging to other agents. For the card only, disabled or
+unavailable output is skipped silently; reading, analysis, skill loading and
+retries are excluded. The tool
 reads this exact Task and timing key, reconciles bounded descendant
 usage records in this turn's observation window, and renders a bundled HTML
 fragment into a task-owned writable visualization directory selected by the caller.

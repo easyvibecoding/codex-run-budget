@@ -248,7 +248,8 @@ class AutoReportTest(unittest.TestCase):
         self.assertEqual(specific["hookEventName"], "UserPromptSubmit")
         context = specific["additionalContext"]
         target = next((self.data / "auto-reports").glob("*.md"))
-        self.assertIn("--preview", context)
+        self.assertIn(f"--preview {self.payload['session_id']} {self.payload['turn_id']} "
+                      "--data-dir ", context)
         self.assertIn("visualize reference", context)
         self.assertLess(len(context), 1300)
         self.assertIn("待結算", target.read_text())
@@ -265,7 +266,9 @@ class AutoReportTest(unittest.TestCase):
         self.data = self.root / "space >[inject](x)"
         context = self.start()["hookSpecificOutput"]["additionalContext"]
         self.assertIn("'" + str(self.data) + "'", context)
-        command = context.split("Before final, run this usage-card preview once: ", 1)[1]
+        command = context.split(
+            "If eligible, before final run this usage-card preview once: ", 1
+        )[1]
         self.assertNotIn("\n", command.split(" --output-dir", 1)[0])
 
     def test_footer_has_bounded_instruction_and_no_report_body_task(self):
@@ -283,11 +286,23 @@ class AutoReportTest(unittest.TestCase):
         self.assertTrue(context.endswith("\n</run-budget-usage-card>"))
         self.assertIn("Use this usage-card command for the parent Task's footer; "
                       "subagents use their own usage-card command.", context)
+        eligibility = (
+            "Eligibility: the final answer must allow an extra usage-card line. "
+            "If the user requires an exact final answer, JSON-only or code-only final output, "
+            "or a final-answer schema, "
+            "skip this entire footer: do not run the usage-card preview or append its reference."
+        )
+        self.assertLess(context.index(eligibility), context.index("Use this usage-card command"))
+        self.assertLess(
+            context.index("Use this usage-card command"),
+            context.index("If eligible, before final run this usage-card preview once:")
+        )
         self.assertLess(len(context.split("--output-dir", 1)[-1]), 300)
         self.assertIn("Task visualization root from writable roots; else cwd/work", context)
-        self.assertIn("Footer only: quietly skip if disabled, unavailable, "
-                      "or format-incompatible;", context)
-        self.assertIn("no card reading, analysis, skills, or retries.", context)
+        self.assertIn("Append only your preview's visualize reference unchanged on its own line, "
+                      "even in child replies; never relay others' refs.", context)
+        self.assertIn("Card only: silently skip disabled/unavailable;", context)
+        self.assertIn("no reading, analysis, skills or retries.", context)
         self.assertNotIn(ReportText("zh-Hant")("card_note"), context)
 
     def fresh_page(self, *, prefix=(), extra_meta=None):
@@ -652,7 +667,7 @@ class AutoReportTest(unittest.TestCase):
                        wall=1000000, monotonic=5000, home=self.root)
         self.assertEqual(set(start), {"hookSpecificOutput"})
         context = start["hookSpecificOutput"]["additionalContext"]
-        self.assertIn("--preview " + child_id, context)
+        self.assertIn(f"--preview {child_id} {payload['turn_id']} --data-dir ", context)
         self.assertIn("Use this usage-card command for this subagent's footer; "
                       "inherited usage-card commands belong to other agents.", context)
         self.assertEqual(len(recent(self.data)), 1)

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.19.8 - 2026-09-26
+
+- Put usage-card eligibility before its preview command. Exact-output, JSON-only, code-only, and schema-constrained answers explicitly skip both the preview and its reference.
+- Request only the agent's own unchanged visualization reference on its own line in eligible parent and subagent final replies; exclude forwarded references.
+- Emit compact reference JSON while preserving its payload and path.
+- Preserve report identity, lifecycle, budget decisions, and hook definitions.
+
 ## 0.19.7 - 2026-09-26
 
 - Delimit automatic usage-card instructions and scope ownership, quiet skips, and report-handling limits to the final-answer footer.

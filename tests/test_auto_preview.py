@@ -224,7 +224,11 @@ class AutoPreviewTest(unittest.TestCase):
         self.assertEqual(result["status"], "preview")
         self.assertLess(len(json.dumps(result)), 700)
         target = next(self.output.glob("*.html"))
-        self.assertIn(str(target), result["reference"])
+        self.assertEqual(
+            result["reference"],
+            '\ue200visualize\ue202{"path":'
+            + json.dumps(str(target), ensure_ascii=False) + '}\ue201'
+        )
         content = target.read_text()
         for expected in ("500", "450", "400", "50", "25", "gpt-6-astra", "xhigh"):
             self.assertIn(expected, content)

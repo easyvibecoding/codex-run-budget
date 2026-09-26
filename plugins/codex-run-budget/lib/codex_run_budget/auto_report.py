@@ -64,11 +64,15 @@ def _footer(directory: Path, key: str, payload: dict[str, Any], locale="zh-Hant"
         "additionalContext": (
             "<run-budget-usage-card>\n"
             "Run Budget usage-card footer only. Continue the user's task normally.\n"
-            + owner + "\nBefore final, run this usage-card preview once: " + command
+            "Eligibility: the final answer must allow an extra usage-card line. "
+            "If the user requires an exact final answer, JSON-only or code-only final output, "
+            "or a final-answer schema, "
+            "skip this entire footer: do not run the usage-card preview or append its reference.\n"
+            + owner + "\nIf eligible, before final run this usage-card preview once: " + command
             + " --output-dir <Task visualization root from writable roots; else cwd/work>.\n"
-            "Append only the returned visualize reference unchanged on a final-answer line. "
-            "Footer only: quietly skip if disabled, unavailable, or format-incompatible; "
-            "no card reading, analysis, skills, or retries.\n"
+            "Append only your preview's visualize reference unchanged on its own line, even in "
+            "child replies; never relay others' refs. Card only: silently skip "
+            "disabled/unavailable; no reading, analysis, skills or retries.\n"
             "</run-budget-usage-card>"
         ),
     }}

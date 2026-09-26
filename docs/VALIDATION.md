@@ -5,6 +5,120 @@ This file preserves dated release checks. The current package version is in
 [changelog](../CHANGELOG.md) for later changes. Historical installed canaries
 do not establish the trust or active runtime of a current installation.
 
+## 0.19.8 model compatibility matrix — 2026-09-26
+
+The compatible signed runtime has sequence `1790405688` and SHA-256
+`0d0698b9f61d007264fc69c31ece36bf39c9139bdcfd49afb50cb383acdd3eea`.
+Ruff, all 480 tests, repository and plugin validation, reproducible artifact
+checks and signature verification passed. Independent inspection confirmed
+unchanged reference payloads across Unicode, escaping and control-character
+boundary cases. Archive changes are limited to version metadata, footer wording
+and reference serialization.
+The eligibility condition precedes command ownership and the preview command;
+exact-output requests skip both preview execution and its reference. The final
+answer's format determines eligibility, separately from the files produced by
+the task. Eligible parent and child replies request the unchanged reference on
+its own line. Hook definitions and the bootstrap remain unchanged.
+
+The native model catalog exposed six GPT-5.6 and GPT-6 models. Each was tested
+with Codex CLI 0.157.1, the machine's configured v2 model catalog and `high`
+reasoning, using an isolated Codex home and installed signed plugin. Each home
+retained the previously reviewed hook hashes; native `hooks/list` confirmed
+12 enabled, trusted hooks without bypassing review. The browser fixture used
+real headless Chrome through a local stdio MCP adapter and CDP; terminal work
+computed and read back synthetic file hashes and sizes.
+
+Each model's matrix contains three parent turns and one same-model child:
+ordinary browser/terminal work with a child; an exact JSON reply after terminal
+work; and ordinary work with reporting disabled after its footer was injected.
+Read-back checks use native model/effort records, actual tool completion events,
+parent/child identity, preview arguments and counts, exact final replies,
+visualization artifacts, Stop receipts and separate completion reconciliation.
+Raw transcripts and identifiers remain outside the repository.
+
+The 0.19.7 baseline exposed these failures:
+
+| Model | Exact-output turn | Ordinary child reply |
+| --- | --- | --- |
+| GPT-5.6 Sol | Unnecessary preview; exact JSON preserved | Passed |
+| GPT-5.6 Terra | Preview and appended reference broke exact JSON | Reference omitted |
+| GPT-5.6 Luna | Preview and appended reference broke exact JSON | Reference was inline |
+| GPT-6 Astra | Unnecessary preview; exact JSON preserved | Passed |
+| GPT-6 Sol | Unnecessary preview; exact JSON preserved | Passed |
+| GPT-6 Luna | Preview and appended reference broke exact JSON | Passed |
+
+All six baseline models completed the requested browser and terminal work,
+maintained parent/child attribution and completion accounting, and handled
+disabled reporting. One Terra browser adapter call failed and a same-page
+retry succeeded; the underlying adapter exception was unavailable. This was
+recorded separately from footer behavior. Earlier browser setup attempts and
+an interrupted infrastructure canary were retained separately and excluded
+from model verdicts. The finalized CDP adapter is identical in all matrices.
+
+The first 0.19.8 candidate, runtime SHA-256
+`35a925afe853f0cec7fef86e91f3887bb1b4339379316830d215607bf99d2e5a`,
+passed exact JSON and disabled reporting for all six models. Four models passed
+every check. GPT-5.6 Luna's parent and GPT-6 Luna's child removed a separator
+space from their reference JSON; marker payloads and paths remained identical,
+but literal preservation failed. GPT-5.6 Luna's child emitted no preview or
+reference. Its delegated final-format constraint was encrypted in native
+records, so eligibility remained unknown rather than being attributed to a
+proven model error. Native work, lineage and completion checks still passed.
+
+The second candidate, runtime SHA-256
+`73af9855a7cb2af56879983a9f56b0afbe084cbc7e32aeb890c48a451436f3ed`,
+narrows the wording to final-answer constraints and emits compact reference
+JSON directly. Its ordinary child task explicitly retains
+natural-language replies, without adding footer or preview instructions;
+strict and disabled tasks and the browser adapter are unchanged. Read-back
+recognizes successful shell variable substitution and `sed` reads in addition
+to direct fixture reads. Rechecking baseline decisions with the same readers
+preserved every pass, fail and unknown verdict.
+Split native command output was joined only through an exact matching single
+command call. Successful fixture writes alone did not establish parent read-back.
+
+In that candidate, GPT-6 Luna's parent emitted its own correct reference and
+also forwarded its child's reference. GPT-5.6 Luna's child again emitted no
+preview or reference; the exact child's native initial-message metadata was
+empty, so delegated final-format eligibility remained unknown. These findings
+were retained. The current candidate explicitly permits only the actor's own
+returned reference and prohibits forwarding other agents' references. Its
+controlled child task also removes exclusive-work wording while preserving
+natural-language replies and no further delegation; it adds no card instructions.
+Earlier unknown delegated-format constraints remain unknown; a later controlled
+request does not establish their original wording.
+
+The final installed-runtime matrix passed all 92 checks per model, with zero
+failed or unknown checks:
+
+| Model | Ordinary parent and child | Exact JSON | Disabled after injection | Receipt identity and completion |
+| --- | --- | --- | --- | --- |
+| GPT-5.6 Sol | Passed | Passed | Passed | Passed |
+| GPT-5.6 Terra | Passed | Passed | Passed | Passed |
+| GPT-5.6 Luna | Passed | Passed | Passed | Passed |
+| GPT-6 Astra | Passed | Passed | Passed | Passed |
+| GPT-6 Sol | Passed | Passed | Passed | Passed |
+| GPT-6 Luna | Passed | Passed | Passed | Passed |
+
+Native records confirmed the requested model and `high` for all 24 turns.
+All 24 fixture results matched independent file calculations. The 12 ordinary
+parent/child previews used their own Task/turn and the signed runtime above;
+each final contained exactly its own unchanged reference on a separate line.
+The six strict turns ran no preview and returned the exact requested JSON.
+All six disabled turns completed their work and made one preview attempt that
+returned `disabled`, with no reference, new HTML or Stop receipt. The 18 enabled
+receipts retained verified identities and separate revision-2 completion with
+explicitly complete accounting. No card reading, report-skill loading or
+preview retry was observed. Independent native-record spot checks also verified
+both Luna parent/child references. Temporary credential copies and isolated
+Chrome processes/profiles were all absent after execution.
+
+This bounded matrix covers one workload at `high` per model, using the configured
+local catalog. It does not establish every reasoning level, service tier,
+authenticated desktop CUA/X workflow, or Desktop visualization painting. Inline
+footer instructions still consume model context, and existing Task pins retain
+their earlier runtime and injected wording.
+
 ## 0.19.7 usage-card instruction scope — 2026-09-26
 
 The compatible signed runtime has sequence `1790403004` and SHA-256
