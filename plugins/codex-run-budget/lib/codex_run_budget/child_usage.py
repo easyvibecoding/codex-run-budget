@@ -52,6 +52,10 @@ _ZERO_USAGE = {key: 0 for key in USAGE_KEYS}
 _STATUS_RANK = {"unavailable": 0, "partial": 1, "observed": 2}
 _HASH_RE = re.compile(r"[0-9a-f]{64}\Z")
 _MAX_INT = 2**63 - 1
+# A bounded revocation table never evicts child tombstones. If its capacity
+# is exhausted, this non-identifier marker suspends all child subtotals in
+# this reporting cache; it does not participate in budget enforcement.
+_REVOCATIONS_SATURATED = "*"
 
 
 def _empty(status: str = "unavailable") -> dict[str, Any]:
@@ -488,6 +492,9 @@ def _connect(root: Path) -> sqlite3.Connection:
     connection.execute(
         "CREATE INDEX IF NOT EXISTS requests_child_stamp ON requests(child_hash,stamp)"
     )
+    connection.execute(
+        "CREATE TABLE IF NOT EXISTS child_revocations (child_hash TEXT PRIMARY KEY)"
+    )
     return connection
 
 
@@ -495,6 +502,45 @@ def _status_better(old: str | None, new: str) -> str:
     if old not in _STATUS_RANK:
         return new
     return old if _STATUS_RANK[old] >= _STATUS_RANK[new] else new
+
+
+def _revocations(connection: sqlite3.Connection, child_hashes: set[str]) -> set[str]:
+    if not child_hashes:
+        return set()
+    placeholders = ",".join("?" for _ in child_hashes)
+    rows = connection.execute(
+        "SELECT child_hash FROM child_revocations WHERE child_hash IN ("
+        + placeholders + ") OR child_hash=?",
+        (*child_hashes, _REVOCATIONS_SATURATED),
+    ).fetchall()
+    revoked = {row[0] for row in rows}
+    return set(child_hashes) if _REVOCATIONS_SATURATED in revoked else revoked
+
+
+def _revoke_child(connection: sqlite3.Connection, child_hash: str) -> None:
+    """Persist a monotonic child-level rejection inside the writer transaction."""
+
+    if _revocations(connection, {child_hash}):
+        return
+    count = connection.execute("SELECT count(*) FROM child_revocations").fetchone()[0]
+    marker = child_hash if count < MAX_DB_AGENTS else _REVOCATIONS_SATURATED
+    connection.execute(
+        "INSERT OR IGNORE INTO child_revocations(child_hash) VALUES(?)", (marker,)
+    )
+
+
+def _load_revocations(root: Path, child_hashes: set[str]) -> tuple[set[str], bool]:
+    """Take the report's final revocation snapshot; an unreadable gate denies usage."""
+
+    connection = None
+    try:
+        connection = _connect(root)
+        return _revocations(connection, child_hashes), False
+    except (OSError, sqlite3.Error, ValueError, TypeError):
+        return set(child_hashes), True
+    finally:
+        if connection is not None:
+            connection.close()
 
 
 def _save_scan(root: Path, scan: dict[str, Any], *, parent_hash: str, agent_hash: str | None,
@@ -514,6 +560,7 @@ def _save_scan(root: Path, scan: dict[str, Any], *, parent_hash: str, agent_hash
             # conflicting receipt as merely partial would still include its
             # tokens, and a missing later source could resurrect that sum.
             if _valid_hash(agent_hash):
+                _revoke_child(connection, agent_hash)
                 connection.execute(
                     "UPDATE requests SET conflict=1 WHERE child_hash=?", (agent_hash,)
                 )
@@ -522,6 +569,12 @@ def _save_scan(root: Path, scan: dict[str, Any], *, parent_hash: str, agent_hash
                     "ELSE status END, terminal_observed=0 WHERE child_hash=?",
                     (agent_hash,),
                 )
+            connection.commit()
+            return
+        # A scan has no trusted generation/revalidation proof. Both scans
+        # obtained before the conflict and later ordinary scans remain
+        # revoked. This check and every insert share the same write lock.
+        if _revocations(connection, {child_hash or agent_hash}):
             connection.commit()
             return
         existing = connection.execute(
@@ -1133,6 +1186,23 @@ def collect(root: Path, session: str, since: float, until: float, *, home=None,
                         else "unavailable"
                     )
                     terminals[child_hash] = False
+
+        # Cache reads and transcript scans precede this single SQLite read.
+        # A revocation committed during either step must suppress even the
+        # in-memory copy of previously valid receipts. This is the report's
+        # revocation snapshot boundary; a later commit belongs to a later
+        # report. No lifecycle from a revoked source can exclude its row.
+        revoked, revocation_failed = _load_revocations(Path(root), child_hashes)
+        cache_failed |= revocation_failed
+        for child_hash in revoked:
+            statuses[child_hash] = (
+                "partial"
+                if all_items[child_hash] or statuses.get(child_hash) != "unavailable"
+                else "unavailable"
+            )
+            all_items[child_hash].clear()
+            terminals[child_hash] = False
+            scans[child_hash] = _empty_scan()
 
         # Group globally so a response id attributed to two child Tasks is
         # excluded from both subtotals instead of silently double-counted.

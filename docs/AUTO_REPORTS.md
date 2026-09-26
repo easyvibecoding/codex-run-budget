@@ -248,6 +248,15 @@ for the same child also invalidates saved request evidence, so a cached subtotal
 cannot reappear after its source becomes unavailable. Metadata for different
 Tasks in ordinary copied-parent history remains valid.
 
+From v0.19.6, that revocation is stored by child hash even when no request has
+arrived. Saving a scan checks it in the same transaction, and collection checks
+it again before using cached or freshly read evidence. Delayed or later matching
+scans cannot clear a revocation: there is no trusted generation signal proving
+that this identity has recovered. A new child identity is independent. Revocation
+storage is bounded; exhaustion preserves an exclusion marker instead of deleting
+old evidence. An unreadable or saturated store leaves child accounting partial or
+unavailable, never an observed zero. These checks affect reports only.
+
 The parent's pre-final preview and Stop receipt select only descendants linked
 by native parent metadata. They combine saved child evidence with a bounded fresh
 read, select native `token_usage_record` timestamps in `[parent start, capture)`,

@@ -5,6 +5,31 @@ This file preserves dated release checks. The current package version is in
 [changelog](../CHANGELOG.md) for later changes. Historical installed canaries
 do not establish the trust or active runtime of a current installation.
 
+## 0.19.6 concurrent child-cache revocation — 2026-09-26
+
+The compatible signed runtime has sequence `1790391315` and SHA-256
+`0aa005b43731a259697993d5b96f8f8f19e0e171bee0a21bf5718808574e52cc`.
+Ruff, all 473 tests, repository and plugin validation, and signature verification
+passed. Real SQLite regressions first reproduced stale scans restoring unseen
+requests after a parent conflict, including an identity with no prior cache.
+They now preserve revocation after database reopen and source removal. Tests also
+cover revocation between cache loading or fresh scanning and collection, new
+child identities, legacy schema migration, corrupt revocation schema and bounded
+storage saturation. The report's revocation snapshot is one final SQLite query;
+commits after that query belong to a later report observation.
+
+A fresh isolated Codex home installed 0.19.6. Native `hooks/list` reported all
+12 existing hooks enabled and trusted with unchanged definitions and reviewed
+hashes. Four targeted concurrency and recovery regressions then passed while
+importing the actual installed signed zipapp, with no model request. Independent
+read-only checks also exercised transaction rollback, cache-only races and
+bounded saturation. Governor, ledger and hook definitions were unchanged.
+
+This release check proves installed runtime selection and report-cache behavior.
+It does not repeat the 0.19.5 model-driven lifecycle canary or establish Desktop
+painting. An ordinary scan cannot undo revocation without trusted recovery
+evidence; there is no automatic recovery of the same disputed child identity.
+
 ## 0.19.5 child lineage and presentation — 2026-09-26
 
 The compatible signed runtime has sequence `1790390014` and SHA-256

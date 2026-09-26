@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.19.6 - 2026-09-26
+
+- Keep a durable, hashed child revocation when native parent metadata conflicts, including when no request has been cached yet.
+- Reject delayed scans atomically after revocation and recheck revocations before collecting subtotals. An ordinary matching scan cannot restore an unverified child's usage.
+- Bound revocation storage without discarding exclusion evidence; unreadable or saturated revocation state preserves partial or unavailable reporting.
+
 ## 0.19.5 - 2026-09-26
 
 - Reject contradictory parent metadata for the same child, including previously cached usage, while retaining valid copied-parent history.
