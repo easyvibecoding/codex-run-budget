@@ -987,15 +987,20 @@ def _child_task(payload: dict[str, Any], home: Path | None) -> dict[str, Any] | 
         return None
 
 
+def _baseline_is_subagent(baseline: dict) -> bool:
+    """Retain the report's Start scope even when later identity proof fails."""
+    return (baseline.get("source_role") == "subagent"
+            or baseline.get("start_event") == "SubagentStart"
+            or baseline.get("parent_hash") is not None
+            or baseline.get("root_hash") is not None)
+
+
 def _baseline_identity_matches(
     baseline: dict, task_hash: str, *, root_hash: str | None = None,
     parent_hash: str | None = None,
 ) -> bool:
     """Require the original report role and lineage, including older child starts."""
-    was_child = (baseline.get("source_role") == "subagent"
-                 or baseline.get("start_event") == "SubagentStart"
-                 or baseline.get("parent_hash") is not None
-                 or baseline.get("root_hash") is not None)
+    was_child = _baseline_is_subagent(baseline)
     if "source_role" in baseline:
         role = baseline["source_role"]
         if role not in ("parent", "subagent") or (role == "parent" and was_child):
@@ -1155,16 +1160,18 @@ def handle(
             if state != "generating":
                 return None
             started = json.loads(row["baseline"])
-            stopped = snapshot(
+            baseline_verified = _baseline_identity_matches(
+                started, stable_hash(session),
+                root_hash=child["root_hash"] if child else None,
+                parent_hash=child["parent_hash"] if child else None,
+            )
+            stopped = (snapshot(
                 source_path, turn, allow_subagent=bool(child),
                 root_hash=child["root_hash"] if child else None,
-            )
+            ) if baseline_verified else
+                {"status": "source_unavailable", "usage": None, "contexts": []})
             source_verified = (
-                _baseline_identity_matches(
-                    started, stable_hash(session),
-                    root_hash=child["root_hash"] if child else None,
-                    parent_hash=child["parent_hash"] if child else None,
-                )
+                baseline_verified
                 and stopped.get("task_hash") == stable_hash(session)
                 and (not child or stopped.get("parent_hash") == child["parent_hash"])
             )
@@ -1175,8 +1182,9 @@ def handle(
             text = ReportText(locale["locale"])
             from .child_usage import collect
             from .turn_quota import saved
-            children = collect(root, session, row["started"], now, home=home,
-                               unnamed_label=text("unnamed"))
+            children = (collect(root, session, row["started"], now, home=home,
+                                unnamed_label=text("unnamed")) if source_verified else
+                        {"status": "unavailable", "usage": None, "rows": []})
             task = (task_description(session, home=home, unnamed_label=text("unnamed"))
                     if source_verified else None)
             if child and task is not None:
@@ -1185,7 +1193,8 @@ def handle(
                 task.pop("agent_path", None)
             receipt = {
                 "schema_version": 2,
-                "scope": "subagent_turn_stop_boundary" if child else "user_turn_stop_boundary",
+                "scope": ("subagent_turn_stop_boundary" if _baseline_is_subagent(started)
+                          else "user_turn_stop_boundary"),
                 "task_hash": stable_hash(session),
                 "source_identity_verified": source_verified,
                 "task": task,

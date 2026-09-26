@@ -6,6 +6,7 @@
 - Reject delayed scans atomically after revocation and recheck revocations before collecting subtotals. An ordinary matching scan cannot restore an unverified child's usage.
 - Bound revocation storage without discarding exclusion evidence; unreadable or saturated revocation state preserves partial or unavailable reporting.
 - Reject explicit baseline roles that contradict child lineage, unknown roles and absent role evidence, while preserving supported legacy starts.
+- Skip Stop observation and descendant collection when the original identity cannot be verified, retaining the Start scope and unavailable totals.
 - Close the readonly timing-index connection after quota observation, including early returns.
 
 ## 0.19.5 - 2026-09-26

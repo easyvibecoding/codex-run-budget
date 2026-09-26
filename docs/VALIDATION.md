@@ -7,9 +7,9 @@ do not establish the trust or active runtime of a current installation.
 
 ## 0.19.6 concurrent child-cache revocation — 2026-09-26
 
-The compatible signed runtime has sequence `1790392814` and SHA-256
-`5c054d2f7774938f5bcf2a032a015d70249b0db7412dd4e647fb3d6ecdcc20f6`.
-Ruff, all 478 tests, repository and plugin validation, and signature verification
+The compatible signed runtime has sequence `1790393593` and SHA-256
+`bc7bf797f136469ea0a7b04850da306fa1270020264acb412989c1084e54726f`.
+Ruff, all 480 tests, repository and plugin validation, and signature verification
 passed. Real SQLite regressions first reproduced stale scans restoring unseen
 requests after a parent conflict, including an identity with no prior cache.
 They now preserve revocation after database reopen and source removal. Tests also
@@ -20,8 +20,8 @@ commits after that query belong to a later report observation.
 
 A fresh isolated Codex home installed 0.19.6. Native `hooks/list` reported all
 12 existing hooks enabled and trusted with unchanged definitions and reviewed
-hashes. Five targeted concurrency, recovery and connection-lifetime regressions passed while
-importing the actual installed signed zipapp, with no model request. Independent
+hashes. Eight targeted concurrency, recovery, connection-lifetime and Stop identity
+regressions passed while importing the actual installed signed zipapp, with no model request. Independent
 read-only checks also exercised transaction rollback, cache-only races and
 bounded saturation. Governor, ledger and hook definitions were unchanged.
 
@@ -34,6 +34,13 @@ rejected contradictory or unknown role variants of that same evidence.
 The quota timing-index reader now closes its readonly connection on successful
 capture and unknown-turn early return; its real-connection regression passed
 under Python 3.13 with no ResourceWarning.
+
+Stop verifies the original task, root, direct parent and role before reading its
+snapshot. Failed baseline identity skips both the snapshot and descendant
+collector, leaves all usage totals unavailable, and retains the original Start
+scope. Regression tests first reproduced five invalid-identity cases that still
+read observations or collected a nonzero descendant subtotal; the final installed
+runtime rejects them while valid root and child controls still collect normally.
 
 This release check proves installed runtime selection and report-cache behavior.
 It does not repeat the 0.19.5 model-driven lifecycle canary or establish Desktop

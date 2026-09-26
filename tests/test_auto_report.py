@@ -19,6 +19,7 @@ from codex_run_budget.auto_report import (  # noqa: E402
     _documents,
     configure,
     handle,
+    observed_total,
     recent,
     settings,
     snapshot,
@@ -66,6 +67,12 @@ def baseline_role_case(baseline, case):
         result["source_role"] = {"parent": "parent", "unknown": "synthetic-unknown-role",
                                  "null": None}[case]
     return result
+
+
+def synthetic_descendant_subtotal():
+    return {"status": "observed", "usage": {"total": 90000, "input": 81000,
+            "cached_input": 72000, "output": 9000, "reasoning_output": 4500},
+            "agents_seen": 1, "agents_with_usage": 1, "request_count": 1, "rows": []}
 
 
 class AutoReportTest(unittest.TestCase):
@@ -772,6 +779,72 @@ class AutoReportTest(unittest.TestCase):
                     self.assertFalse(receipt["source_identity_verified"])
                     self.assertIsNone(receipt["usage"])
 
+    def test_invalid_child_identity_cannot_collect_or_publish_descendant_subtotal(self):
+        _, _, _, child_page, payload = self._native_child_fixture()
+        original_source = child_page.read_bytes()
+        for field in ("task_hash", "root_hash", "parent_hash", "source_role", "control"):
+            with self.subTest(field=field):
+                self.data = self.root / ("descendant-scope-" + field)
+                child_page.write_bytes(original_source)
+                self.assertIn("hookSpecificOutput", handle(
+                    {**payload, "hook_event_name": "SubagentStart"}, self.data,
+                    wall=1000000, monotonic=5000, home=self.root))
+                if field != "control":
+                    with sqlite3.connect(self.data / "auto-reports/timing.sqlite3") as timing:
+                        baseline = json.loads(timing.execute(
+                            "SELECT baseline FROM turns").fetchone()[0])
+                        baseline[field] = "parent" if field == "source_role" else "f" * 64
+                        timing.execute("UPDATE turns SET baseline=?", (json.dumps(baseline),))
+                with child_page.open("a") as output:
+                    output.write(json.dumps(counter(150)) + "\n")
+                with patch("codex_run_budget.child_usage.collect",
+                           return_value=synthetic_descendant_subtotal()) as collect, patch(
+                    "codex_run_budget.auto_report.snapshot", wraps=snapshot
+                ) as read_source:
+                    self.assertIn("systemMessage", handle(
+                        {**payload, "hook_event_name": "SubagentStop",
+                         "agent_transcript_path": str(child_page)}, self.data,
+                        wall=1000001, monotonic=5001, home=self.root))
+                receipt = self.report()
+                total, complete = observed_total(receipt["usage"], receipt["subagents"])
+                if field == "control":
+                    read_source.assert_called_once()
+                    collect.assert_called_once()
+                    self.assertTrue(receipt["source_identity_verified"])
+                    self.assertTrue(receipt["subagents_included"])
+                    self.assertEqual(receipt["subagents"]["usage"]["total"], 90000)
+                    self.assertEqual((total["total"], complete), (90050, True))
+                    continue
+                read_source.assert_not_called()
+                collect.assert_not_called()
+                self.assertFalse(receipt["source_identity_verified"])
+                self.assertEqual(receipt["scope"], "subagent_turn_stop_boundary")
+                self.assertEqual(receipt["subagents"]["status"], "unavailable")
+                self.assertIsNone(receipt["subagents"]["usage"])
+                self.assertFalse(receipt["subagents_included"])
+                self.assertEqual((total, complete), (None, False))
+                for extension in ("json", "md", "html"):
+                    content = next((self.data / "auto-reports").glob("*." + extension)).read_text()
+                    self.assertNotIn("90,000", content)
+                    self.assertNotIn("90000", content)
+
+    def test_verified_root_stop_still_collects_descendants_separately(self):
+        self.start()
+        self.append(counter(1200))
+        with patch("codex_run_budget.child_usage.collect",
+                   return_value=synthetic_descendant_subtotal()) as collect, patch(
+            "codex_run_budget.auto_report.snapshot", wraps=snapshot
+        ) as read_source:
+            self.assertIn("systemMessage", self.event("Stop", 1))
+        read_source.assert_called_once()
+        collect.assert_called_once()
+        receipt = self.report()
+        self.assertTrue(receipt["source_identity_verified"])
+        self.assertEqual(receipt["scope"], "user_turn_stop_boundary")
+        self.assertEqual(receipt["usage"]["total"], 200)
+        self.assertEqual(receipt["subagents"]["usage"]["total"], 90000)
+        self.assertEqual(observed_total(receipt["usage"], receipt["subagents"])[0]["total"], 90200)
+
     def test_child_baseline_cannot_be_reused_as_parent_report(self):
         _, child_id, _, child_page, payload = self._native_child_fixture()
         self.assertIn("hookSpecificOutput", handle(
@@ -785,15 +858,26 @@ class AutoReportTest(unittest.TestCase):
                                                 "model": "synthetic-other-root-model"}},
             native_counter(child_id, payload["turn_id"], 150, turn_total=50),
         )))
-        self.assertIn("systemMessage", handle(
-            {"session_id": child_id, "turn_id": payload["turn_id"],
-             "hook_event_name": "Stop", "transcript_path": str(child_page)},
-            self.data, wall=1000001, monotonic=5001, home=self.root))
+        with patch("codex_run_budget.child_usage.collect",
+                   return_value=synthetic_descendant_subtotal()) as collect, patch(
+            "codex_run_budget.auto_report.snapshot", wraps=snapshot
+        ) as read_source:
+            self.assertIn("systemMessage", handle(
+                {"session_id": child_id, "turn_id": payload["turn_id"],
+                 "hook_event_name": "Stop", "transcript_path": str(child_page)},
+                self.data, wall=1000001, monotonic=5001, home=self.root))
         receipt = self.report()
+        self.assertEqual(receipt["scope"], "subagent_turn_stop_boundary")
+        read_source.assert_not_called()
+        collect.assert_not_called()
         self.assertFalse(receipt["source_identity_verified"])
         self.assertIsNone(receipt["usage"])
         self.assertIsNone(receipt["task_usage"])
         self.assertEqual(receipt["stop_contexts"], [])
+        self.assertEqual(observed_total(receipt["usage"], receipt["subagents"]), (None, False))
+        for content in _documents(receipt):
+            self.assertNotIn("主代理", content)
+            self.assertNotIn("90,000", content)
 
     def test_subagent_receipt_documents_show_own_scope_and_escaped_parent(self):
         _, _, _, child_page, payload = self._native_child_fixture()
