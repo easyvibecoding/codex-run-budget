@@ -5,6 +5,28 @@ This file preserves dated release checks. The current package version is in
 [changelog](../CHANGELOG.md) for later changes. Historical installed canaries
 do not establish the trust or active runtime of a current installation.
 
+## 0.19.7 usage-card instruction scope — 2026-09-26
+
+The compatible signed runtime has sequence `1790403004` and SHA-256
+`caabd59a0a9f4478380c0f46e10c66229aabc0735a97fe57d14ccce669aa60b7`.
+Ruff, all 480 tests, repository and plugin validation, signature verification,
+and reproducible runtime checks passed. Existing tests cover the delimited
+parent and child footer instructions, command ownership, shell quoting,
+disabled reporting, start deduplication, and preserved Governor decisions.
+The instruction suffix retains its existing 300-character bound.
+
+An isolated publisher store verified and selected the signed archive for a
+synthetic new Task. Native `hooks/list` on the active installation reported all
+12 hooks enabled and trusted with zero needing review; hook definitions remain
+byte-identical to the previous release. This change edits report instructions
+only, leaving report lifecycle, admission, and Task pinning unchanged.
+
+These checks establish the emitted instruction's scope and compatible runtime
+selection. No model-driven browser canary was performed, and they do not prove
+that model distraction or misinterpretation is eliminated. The inline footer
+still consumes model context. Existing Task pins and injected messages retain
+their original wording.
+
 ## 0.19.6 paired review JSON presentation — 2026-09-26
 
 The compatible signed runtime has sequence `1790394896` and SHA-256

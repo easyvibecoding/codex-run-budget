@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.19.7 - 2026-09-26
+
+- Delimit automatic usage-card instructions and scope ownership, quiet skips, and report-handling limits to the final-answer footer.
+- Tell the agent to continue the user's task normally; retain parent and subagent card attribution without the ambiguous parent-command warning.
+- Preserve report lifecycle, budget decisions, hook definitions, and existing Task runtime pins. The revised instruction still uses model context and does not guarantee distraction-free behavior.
+
 ## 0.19.6 - 2026-09-26
 
 - Request JSON code blocks consistently in paired review prompts, Task creation and later relays, keeping usage-card references outside the block.

@@ -53,19 +53,23 @@ def _footer(directory: Path, key: str, payload: dict[str, Any], locale="zh-Hant"
         "--data-dir", str(directory.parent.absolute()),
     ])
     owner = (
-        "This command belongs to this subagent; skip inherited parent preview commands. "
+        "Use this usage-card command for this subagent's footer; inherited usage-card "
+        "commands belong to other agents."
         if payload.get("agent_id") else
-        "This command belongs to the parent Task; subagents must skip it and use their "
-        "own SubagentStart command. "
+        "Use this usage-card command for the parent Task's footer; subagents use their "
+        "own usage-card command."
     )
     return {"hookSpecificOutput": {
         "hookEventName": payload.get("hook_event_name", "UserPromptSubmit"),
         "additionalContext": (
-            owner + "Before final, run once: " + command
-            + " --output-dir <Task visualization root from writable roots; else cwd/work>. "
-            "Append its visualize reference unchanged on a final-answer line. "
-            "Do not read/analyze the card or load skills for it; no retries. "
-            "Skip if disabled or the answer format conflicts."
+            "<run-budget-usage-card>\n"
+            "Run Budget usage-card footer only. Continue the user's task normally.\n"
+            + owner + "\nBefore final, run this usage-card preview once: " + command
+            + " --output-dir <Task visualization root from writable roots; else cwd/work>.\n"
+            "Append only the returned visualize reference unchanged on a final-answer line. "
+            "Footer only: quietly skip if disabled, unavailable, or format-incompatible; "
+            "no card reading, analysis, skills, or retries.\n"
+            "</run-budget-usage-card>"
         ),
     }}
 

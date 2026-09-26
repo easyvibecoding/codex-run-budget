@@ -265,7 +265,8 @@ class AutoReportTest(unittest.TestCase):
         self.data = self.root / "space >[inject](x)"
         context = self.start()["hookSpecificOutput"]["additionalContext"]
         self.assertIn("'" + str(self.data) + "'", context)
-        self.assertNotIn("\n", context)
+        command = context.split("Before final, run this usage-card preview once: ", 1)[1]
+        self.assertNotIn("\n", command.split(" --output-dir", 1)[0])
 
     def test_footer_has_bounded_instruction_and_no_report_body_task(self):
         from codex_run_budget.auto_report import _footer
@@ -275,10 +276,18 @@ class AutoReportTest(unittest.TestCase):
         directory.mkdir()
         specific = _footer(directory, "example", self.payload)["hookSpecificOutput"]
         context = specific["additionalContext"]
+        self.assertTrue(context.startswith(
+            "<run-budget-usage-card>\n"
+            "Run Budget usage-card footer only. Continue the user's task normally.\n"
+        ))
+        self.assertTrue(context.endswith("\n</run-budget-usage-card>"))
+        self.assertIn("Use this usage-card command for the parent Task's footer; "
+                      "subagents use their own usage-card command.", context)
         self.assertLess(len(context.split("--output-dir", 1)[-1]), 300)
         self.assertIn("Task visualization root from writable roots; else cwd/work", context)
-        self.assertIn("Do not read", context)
-        self.assertIn("no retries", context)
+        self.assertIn("Footer only: quietly skip if disabled, unavailable, "
+                      "or format-incompatible;", context)
+        self.assertIn("no card reading, analysis, skills, or retries.", context)
         self.assertNotIn(ReportText("zh-Hant")("card_note"), context)
 
     def fresh_page(self, *, prefix=(), extra_meta=None):
@@ -642,7 +651,10 @@ class AutoReportTest(unittest.TestCase):
         start = handle({**payload, "hook_event_name": "SubagentStart"}, self.data,
                        wall=1000000, monotonic=5000, home=self.root)
         self.assertEqual(set(start), {"hookSpecificOutput"})
-        self.assertIn("--preview " + child_id, start["hookSpecificOutput"]["additionalContext"])
+        context = start["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("--preview " + child_id, context)
+        self.assertIn("Use this usage-card command for this subagent's footer; "
+                      "inherited usage-card commands belong to other agents.", context)
         self.assertEqual(len(recent(self.data)), 1)
         native = native_counter(child_id, payload["turn_id"], 300,
                                 request=200, turn_total=200)

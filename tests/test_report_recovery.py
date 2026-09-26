@@ -174,7 +174,7 @@ class ReportRecoveryTest(unittest.TestCase):
             output = self.event()
         context = output["hookSpecificOutput"]["additionalContext"]
         self.assertTrue(context.startswith("existing budget context\n"))
-        self.assertIn("Before final, run once:", context)
+        self.assertIn("Before final, run this usage-card preview once:", context)
 
     def test_threshold_uses_recovered_time_and_storage_omits_payload(self):
         configure(self.data, enabled=True, threshold_seconds=5)

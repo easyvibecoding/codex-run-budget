@@ -16,12 +16,15 @@ token-counter baseline. For a subagent, `SubagentStart` uses that child's native
 remains the governance run key. The parent path checks its exact Task identity;
 the child path also verifies its native root and direct parent. Similar names
 or timestamps never establish ownership. The start creates a pending Markdown
-file and returns one short `additionalContext` instruction to run one
-deterministic pre-final preview tool
-and put its native `visualize` reference at the end of the normal final answer.
-The child's instruction identifies its own Task and tells the child to skip an
-inherited parent preview instruction. The model is told
-not to read/analyze the report, invent numbers, or add another turn. The tool
+file and returns one short `additionalContext` instruction enclosed in
+`<run-budget-usage-card>` and `</run-budget-usage-card>`. It tells the model to
+continue the user's task normally, run one deterministic pre-final usage-card
+preview, and put its native `visualize` reference at the end of the normal final
+answer. Command ownership applies only to the usage-card footer: the parent uses
+its command, and each child uses its own command while identifying inherited
+usage-card commands as belonging to other agents. For this footer only, disabled
+or unavailable previews and incompatible answer formats are skipped quietly;
+card reading, analysis, skill loading and retries are excluded. The tool
 reads this exact Task and timing key, reconciles bounded descendant
 usage records in this turn's observation window, and renders a bundled HTML
 fragment into a task-owned writable visualization directory selected by the caller.
