@@ -81,6 +81,21 @@ class BootstrapTest(unittest.TestCase):
     def evict_cache(self):
         self.source.rename(self.root / "evicted-cache")
 
+    def settle_report_reader(self):
+        # A Stop receipt may launch a detached completion reader. Disable its
+        # remaining polls, then wait for its terminal state before temp cleanup.
+        (self.data / "auto-report.json").write_text(
+            json.dumps({"enabled": False, "threshold_seconds": 0}))
+        timing = self.data / "auto-reports/timing.sqlite3"
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            with sqlite3.connect(timing) as connection:
+                row = connection.execute("SELECT state FROM reconciliations").fetchone()
+            if row is None or row[0] not in {"queued", "running"}:
+                return
+            time.sleep(0.05)
+        self.fail("detached completion reader did not settle")
+
     def test_bootstrap_survives_cache_eviction_and_keeps_enforcement(self):
         started = self.invoke("UserPromptSubmit", prompt="run-budget:start tokens=100k tools=2")
         self.assertEqual(started["hookSpecificOutput"]["hookEventName"], "UserPromptSubmit")
@@ -102,6 +117,7 @@ class BootstrapTest(unittest.TestCase):
         self.assertEqual(denied["hookSpecificOutput"]["permissionDecision"], "deny")
         stopped = self.invoke("Stop")
         self.assertNotEqual(stopped.get("decision"), "block")
+        self.settle_report_reader()
 
     def test_auto_report_is_in_pinned_runtime_after_cache_eviction(self):
         original = self.transcript.read_text()
@@ -116,20 +132,7 @@ class BootstrapTest(unittest.TestCase):
         self.assertEqual(len(list((self.data / "auto-reports").glob("*.md"))), 1)
         self.assertFalse((self.data / "auto-report.json").exists())
         self.assertEqual(self.invoke("Stop"), {})
-        # Stop may launch a detached completion reader. Let it settle before
-        # TemporaryDirectory cleanup removes the report store on CI runners.
-        (self.data / "auto-report.json").write_text(
-            json.dumps({"enabled": False, "threshold_seconds": 0}))
-        timing = self.data / "auto-reports/timing.sqlite3"
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline:
-            with sqlite3.connect(timing) as connection:
-                row = connection.execute("SELECT state FROM reconciliations").fetchone()
-            if row is None or row[0] not in {"queued", "running"}:
-                break
-            time.sleep(0.05)
-        else:
-            self.fail("detached completion reader did not settle")
+        self.settle_report_reader()
 
     def test_missing_runtime_has_structured_denial_and_no_stop_retry(self):
         self.evict_cache()

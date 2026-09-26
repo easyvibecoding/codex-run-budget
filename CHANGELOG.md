@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.19.4 - 2026-09-26
+
+- Bound SQLite write contention across concurrent Task starts with one shared deadline below the native hook timeout. Slow storage no longer drops otherwise valid start baselines at the prior short lock wait.
+- Preserve the 0.19.3 child-agent reporting contract and existing hook definitions, budget decisions, and private state boundaries.
+
 ## 0.19.3 - 2026-09-26
 
 - Give verified subagents their own pre-final usage cards and private SubagentStop receipts, keyed by the child's native Task and turn while preserving the parent-shared budget run key.

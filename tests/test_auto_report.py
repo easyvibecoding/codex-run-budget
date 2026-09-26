@@ -7,6 +7,8 @@ import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier, Event
+from time import sleep
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -129,6 +131,80 @@ class AutoReportTest(unittest.TestCase):
             )
         self.assertTrue(all(set(result) == {"hookSpecificOutput"} for result in results))
         self.assertEqual(len(recent(self.data)), 8)
+
+    def test_parallel_tasks_keep_all_starts_under_write_contention(self):
+        from codex_run_budget.auto_report import _connect, _footer
+
+        configure(self.data, enabled=True)
+        connection = _connect(self.data)
+        connection.close()
+        gate = Barrier(8)
+
+        def start(n):
+            gate.wait(timeout=10)
+            return self.event("UserPromptSubmit", turn_id=f"turn-{n}")
+
+        def slow_footer(*args, **kwargs):
+            # Eight starts now need more than the former 0.4-second busy wait.
+            sleep(0.09)
+            return _footer(*args, **kwargs)
+
+        with patch("codex_run_budget.auto_report._footer", side_effect=slow_footer):
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                results = list(pool.map(start, range(8)))
+        bad = [(n, sorted(result) if isinstance(result, dict) else result)
+               for n, result in enumerate(results)
+               if not isinstance(result, dict) or set(result) != {"hookSpecificOutput"}]
+        self.assertEqual(bad, [])
+        self.assertEqual(len(recent(self.data)), 8)
+
+    def test_schema_and_preflight_reads_share_one_sqlite_wait_deadline(self):
+        from codex_run_budget.auto_report import _connect
+
+        configure(self.data, enabled=True)
+        connection = _connect(self.data)
+        connection.close()
+        path = self.data / "auto-reports/timing.sqlite3"
+        first = sqlite3.connect(path, isolation_level=None)
+        second = sqlite3.connect(path, isolation_level=None)
+        entered, connected, proceed = Event(), Event(), Event()
+        observed_wait_ms = []
+
+        def two_phase_connect(root, *, deadline=None):
+            entered.set()
+            result = _connect(root, deadline=deadline)
+            observed_wait_ms.append(result.execute("PRAGMA busy_timeout").fetchone()[0])
+            connected.set()
+            if not proceed.wait(timeout=5):
+                result.close()
+                raise TimeoutError("second SQLite lock was not established")
+            return result
+
+        first.execute("BEGIN EXCLUSIVE")
+        try:
+            with patch("codex_run_budget.auto_report._connect", side_effect=two_phase_connect):
+                with ThreadPoolExecutor(max_workers=1) as pool:
+                    future = pool.submit(self.event, "UserPromptSubmit")
+                    try:
+                        self.assertTrue(entered.wait(timeout=5))
+                        sleep(0.7)  # CREATE TABLE waits on the first exclusive lock.
+                        first.rollback()
+                        self.assertTrue(connected.wait(timeout=5))
+                        second.execute("BEGIN EXCLUSIVE")
+                        proceed.set()  # The preflight SELECT now waits on a second lock.
+                        result = future.result(timeout=2.5)
+                        self.assertEqual(set(result), {"systemMessage"})
+                    finally:
+                        proceed.set()
+                        second.rollback()
+        finally:
+            first.close()
+            second.close()
+        # The first lock consumed part of the two-second budget. The preflight
+        # SELECT must not inherit the original two-second busy timeout.
+        self.assertEqual(len(observed_wait_ms), 1)
+        self.assertLessEqual(observed_wait_ms[0], 1500)
+        self.assertEqual(len(recent(self.data)), 0)
 
     def test_every_turn_default_zero_and_boundary_counts(self):
         self.start()

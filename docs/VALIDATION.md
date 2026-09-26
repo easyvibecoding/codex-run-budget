@@ -5,6 +5,34 @@ This file preserves dated release checks. The current package version is in
 [changelog](../CHANGELOG.md) for later changes. Historical installed canaries
 do not establish the trust or active runtime of a current installation.
 
+## 0.19.4 concurrent starts and child preview — 2026-09-26
+
+The signed runtime was rebuilt at sequence `1790388094` with SHA-256
+`c33221e03a94278a9245ba86d592e876d8a9f6ce67760ee755618f48d84def61`.
+Ruff, 449 unit tests, repository and plugin validation, and signed-release
+verification passed. An eight-Task write-lock fixture lost four starts under
+the former 0.4-second wait and retained all eight with the new shared two-second
+deadline. A separate two-lock test checks that schema creation, the preflight
+read, and the write claim cannot each take a fresh full wait. The native hook
+timeout remains three seconds; overloaded storage can still yield an explicit
+nonblocking report failure.
+
+A fresh disposable Codex home installed plugin 0.19.4 with a separate data
+directory. Native `hooks/list` showed all 12 installed commands matched their
+previously reviewed trust hashes. Those hashes were seeded only into this
+isolated fixture; read-back then showed all 12 enabled and trusted. A real
+`codex exec` turn spawned one child. The child's final answer supplied an inline
+visualization reference to an existing HTML preview containing its own hashed
+selector. The installed hooks wrote parent and child Stop receipts plus
+completion revisions. The child selector matched the parent's child row;
+the child observed 36,391 own-turn tokens and the parent separately recorded
+47,523 own-turn tokens and 36,391 descendant tokens. Neither receipt contained
+a raw Task UUID or nonempty `agent_path`.
+
+This proves the isolated CLI hook and preview-file path, not that the Desktop
+app painted the card or that the screenshot's renderer error is gone. Canary
+token totals include normal Codex context and are not plugin overhead.
+
 ## 0.19.3 subagent reports — 2026-09-26
 
 The compatible signed runtime was rebuilt at sequence `1790386733` with SHA-256

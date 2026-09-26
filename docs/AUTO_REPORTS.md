@@ -360,8 +360,9 @@ budget ledger or policy decisions.
   Use the manual
   `report` or `meter` commands for richer, separately requested analysis.
 - Each start/Stop reads at most a 128 KiB header and an 8 MiB tail. At most 16
-  exact-turn setting observations are retained. SQLite's write wait is 0.4
-  seconds; the existing synchronous hook timeout remains 3 seconds. This bounds
+  exact-turn setting observations are retained. SQLite initialization and start
+  writes share a two-second wait deadline; the synchronous hook timeout remains
+  three seconds. This bounds
   work but cannot guarantee success on an overloaded disk or host.
 - Child reconciliation selects at most 32 descendants, reading at most a 128 KiB
   header and 1 MiB tail for each. The numeric store has a 0.25-second SQLite wait,

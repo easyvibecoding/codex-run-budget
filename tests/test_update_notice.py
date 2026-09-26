@@ -157,18 +157,30 @@ class UpdateNoticeTest(unittest.TestCase):
 
     def test_native_rpc_timeout_is_unknown_and_reaped(self):
         binary = self.root / "codex"
-        marker = self.root / "started"
-        binary.write_text(f"#!{sys.executable}\nimport os, time\n"
-                          f"open({str(marker)!r}, 'w').write(str(os.getpid()))\n"
-                          "time.sleep(10)\n")
+        binary.write_text(f"#!{sys.executable}\nimport time\ntime.sleep(10)\n")
         binary.chmod(0o700)
+        # Under load the child may be reaped before its first Python statement.
+        # The Popen PID, not a child-written marker, proves which process exited.
+        spawned = []
+        original_popen = subprocess.Popen
+
+        def record_process(*args, **kwargs):
+            process = original_popen(*args, **kwargs)
+            spawned.append(process)
+            return process
+
         started = time.monotonic()
-        with patch.dict(os.environ, {"PATH": str(self.root)}):
+        with (patch.dict(os.environ, {"PATH": str(self.root)}),
+              patch.object(notice.subprocess, "Popen", side_effect=record_process)):
             result = NATIVE_STATUS(NAME, self.root, self.root / "native")
         self.assertEqual(result, {"status": "unknown"})
-        self.assertLess(time.monotonic() - started, 2.5)
+        elapsed = time.monotonic() - started
+        self.assertGreaterEqual(elapsed, 1.0)
+        self.assertLess(elapsed, 2.5)
+        self.assertEqual(len(spawned), 1)
+        self.assertIsNotNone(spawned[0].returncode)
         with self.assertRaises(ProcessLookupError):
-            os.kill(int(marker.read_text()), 0)
+            os.kill(spawned[0].pid, 0)
 
     def test_public_manifest_fetch_keeps_tls_and_uses_system_ca_when_missing(self):
         with (patch.object(notice.ssl, "create_default_context") as create,

@@ -123,7 +123,11 @@ def configure(root: Path, *, enabled: bool, threshold_seconds: float = 0) -> dic
     return settings(root)
 
 
-def _connect(root: Path) -> sqlite3.Connection:
+def _remaining_wait_ms(deadline: float) -> int:
+    return max(0, int((deadline - time.monotonic()) * 1000))
+
+
+def _connect(root: Path, *, deadline: float | None = None) -> sqlite3.Connection:
     directory = _directory(root)
     path = directory / "timing.sqlite3"
     if path.is_symlink():
@@ -137,7 +141,10 @@ def _connect(root: Path) -> sqlite3.Connection:
             os.close(descriptor)
     if path.is_symlink() or not path.is_file():
         raise ValueError("timing store is not a regular file")
-    connection = sqlite3.connect(path, timeout=0.4, isolation_level=None)
+    # Several Tasks can start together. Share one bounded wait across schema
+    # initialization and the later write claim, within the 3-second hook limit.
+    timeout = 0.4 if deadline is None else max(0.0, deadline - time.monotonic())
+    connection = sqlite3.connect(path, timeout=timeout, isolation_level=None)
     connection.row_factory = sqlite3.Row
     try:
         connection.execute(
@@ -146,6 +153,10 @@ def _connect(root: Path) -> sqlite3.Connection:
             "started REAL NOT NULL, monotonic REAL NOT NULL, baseline TEXT NOT NULL, "
             "state TEXT NOT NULL, elapsed REAL, report TEXT)"
         )
+        if deadline is not None:
+            # CREATE may have waited on another writer. The following SELECT
+            # must receive only the remaining part of the same wait budget.
+            connection.execute(f"PRAGMA busy_timeout={_remaining_wait_ms(deadline)}")
     except Exception:
         connection.close()
         raise
@@ -979,6 +990,7 @@ def handle(
     event = payload.get("hook_event_name")
     if event not in EVENTS:
         return None
+    write_deadline = time.monotonic() + 2.0 if event in START_EVENTS else None
     try:
         if not settings(root)["enabled"]:
             return None
@@ -1009,7 +1021,7 @@ def handle(
                 # The common path does no transcript or locale work. Recheck
                 # under the write lock to deduplicate concurrent tool events.
                 if (root / "auto-reports/timing.sqlite3").exists():
-                    connection = _connect(root)
+                    connection = _connect(root, deadline=write_deadline)
                     if connection.execute("SELECT 1 FROM turns WHERE key=?", (key,)).fetchone():
                         return None
                 recovery = event not in ("UserPromptSubmit", "SubagentStart")
@@ -1041,7 +1053,9 @@ def handle(
                 observed["hook_model"] = None if recovery else _model(payload.get("model"))
                 observed["report_locale"] = resolve_locale(home=home)["locale"]
             if connection is None:
-                connection = _connect(root)
+                connection = _connect(root, deadline=write_deadline)
+            if write_deadline is not None:
+                connection.execute(f"PRAGMA busy_timeout={_remaining_wait_ms(write_deadline)}")
             connection.execute("BEGIN IMMEDIATE")
             if event == "SessionEnd":
                 connection.execute(
