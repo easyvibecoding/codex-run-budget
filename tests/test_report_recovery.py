@@ -172,8 +172,9 @@ class ReportRecoveryTest(unittest.TestCase):
                     "additionalContext": "existing budget context"}}
         with patch.object(Governor, "_handle_budget", return_value=decision):
             output = self.event()
-        self.assertTrue(output["hookSpecificOutput"]["additionalContext"].startswith(
-            "existing budget context\nBefore final"))
+        context = output["hookSpecificOutput"]["additionalContext"]
+        self.assertTrue(context.startswith("existing budget context\n"))
+        self.assertIn("Before final, run once:", context)
 
     def test_threshold_uses_recovered_time_and_storage_omits_payload(self):
         configure(self.data, enabled=True, threshold_seconds=5)

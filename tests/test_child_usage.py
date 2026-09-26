@@ -19,6 +19,7 @@ from codex_run_budget.child_usage import (  # noqa: E402
     capture,
     collect,
 )
+from codex_run_budget.util import stable_hash  # noqa: E402
 
 PARENT = "12345678-1234-1234-1234-123456789abc"
 CHILD_A = "aaaaaaaa-1234-1234-1234-123456789abc"
@@ -195,6 +196,65 @@ class ChildUsageTest(unittest.TestCase):
         self.assertEqual(result["usage"]["total"], 36)
         self.assertNotIn("U", {row["display_name"] for row in result["rows"]})
         self.assertEqual({row["parent_name"] for row in result["rows"]}, {"主代理", "A"})
+
+    def test_shared_root_session_captures_nested_child_under_its_direct_parent(self) -> None:
+        parent_path = self._page(
+            CHILD_A,
+            PARENT,
+            [metadata(CHILD_A, PARENT), request(CHILD_A, "parent-response", 10, 12)],
+            name="same name",
+        )
+        grandchild_path = self._page(
+            GRANDCHILD,
+            CHILD_A,
+            [metadata(GRANDCHILD, CHILD_A), request(GRANDCHILD, "nested-response", 11, 14)],
+            name="same name",
+        )
+        self._stop(CHILD_A, parent_path)
+        # Native child hooks keep the root session_id even for a nested child.
+        self._stop(GRANDCHILD, grandchild_path, parent=PARENT)
+        self._stop(GRANDCHILD, grandchild_path, parent=PARENT)
+        with sqlite3.connect(self.root / DB_NAME) as stored:
+            nested = stored.execute(
+                "SELECT parent_hash, total FROM requests WHERE child_hash=?",
+                (stable_hash(GRANDCHILD),),
+            ).fetchall()
+        self.assertEqual(nested, [(stable_hash(CHILD_A), 14)])
+
+        # Prove collection can use the stop receipt after the source vanishes.
+        grandchild_path.unlink()
+        root = collect(self.root, PARENT, WINDOW_START, WINDOW_START + 20, home=self.home)
+        nested = collect(self.root, CHILD_A, WINDOW_START, WINDOW_START + 20, home=self.home)
+        self.assertEqual(root["usage"]["total"], 26)
+        self.assertEqual(root["request_count"], 2)
+        self.assertEqual(root["agents_seen"], 2)
+        self.assertEqual(nested["usage"]["total"], 14)
+        self.assertEqual(nested["request_count"], 1)
+        self.assertEqual(nested["agents_seen"], 1)
+
+    def test_shared_root_session_rejects_wrong_nested_lineage_and_foreign_transcript(self) -> None:
+        self._page(CHILD_A, PARENT, [metadata(CHILD_A, PARENT)], name="parent")
+        wrong_lineage = self._page(
+            GRANDCHILD,
+            CHILD_A,
+            [metadata(GRANDCHILD, PARENT), request(GRANDCHILD, "wrong-parent", 10, 40)],
+            name="nested",
+        )
+        self._stop(GRANDCHILD, wrong_lineage, parent=PARENT)
+        foreign = Path(self.temp.name) / "foreign.jsonl"
+        foreign.write_text("".join(json.dumps(row) + "\n" for row in (
+            metadata(UNRELATED, PARENT), request(UNRELATED, "foreign-response", 11, 50)
+        )))
+        self._stop(GRANDCHILD, foreign, parent=PARENT)
+        with sqlite3.connect(self.root / DB_NAME) as stored:
+            count = stored.execute(
+                "SELECT count(*) FROM requests WHERE child_hash=?",
+                (stable_hash(GRANDCHILD),),
+            ).fetchone()[0]
+        self.assertEqual(count, 0)
+        result = collect(self.root, PARENT, WINDOW_START, WINDOW_START + 20, home=self.home)
+        self.assertIsNone(result["usage"])
+        self.assertEqual(result["status"], "unavailable")
 
     def test_duplicate_stop_and_cache_live_request_are_deduplicated(self) -> None:
         path = self._page(

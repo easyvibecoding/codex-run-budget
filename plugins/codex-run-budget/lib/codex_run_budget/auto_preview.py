@@ -22,11 +22,12 @@ from urllib.parse import quote
 from .auto_report import _delta, child_coverage, observed_total, settings, snapshot
 from .child_usage import collect
 from .report_i18n import ReportText, resolve_locale
-from .task_catalog import TaskCatalog, _uuid
+from .task_catalog import MAX_DEPTH, TaskCatalog, _uuid
 from .util import stable_hash
 
 
-def _checked_output_dir(output_dir: Path, session: str, home: Path, workspace) -> Path:
+def _checked_output_dir(output_dir: Path, session: str, home: Path, workspace,
+                        *, root_session: str | None = None) -> Path:
     """Accept only known desktop-readable Task roots, before collecting usage.
 
     Full filesystem access is not the desktop visualization read policy. The
@@ -34,12 +35,13 @@ def _checked_output_dir(output_dir: Path, session: str, home: Path, workspace) -
     Explicit extra sandbox roots are intentionally unsupported here: the preview
     tool cannot independently verify the desktop's effective policy for them.
     """
-    identifier = uuid.UUID(session)
-    if identifier.version != 7:
-        raise ValueError("inline preview requires a native UUIDv7 Task")
-    day = datetime.fromtimestamp(int(identifier.hex[:12], 16) / 1000, timezone.utc)
-    native = home / "visualizations" / day.strftime("%Y/%m/%d") / session
-    roots = [native]
+    roots = []
+    for candidate in {session, root_session or session}:
+        identifier = uuid.UUID(candidate)
+        if identifier.version != 7:
+            raise ValueError("inline preview requires a native UUIDv7 Task")
+        day = datetime.fromtimestamp(int(identifier.hex[:12], 16) / 1000, timezone.utc)
+        roots.append(home / "visualizations" / day.strftime("%Y/%m/%d") / candidate)
     if isinstance(workspace, str) and Path(workspace).is_absolute():
         roots.append(Path(workspace))
     if (not output_dir.is_absolute() or ".." in output_dir.parts
@@ -120,7 +122,9 @@ def render_card(receipt: dict) -> str:
         if contexts_limited else ""
     )
     escaped["agents"] = "".join(
-        '<div class="report-agent"><div>' + escape(row["display_name"])
+        '<div class="report-agent"><div>' + escape(
+            row["display_name"] + (" · @" + row["selector"] if row.get("selector") else "")
+        )
         + '<div class="text-small">'
         + escape(text("owner", name=row.get("parent_name") or text("unknown_parent")))
         + " · " + escape(text("terminal" if row.get("terminal_observed") else "pending_end"))
@@ -169,8 +173,20 @@ def preview(root: Path, session: str, turn: str, *, output_dir: Path, home=None)
     text = ReportText(locale["locale"])
     with TaskCatalog(home, unnamed_label=text("unnamed")) as catalog:
         task = catalog.get(session)
-        if task["role"] != "parent":
+        description = catalog.describe(task)
+        child = task["role"] == "subagent"
+        if child and (description["lineage_status"] != "observed"
+                      or not task["parent_id"] or not description["root_hash"]):
             return {"status": "subagent"}
+        root_task = task
+        if child:
+            for _ in range(MAX_DEPTH):
+                if not root_task["parent_id"]:
+                    break
+                root_task = catalog.get(root_task["parent_id"])
+            if (root_task["parent_id"] or root_task["role"] != "parent"
+                    or stable_hash(root_task["id"]) != description["root_hash"]):
+                return {"status": "subagent"}
         native = catalog.connection.execute(
             "SELECT rollout_path FROM threads WHERE id=?", (session,)
         ).fetchone()
@@ -182,11 +198,19 @@ def preview(root: Path, session: str, turn: str, *, output_dir: Path, home=None)
         native_home = Path(home or os.environ.get("CODEX_HOME") or Path.home() / ".codex")
         output_dir = _checked_output_dir(
             output_dir, session, native_home, workspace[0] if workspace else None,
+            root_session=root_task["id"],
         )
-        current = snapshot(native[0] if native else None, turn)
-    if current.get("task_hash") != stable_hash(session):
+        current = snapshot(
+            native[0] if native else None, turn,
+            allow_subagent=child,
+            root_hash=description["root_hash"] if child else None,
+        )
+    if (current.get("task_hash") != stable_hash(session)
+            or child and current.get("parent_hash") != stable_hash(task["parent_id"])):
         return {"status": "source_unavailable"}
     baseline = json.loads(row["baseline"])
+    if child and baseline.get("parent_hash") != stable_hash(task["parent_id"]):
+        return {"status": "source_unavailable"}
     usage, status = _delta(baseline, current)
     if (status == "counter_unavailable" and baseline.get("fresh_turn_start")
             and current.get("first_turn_only") and current.get("usage") is None):
@@ -197,7 +221,9 @@ def preview(root: Path, session: str, turn: str, *, output_dir: Path, home=None)
     from .turn_quota import observe
     quota = observe(root, key, home=home)
     receipt = {
-        "key": key, "task_name": task["display_name"], "usage": usage, "usage_status": status,
+        "key": key,
+        "task_name": task["display_name"] + (" · @" + description["selector"] if child else ""),
+        "usage": usage, "usage_status": status,
         "contexts": current["contexts"], "contexts_limited": current.get("contexts_limited", False),
         "task_usage": current.get("usage"), "elapsed_seconds": seconds,
         "counter_source": current.get("counter_source"),
@@ -206,7 +232,8 @@ def preview(root: Path, session: str, turn: str, *, output_dir: Path, home=None)
         **locale,
     }
     # Recheck immediately before writing, after potentially slow collection.
-    _checked_output_dir(output_dir, session, native_home, workspace[0] if workspace else None)
+    _checked_output_dir(output_dir, session, native_home, workspace[0] if workspace else None,
+                        root_session=root_task["id"])
     output_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     target = output_dir / ("codex-turn-" + key[:16] + "-" + str(time.time_ns()) + ".html")
     content = render_card(receipt)

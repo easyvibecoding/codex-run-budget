@@ -248,7 +248,7 @@ python3 "$PLUGIN_ROOT/scripts/run_budget.py" auto-report status
 Choose only the requested action above, not both. The default is on when settings
 are absent; an explicit off setting survives upgrades. Do not rewrite user
 preferences merely to apply the default. Enabling defaults to threshold 0, so every
-eligible main user turn can report. Do not add a five-minute gate unless the
+eligible parent or subagent turn can report. Do not add a five-minute gate unless the
 user requests one (`--threshold-seconds 300`). `auto-report list` reads recent
 receipt state, and `auto-report disable` preserves existing files. These
 commands are independent of budget enforcement; do not start a budget for them.
@@ -256,16 +256,19 @@ The setting is checked at each relevant hook, not cached per Task. This is a
 local plugin configuration, not a new native app Settings toggle. A conversational
 request to change it uses normal tokens; automatic generation needs no model call.
 
-UserPromptSubmit records a baseline and creates a pending Markdown target. From
-v0.13 it supplies a short `additionalContext` instruction to run one deterministic
+UserPromptSubmit records a parent baseline; SubagentStart records the child's
+own baseline, using `agent_id` and the active turn while preserving the shared
+`session_id` as the budget key. Each start creates a pending Markdown target and
+supplies a short `additionalContext` instruction to run one deterministic
 preview command before the normal final answer. Select a task-owned writable
 visualization directory, run that command once, and include its returned native
 `visualize` reference on its own line in the final answer, not as a Markdown link.
 Do not read the report body, invent numbers or regenerate layout with a model.
 The fixed template supplies the whole inline card. Skip without retries on failure.
 Omit it when the user disables reports
-or requires an incompatible exact format. The first eligible Stop fills the same
-Markdown path and generates HTML/JSON plus an informational `systemMessage`.
+or requires an incompatible exact format. The first eligible parent Stop or
+child SubagentStop fills its own Markdown path and generates HTML/JSON plus an
+informational `systemMessage`. A child Stop, if delivered, settles idempotently.
 The renderer makes no model/network requests; there are no report-driven new
 turns or full cross-Task scans. The normal preview tool round trip may add inference.
 The instruction, one tool call/result and normal-answer reference use tokens;
@@ -273,15 +276,17 @@ do not describe visible reporting as zero-token. Local CPU,
 disk and later model reading still cost resources. Do not add a model follow-up
 just to produce, decorate or announce these automatic receipts.
 
-Call them user-turn Stop snapshots, not proof the whole Task has completed.
-Missing starts and interrupted turns are excluded; duplicate Stops are not
-regenerated. Subagents do not generate their own inline card. Instead,
-SubagentStop deterministically saves available usage evidence; the parent's one
-preview rereads bounded exact descendants and merges deduplicated request records
-within this parent turn's observation window. No self-report prompt, polling,
-forced stop or report-driven continuation is needed. Missing/late records remain
-partial or unknown, never zero. The card separates parent and child subtotals.
-Other hooks may continue after the snapshot. Parent boundary-counter differences
+Call them own-turn snapshots, not proof the whole Task has completed.
+Missing starts and interrupted turns are excluded; duplicate settling hooks are
+not regenerated. A subagent can show its own pre-final card on its page. Its
+SubagentStop also deterministically saves available usage evidence; an ancestor's
+one preview rereads bounded exact descendants and merges deduplicated request
+records within that ancestor turn's observation window. No self-report prompt,
+polling, forced stop or report-driven continuation is needed. Missing/late
+records remain partial or unknown, never zero. Each card separates its own
+Task usage from its descendant subtotal; do not add the child card again to an
+ancestor subtotal. Native parent metadata must establish lineage.
+Other hooks may continue after the snapshot. Boundary-counter differences
 and child request records may lag final persistence; neither establishes actual
 quota shares or billing. Historical settings are observed,
 not inferred or used to allocate token totals. The bounded index keeps at most

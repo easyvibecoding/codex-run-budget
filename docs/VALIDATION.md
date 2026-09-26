@@ -5,6 +5,34 @@ This file preserves dated release checks. The current package version is in
 [changelog](../CHANGELOG.md) for later changes. Historical installed canaries
 do not establish the trust or active runtime of a current installation.
 
+## 0.19.3 subagent reports — 2026-09-26
+
+The compatible signed runtime was rebuilt at sequence `1790386733` with SHA-256
+`320d5b1c6e6628173aebf89b948a258a1bcb46f0509ece37593a5422732a633d`.
+Ruff, 447 unit tests, repository validation and the publisher release check
+passed. The package retained the prior 12 hook definitions.
+
+A fresh Codex home and separate Run Budget data directory were used for an
+isolated local-plugin installation. Native `hooks/list` first showed 12
+untrusted hooks; all 12 current hashes matched the previously reviewed hashes.
+Those hashes were copied only into the disposable canary configuration. Native
+read-back then showed all 12 hooks trusted and enabled. The maintainer's active
+plugin installation and trust settings were not changed by this canary.
+
+A real `codex exec` with one subagent exited 0. The isolated report directory
+contained one parent and one child Stop receipt, each with JSON, HTML, Markdown
+and a separate completion revision. The child JSON reported
+`subagent_turn_stop_boundary`; its short hashed selector matched the parent's
+subagent row. The JSON contained no raw Task UUID and no nonempty `agent_path`.
+The child Stop observed 15,653 own-turn tokens (`native_turn_counter` from
+`native_request`: 15,610 input, including 11,904 cached input, and 43 output).
+The parent Stop showed 47,080 own-turn tokens and a separate 15,653 descendant
+subtotal. These are observations from this canary, not plugin overhead or
+account billing.
+The CLI run did not create an inline visualization file. Preview rendering is
+covered by synthetic tests; this canary does not prove that the Desktop app
+painted the child card.
+
 ## 0.19.2 experimental paired-project review — 2026-09-24
 
 The 0.19.2 signed runtime was built and verified locally; its SHA-256 is

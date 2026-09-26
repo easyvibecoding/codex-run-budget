@@ -103,7 +103,7 @@ def main() -> int:
         if not isinstance(event, str) or not event:
             return reject("missing event identity")
     result = Governor.dispatch(payload)
-    if event == "Stop":
+    if event in ("Stop", "SubagentStop"):
         try:
             from .reconcile import schedule
             from .util import data_path

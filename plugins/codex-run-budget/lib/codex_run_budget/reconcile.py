@@ -79,10 +79,31 @@ def _read(path: Path) -> bytes:
 
 
 def _selectors(payload):
-    selected = {key: payload.get(key) for key in ("session_id", "turn_id", "transcript_path")}
+    child = payload.get("allow_subagent") is True or (
+        payload.get("hook_event_name") in ("Stop", "SubagentStop")
+        and bool(payload.get("agent_id"))
+    )
+    selected = {
+        "session_id": payload.get("agent_id", payload.get("session_id")) if child
+        else payload.get("session_id"),
+        "turn_id": payload.get("turn_id"),
+        "transcript_path": (
+            payload.get("agent_transcript_path")
+            if payload.get("hook_event_name") == "SubagentStop"
+            else payload.get("transcript_path")
+        ),
+    }
     if any(not isinstance(value, str) or not 0 < len(value) <= 4096
            for value in selected.values()):
         raise ValueError("missing reconciliation selector")
+    if child:
+        root_hash = payload.get("root_hash")
+        if root_hash is None and isinstance(payload.get("session_id"), str):
+            root_hash = stable_hash(payload["session_id"])
+        if (not isinstance(root_hash, str) or len(root_hash) != 64
+                or any(c not in "0123456789abcdef" for c in root_hash)):
+            raise ValueError("missing shared root proof")
+        selected.update(allow_subagent=True, root_hash=root_hash)
     return selected
 
 
@@ -98,7 +119,7 @@ def _runner(root):
 
 def schedule(payload: dict, root: Path, *, home=None) -> bool:
     """Launch at most once after a reported Stop; spawn errors cannot block work."""
-    if payload.get("hook_event_name") != "Stop":
+    if payload.get("hook_event_name") not in ("Stop", "SubagentStop"):
         return False
     connection = None
     key = None
@@ -208,11 +229,20 @@ def run(payload: dict, root: Path, *, home=None, delays=DELAYS) -> dict:
                 break
             time.sleep(delay)
             attempts += 1
-            current = snapshot(selected["transcript_path"], turn, completed_only=True)
+            current = snapshot(
+                selected["transcript_path"], turn, completed_only=True,
+                allow_subagent=selected.get("allow_subagent", False),
+                root_hash=selected.get("root_hash"),
+            )
             if not current.get("completion_observed"):
                 continue
             if current.get("task_hash") != row["session_hash"]:
                 raise ValueError("completion identity mismatch")
+            if selected.get("allow_subagent") and (
+                current.get("parent_hash") != baseline.get("parent_hash")
+                or (original.get("task") or {}).get("root_hash") != selected["root_hash"]
+            ):
+                raise ValueError("subagent lineage mismatch")
             usage, status = _delta(baseline, current)
             text = ReportText(original.get("locale", "zh-Hant"))
             children = collect(root, session, row["started"], until, home=home,
@@ -223,7 +253,10 @@ def run(payload: dict, root: Path, *, home=None, delays=DELAYS) -> dict:
                         and not current.get("contexts_limited"))
             state = "complete" if complete else "partial"
             revised = {
-                **original, "scope": "user_turn_completion_boundary", "revision": 2,
+                **original,
+                "scope": ("subagent_turn_completion_boundary" if selected.get("allow_subagent")
+                          else "user_turn_completion_boundary"),
+                "revision": 2,
                 "reconciliation_status": state,
                 "reconciled_at": datetime.now(timezone.utc).isoformat(),
                 "completion_observed": True, "completed_at": current.get("completed_at"),

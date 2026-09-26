@@ -1,28 +1,38 @@
-# Automatic user-turn receipts
+# Automatic Task and subagent turn receipts
 
 The user-switchable `auto-report` feature is deterministic Python, not a model task.
 From v0.10.1, the default is enabled when no settings file exists. An explicit
 `enabled: false` remains off after upgrades. Reading defaults never writes a
 settings file or overwrites a user's choice. `auto-report enable` selects threshold 0:
-every eligible main-user-turn Stop can generate one receipt, even immediately
-after its start. Timing remains useful metadata but is not a generation gate.
+every eligible parent Stop or subagent SubagentStop can generate one own-turn
+receipt, even immediately after its start. Timing remains useful metadata but
+is not a generation gate.
 
 ## Lifecycle and presentation
 
-`UserPromptSubmit` records a hashed session/turn key and a bounded token-counter
-baseline. From v0.13 it also creates a pending Markdown file and returns one short
-`additionalContext` instruction to run one deterministic pre-final preview tool
+For a parent Task, `UserPromptSubmit` records a hashed Task/turn key and a bounded
+token-counter baseline. For a subagent, `SubagentStart` uses that child's native
+`agent_id` and active `turn_id` for its own key, while the shared `session_id`
+remains the governance run key. The parent path checks its exact Task identity;
+the child path also verifies its native root and direct parent. Similar names
+or timestamps never establish ownership. The start creates a pending Markdown
+file and returns one short `additionalContext` instruction to run one
+deterministic pre-final preview tool
 and put its native `visualize` reference at the end of the normal final answer.
-The model is told not to read/analyze the report, invent numbers, or add another
-turn. The tool reads this exact Task and timing key, reconciles bounded descendant
+The child's instruction identifies its own Task and tells the child to skip an
+inherited parent preview instruction. The model is told
+not to read/analyze the report, invent numbers, or add another turn. The tool
+reads this exact Task and timing key, reconciles bounded descendant
 usage records in this turn's observation window, and renders a bundled HTML
 fragment into a task-owned writable visualization directory selected by the caller.
-Prefer the Task's visualization root explicitly supplied in writable roots;
-otherwise use `work/` inside its native working directory. The preview validates
+Prefer a visualization root explicitly supplied in writable roots; otherwise
+use `work/` inside the Task's native working directory. The preview validates
 that destination against the native Task's working directory or its own
-`CODEX_HOME/visualizations/YYYY/MM/DD/<Task>/` root (UUIDv7 UTC date). Write access,
+`CODEX_HOME/visualizations/YYYY/MM/DD/<Task>/` root (UUIDv7 UTC date). After
+verified native lineage, a child may also write under its root Task's native
+visualization root when that is the supplied writable directory. Write access,
 including full access, does not itself authorize the desktop to read a file.
-Private state directories, other Tasks' visualization roots, traversal and
+Private state directories, unrelated Tasks' visualization roots, traversal and
 symlinks are rejected before quota/child collection; no invalid reference is
 returned and no retry or fallback write is attempted. Extra sandbox roots are
 not accepted because this tool cannot verify the desktop's effective read policy.
@@ -54,7 +64,8 @@ context instruction. Existing rows (including terminal states) do not trigger
 another transcript read, locale lookup, or instruction. Reporting never changes
 tool permission, input or output, or requests a Stop continuation.
 
-Recovery requires the exact parent Task and active turn's native `task_started`
+Parent tool-hook recovery requires the exact parent Task and active turn's
+native `task_started`
 record, with a valid timezone-aware timestamp, within the existing 8 MiB scan.
 The baseline is reconstructed at that record, not from the first tool's already
 spent tokens. Earlier counters or verified fresh-first-turn evidence may establish
@@ -62,7 +73,9 @@ the baseline; an explicit native turn counter can still supply usage without it.
 Missing counters stay unknown. Timing and child coverage use the recovered native
 start, and the private Stop receipt records `start_event` and `start_recovered`.
 Malformed, foreign, completed, future, before-current-boot or out-of-scan starts
-are not recovered. The report switch is rechecked and subagents are excluded.
+are not recovered. The report switch is rechecked. Subagent starts use their
+own `SubagentStart` hook; an absent child start is not inferred from an unrelated
+parent or tool event.
 
 This uses the documented
 [PreToolUse](https://learn.chatgpt.com/docs/hooks#pretooluse) and
@@ -72,10 +85,12 @@ not establish why any particular scheduler omitted a hook. A turn with neither
 a prompt start nor an eligible tool event cannot be guaranteed a card. Missing
 or disabled hooks, unavailable runtime and model noncompliance remain host limits.
 
-`Stop` claims that key before generating private Markdown, HTML and
-JSON files under the budget data directory's `auto-reports/`. Files are mode
+The parent's `Stop` or child's `SubagentStop` claims its own key before
+generating private Markdown, HTML and JSON files under the budget data
+directory's `auto-reports/`. Files are mode
 0600 and use opaque names; no prompt, transcript text or raw transcript path is
-persisted. The Stop output contains only an informational `systemMessage`.
+persisted. A child's `Stop`, when delivered, can settle the same child key
+idempotently. The settling hook may return only an informational `systemMessage`.
 Existing budget decisions, context and enforcement fields are preserved.
 HTML and JSON are written exclusively before atomically replacing only this
 turn's exact pending Markdown. Stop publication does not overwrite completed or
@@ -111,19 +126,21 @@ receipt inside the pre-final card or modify the App to force one.
 Markdown is the native-file-viewer entry
 point; HTML is an offline static alternative, not a promised automatic preview.
 
-A Stop is a user-turn boundary, not semantic completion of a long-running Task.
+A Stop or SubagentStop is a turn boundary, not semantic completion of a
+long-running Task.
 Another hook can continue the turn after the first receipt. `stop_hook_active`
 is recorded, not used to generate another receipt. Interrupted/session-ended
-turns, denied user prompts, subagent hooks, and Stops without a recorded start
+turns, denied user prompts, and settling hooks without a recorded start
 do not generate full turn reports. Child numeric capture is separate. Duplicate
 deliveries cannot overwrite report files. A crash
 after claiming leaves an incomplete attempt without automatic retries; partial
 files are retained, and only fully written outputs are announced.
 
-## Completion revision (v0.14)
+## Completion revision (parent v0.14; subagent v0.19.3)
 
-After the normal Governor dispatch and an eligible reported Stop, the hook adapter
-may launch one detached report-only child. The child never enters Governor,
+After the normal Governor dispatch and an eligible reported parent or child
+settlement, the hook adapter may launch one detached report-only child. The
+worker never enters Governor,
 changes a budget ledger/admission decision, invokes a model, refreshes quota or
 requests a continuation. It performs at most eight bounded snapshot reads with
 a 25-second process deadline, checks the report switch again before publishing,
@@ -137,11 +154,12 @@ truncates evidence at that completion record before interpreting counters and
 model/effort observations. Subsequent turns cannot supply usage or settings.
 The native format is observational and can change; unavailable completion,
 missing counters, reset counters and bounded evidence remain provisional/partial.
-This is completion of the selected user turn, not proof the whole Task is done.
+This is completion of the selected turn, not proof the whole Task is done.
 
-The completion revision keeps the original start-to-Stop elapsed time and child
-window; it may include child numeric records persisted late for that same window.
-Quota remains the original timestamped pre-final account observation. The Stop
+The completion revision keeps the original start-to-settlement elapsed time
+and child window; it may include child numeric records persisted late for that
+same window.
+Quota remains the original timestamped pre-final account observation. The original
 JSON/HTML/Markdown remain immutable. Separate `.reconciled.json`, `.reconciled.html`
 and `.reconciled.md` files carry revision 2, check status and update time. No
 original report path is overwritten; edits and symlinks remain untouched. The
@@ -159,7 +177,7 @@ and are not persisted in job state or command-line arguments.
 
 ### Report language
 
-The inline card, pending page, Stop Markdown/HTML and report messages share
+The inline card, pending page, Stop/SubagentStop Markdown/HTML and report messages share
 bundled language catalogs. They prefer Codex's observed `[desktop].localeOverride`
 in `CODEX_HOME/config.toml`, not the language of prompts or model output. No
 Codex preference is changed. Every new output resolves language again; already
@@ -197,13 +215,29 @@ seconds. Failures use English or an available host-language fallback; they never
 continue the model or weaken budget enforcement. Catalogs are shipped inside
 the pinned runtime and need no network or additional model requests.
 
-### Deterministic child receipts and pre-final reconciliation
+### Subagent's own receipt and parent reconciliation
 
-`SubagentStop` now saves available allowlisted usage evidence to a separate private
-child store, even without an active governed budget. It never adds a child footer,
-asks the child to self-report, returns a continuation decision, or starts a model
-request. The same report switch controls this capture. The existing budget
-governor still handles its own shared-budget accounting independently.
+The existing `SubagentStart` hook, when trusted, can establish the subagent's own
+timing and preview context. `SubagentStop` settles that child's own private
+receipt when its start and identity are verified. It also saves available
+allowlisted usage evidence to a separate private child store, even without an
+active governed budget. The child does not have to self-report, and the hooks
+do not start a model request or request a continuation. The same report switch
+controls both paths. The existing budget governor handles shared-budget
+accounting independently; a child's report identity is not another budget.
+
+`SubagentStart` receives the parent-shared `session_id`, the child's `agent_id`
+and active `turn_id`, and the child's transcript path. The report uses the
+child's native identity for its own card and validates its root and direct
+parent against catalog and transcript metadata. `SubagentStop` uses the child
+transcript supplied as `agent_transcript_path`; a child's `Stop`, if the host
+delivers one, cannot publish a second receipt. The inline card is the child's
+pre-final snapshot. The later child receipt and bounded completion revision
+remain separate, immutable observations. Missing start, mismatched lineage,
+absent counters, and scan limits cannot be silently filled from the parent.
+Copied parent metadata or history in a child transcript is not the child's own
+usage; the child report counts only evidence after its own start. If no native
+child counter is established, usage stays unknown.
 
 The parent's pre-final preview and Stop receipt select only descendants linked
 by native parent metadata. They combine saved child evidence with a bounded fresh
@@ -211,6 +245,10 @@ read, select native `token_usage_record` timestamps in `[parent start, capture)`
 and deduplicate response identities. Explicit child thread/turn attribution is
 required: a forked child transcript can also contain copied parent metadata and
 history, so child lifetime counters and inherited records are not added.
+The same short hashed `@selector` appears beside a child on its own card and
+in an ancestor's child row, so the two views can be matched without persisting
+a raw Task ID. The selector is a display aid; native parent metadata still
+establishes ownership.
 
 This is observation-window attribution, not proof the parent caused every request
 in that interval. Reused children contribute only records in this window. Names
@@ -222,7 +260,9 @@ Active cross-window children, reused children and unknown or conflicting lifecyc
 evidence remain in scope. File modification time is not treated as a Stop event.
 Bounded selection or scan limits still prevent a complete-coverage claim.
 
-The official [SubagentStop contract](https://learn.chatgpt.com/docs/hooks#subagentstop)
+The official [SubagentStart](https://learn.chatgpt.com/docs/hooks#subagentstart)
+context reaches the child, while the
+[SubagentStop contract](https://learn.chatgpt.com/docs/hooks#subagentstop)
 permits a missing transcript path and a continuation decision. Capture can precede
 final persistence; the one pre-final reread reconciles records that arrived later.
 It cannot force native counters to flush or guarantee every child's final tokens.
@@ -232,7 +272,7 @@ no agent interruption or model retry turn is added. A completed child does not n
 
 ### Current-turn settings and layout
 
-The inline card keeps Task totals and the current turn's token increase visible.
+Each inline card keeps its own Task total and current turn's token increase visible.
 Observed parent/child coverage, account quota, current-turn settings and token
 details are four independent native `details` disclosures, closed by default.
 Their summaries reuse the report locale; opening and closing require no scripts,
@@ -240,14 +280,16 @@ network requests or model calls. When exactly one native main-Codex 7-day window
 is present, the closed quota summary also shows its remaining percentage and
 previous-card movement/status. Other quota buckets are never substituted, and
 resets or unavailable readings keep their existing labels. No weekly window is
-inferred from the subscription plan. Stop Markdown/HTML remains expanded for offline
+inferred from the subscription plan. Stop/SubagentStop Markdown/HTML remains expanded for offline
 reading. Existing immutable cards retain their original layout.
 
-The bordered inline card pairs the main agent's native Task total with this
-turn's added tokens. Both primary values exclude children; the separately
-labeled observed turn subtotal adds only saved child request evidence in the
-current window. Elapsed time is secondary header metadata. Nine locales share
-the same responsive layout, with stacked metrics on narrow screens.
+The bordered inline card pairs the selected Task's native total with this
+turn's added tokens. Both primary values exclude descendants; the separately
+labeled observed turn subtotal adds only descendant request evidence in the
+current window. A subagent's own card and an ancestor's descendant subtotal
+can show overlapping requests; do not add them together. Elapsed time is
+secondary header metadata. Nine locales share the same responsive layout,
+with stacked metrics on narrow screens.
 
 Model and reasoning effort are displayed as chronological pairs from this turn,
 not independent lists or the Task's initial settings. Adjacent identical pairs
@@ -345,11 +387,14 @@ read and local processing, not another model tool turn. No quota call happens
 in start/Stop hooks. Stop includes the saved pre-final quota snapshot with its
 own capture time; it is not a fresh Stop-time account reading.
 
-The card displays `100 - usedPercent`, clamped to 0–100, and the difference in
-**remaining percentage points** from this Task's immediately preceding turn's
+The parent or subagent card displays `100 - usedPercent`, clamped to 0–100, and
+the difference in **remaining percentage points** from this same Task's
+immediately preceding turn's
 card. Negative differences mean the displayed allowance fell; they are not the
-percentage of this Task's own usage. Account-wide usage includes concurrent
-Tasks, other devices/features and reporting delay. A displayed zero difference
+percentage of this Task's own usage. Account-wide usage includes the parent,
+subagents, concurrent Tasks, other devices/features and reporting delay. A child
+card does not allocate any part of this quota to that child. A displayed zero
+difference
 means unchanged at the source's reported precision, not free work, a precise
 less-than-one-percent bound, or a token-to-percent conversion. Supplied fractional
 percentages are preserved; no fractional spend is inferred from token counts.
@@ -402,9 +447,10 @@ not start a budget, change native subscriptions or alter models. An optional
 it is unnecessary for saving model-generation cost and is not the default.
 
 The switch is checked at each relevant hook, so turning it off also suppresses
-a pending Stop receipt. Turning it on does not backfill completed turns. An active
-turn can recover its native start at its next eligible tool event; future user
-turns otherwise establish their own baselines. Recovery never changes the switch.
+a pending parent or subagent receipt. Turning it on does not backfill completed
+turns. An active parent turn can recover its native start at its next eligible
+tool event; future turns otherwise establish their own baselines. Recovery never
+changes the switch.
 Users may ask Codex to turn automatic per-turn reports on/off; the skill runs
 these same commands and reads back `status`. Such a conversational configuration
 request uses a normal model turn; subsequent report generation itself does not.
@@ -412,5 +458,9 @@ This is a local configuration switch, not an added native app Settings widget.
 Official plugin guidance routes
 [Codex-local preferences to config files](https://developers.openai.com/plugins/guides/submit-claude-plugin#replace-claude-userconfig).
 
-After an upgrade, review/trust changed hooks and use a new Task to pick up the
-new pinned runtime. Existing Tasks retain their previously loaded hook code.
+Run Budget already defines `SubagentStart` and `SubagentStop` hooks. A compatible
+publisher-signed runtime update that leaves their hook definitions unchanged
+preserves existing native trust; it does not grant a new hook permission.
+New Tasks pick up the new pinned runtime, while existing Tasks retain their
+previously loaded code. If a package update changes a hook definition, review
+and trust that change through `/hooks` before starting a new Task.

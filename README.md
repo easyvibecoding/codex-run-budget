@@ -42,14 +42,14 @@ run-budget:off
 
 `resume tokens=` sets a new absolute ceiling above observed spend. A control line quoted later in a message does not activate a command. [Control syntax, policy order, and state](docs/DESIGN.md) · [Run inspection](#inspect-a-budget-run).
 
-Automatic usage cards are enabled by default even when no budget is active. [Turn receipts](docs/AUTO_REPORTS.md).
+Automatic usage cards are enabled by default even when no budget is active. An eligible subagent can show its own card on its page; the parent card keeps a separate observed descendant subtotal. A matching hashed `@selector` identifies the child in both views. [Turn receipts](docs/AUTO_REPORTS.md).
 
 ## Capabilities
 
 | Area | What it does | Boundary |
 | --- | --- | --- |
 | Shared run governance | Uses the parent `session_id` and one SQLite ledger for parent and descendant hooks; applies token, tool, agent, in-flight, repeat, and output guards with STEER then HALT. | Enforces only at supported hook boundaries. |
-| Automatic turn receipts | Shows an optional pre-final inline card and saves local Stop receipts; a bounded completion check can publish a later revision. | The inline card remains a snapshot; missing evidence stays partial. |
+| Automatic turn receipts | Shows optional pre-final cards for the parent and each eligible subagent on their own pages, saves local Stop/SubagentStop receipts, and may publish a bounded completion revision. | Each card is a snapshot; missing counters or lineage stay partial or unknown. |
 | Scoped Task reports | Selects one Task, its agent tree, or explicit time windows; shows observed tokens, historical settings, cache-read share, and setting-change signals. | A cross-Task window requires explicit scope; reports do not start a budget. |
 | Native meter | Reads account quota and saved snapshots, local Task configuration history, dated rates, and Standard/Fast credit scenarios. | Account percentages and estimated credits are not Task charges or actual billing. |
 | Diagnostics | Audits exact local transcripts, surveys a bounded recent cohort, and captures explicit workflow observations with cursors. | Observation does not imply a live process, completed work, or recurring monitoring. |
@@ -82,7 +82,7 @@ python3 plugins/codex-run-budget/scripts/run_budget.py auto-report disable
 python3 plugins/codex-run-budget/scripts/run_budget.py auto-report enable
 ```
 
-An explicit disabled setting survives upgrades. To include only turns longer than 300 seconds, use `auto-report enable --threshold-seconds 300`. The default threshold is zero. Stop may precede the final persisted usage record; a report-only worker can check for that exact turn's completion and save a separate revision. Original Stop files and pre-final cards remain unchanged. [Receipt lifecycle](docs/AUTO_REPORTS.md).
+An explicit disabled setting survives upgrades. To include only turns longer than 300 seconds, use `auto-report enable --threshold-seconds 300`. The default threshold is zero. `SubagentStart` identifies a child's own Task and turn for its card; `SubagentStop` settles its own receipt and supplies bounded evidence for ancestor cards. Stop may precede the final persisted usage record; a report-only worker can check that exact turn's completion and save a separate revision. Original receipts and pre-final cards remain unchanged. Run Budget's existing `SubagentStart` hook definition is unchanged by a compatible signed runtime update, so existing native trust remains valid; a new Task is needed to load that runtime. [Receipt lifecycle](docs/AUTO_REPORTS.md).
 
 ### Report selected Tasks and agents
 
@@ -95,7 +95,7 @@ python3 plugins/codex-run-budget/scripts/run_budget.py report tree --thread TASK
 python3 plugins/codex-run-budget/scripts/run_budget.py report window --all-tasks --windows 5h
 ```
 
-Bare `report` is a no-scan menu. `task` and `window` default to the current Task; `agents` is a metadata view, while `tree` explicitly includes descendant usage. Cross-Task analysis requires `--all-tasks` and an explicit window. Reports save private Markdown, HTML, or JSON; short CLI output links to the file unless `--full` is requested. In Codex, use the bundled `usage-task`, `usage-agents`, and `usage-window` skills. The 0.18.0 report adds per-window cache-read share, request counts, and observed model, reasoning-effort, or service-tier changes without inferring cache-miss causes. [Scope and evidence](docs/REPORTS.md).
+Bare `report` is a no-scan menu. `task` and `window` default to the current Task; `report task` selects only that Task, including when it is a subagent. `agents` is a metadata view, while `tree` explicitly includes descendant usage for a selected parent. A subagent's own total can already be present in the parent's tree subtotal; do not add them together. Cross-Task analysis requires `--all-tasks` and an explicit window. Reports save private Markdown, HTML, or JSON; short CLI output links to the file unless `--full` is requested. In Codex, use the bundled `usage-task`, `usage-agents`, and `usage-window` skills. The 0.18.0 report adds per-window cache-read share, request counts, and observed model, reasoning-effort, or service-tier changes without inferring cache-miss causes. [Scope and evidence](docs/REPORTS.md).
 
 ### Read native account quota
 

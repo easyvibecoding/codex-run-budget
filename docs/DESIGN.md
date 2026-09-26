@@ -43,6 +43,12 @@ parent session id, so parent and descendant agents use one ledger row. Each
 transcript is a lineage source identified by a SHA-256 hash; its cumulative
 token counter is converted to a delta exactly once.
 
+Reporting identifies each Task separately: the parent Task uses its own native
+thread identity, and a subagent uses its native agent/thread identity and turn.
+That report identity does not create another budget or change the shared
+`session_id` ledger key. Native parent metadata, rather than similar names or
+timing, links a subagent's observations to the parent's report.
+
 ## Operator control lines
 
 Put a control line at the beginning of the user's Task message. The parser

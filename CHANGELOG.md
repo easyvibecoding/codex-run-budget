@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.19.3 - 2026-09-26
+
+- Give verified subagents their own pre-final usage cards and private SubagentStop receipts, keyed by the child's native Task and turn while preserving the parent-shared budget run key.
+- Keep bounded child evidence in ancestor turn cards and Task-tree reports without double-counting a child's own report; missing counters or lineage remain partial or unknown.
+- Extend bounded completion reconciliation to child receipts. Reporting does not change Governor decisions, start another model turn, or allocate account quota to a child.
+- Use the existing trusted SubagentStart/SubagentStop hook definitions with a compatible signed runtime; new Tasks load the updated runtime, while pinned Tasks retain their prior behavior.
+
 ## 0.19.2
 
 - Mark cross-project Task coordination experimental, with a global switch and a switch for each pair.

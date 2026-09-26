@@ -42,14 +42,14 @@ run-budget:off
 
 `resume tokens=` 設定新的絕對上限，且必須高於已觀測用量。訊息後段引用的控制行不會啟動指令。[控制語法、政策順序與狀態](docs/DESIGN.md) · [檢查預算執行紀錄](#檢查預算執行紀錄)。
 
-即使沒有啟動預算，自動用量卡預設仍會顯示。[回合紀錄](docs/AUTO_REPORTS.md)。
+即使沒有啟動預算，自動用量卡預設仍會顯示。符合條件的子代理可在自己的頁面顯示用量卡；父 Task 的卡片則另列已觀測的後代用量小計。兩處以相同的雜湊 `@selector` 對應該子代理。[回合紀錄](docs/AUTO_REPORTS.md)。
 
 ## 功能
 
 | 範圍 | 功能 | 邊界 |
 | --- | --- | --- |
 | 共用執行預算 | 以父 Task 的 `session_id` 與同一份 SQLite 帳本處理父 Task 及子代理的 hook；對 token、工具、代理、執行中作業、重複呼叫與輸出套用護欄，先 STEER 再 HALT。 | 僅在受支援的 hook 邊界執行。 |
-| 自動回合紀錄 | 可在結束前顯示行內用量卡，並在本機儲存 Stop 紀錄；有限次的完成檢查可另存後續修訂。 | 行內卡是當下快照；缺少的證據仍標為部分資料。 |
+| 自動回合紀錄 | 父 Task 與符合條件的子代理可各自在自己的頁面顯示結束前用量卡，並儲存 Stop／SubagentStop 紀錄；有限次的完成檢查可另存後續修訂。 | 每張卡都是當下快照；計數或譜系證據不足時仍標為部分資料或未知。 |
 | 指定範圍的 Task 報告 | 選擇單一 Task、其代理樹或明確指定的時間範圍；顯示已觀測 token、歷史設定、快取讀取占比與設定變動訊號。 | 跨 Task 的時間範圍須明確指定；報告不會啟動預算。 |
 | 原生額度儀表 | 讀取帳號額度與已儲存快照、本機 Task 設定歷史、附日期的費率，以及 Standard/Fast 額度情境。 | 帳號百分比與估算額度不是 Task 費用或實際帳單。 |
 | 診斷 | 稽核指定的本機逐字紀錄、調查有界限的近期 Task 群，並用游標記錄明確要求的工作流程觀測。 | 觀測不代表程序仍在執行、工作已完成或持續監控。 |
@@ -82,7 +82,7 @@ python3 plugins/codex-run-budget/scripts/run_budget.py auto-report disable
 python3 plugins/codex-run-budget/scripts/run_budget.py auto-report enable
 ```
 
-明確設定為停用會在升級後保留。若只想納入超過 300 秒的回合，使用 `auto-report enable --threshold-seconds 300`；預設門檻為零。Stop 可能早於最終用量紀錄寫入；僅處理報告的 worker 可檢查該回合是否完成，並另存一份修訂。原本的 Stop 檔案與結束前卡片保持不變。[紀錄生命週期](docs/AUTO_REPORTS.md)。
+明確設定為停用會在升級後保留。若只想納入超過 300 秒的回合，使用 `auto-report enable --threshold-seconds 300`；預設門檻為零。`SubagentStart` 以子代理自己的 Task 與回合識別建立卡片；`SubagentStop` 結算其紀錄，並提供祖先卡片使用的有限範圍證據。Stop 可能早於最終用量紀錄寫入；僅處理報告的 worker 可檢查該回合是否完成，並另存修訂。原本的紀錄與結束前卡片保持不變。Run Budget 既有的 `SubagentStart` hook 定義在相容的簽章執行環境更新中不變，因此既有原生信任仍有效；新 Task 才會載入更新後的執行環境。[紀錄生命週期](docs/AUTO_REPORTS.md)。
 
 ### 報告指定 Task 與代理
 
@@ -95,7 +95,7 @@ python3 plugins/codex-run-budget/scripts/run_budget.py report tree --thread TASK
 python3 plugins/codex-run-budget/scripts/run_budget.py report window --all-tasks --windows 5h
 ```
 
-單獨執行 `report` 只會顯示選單，不會掃描。`task` 與 `window` 預設指向目前 Task；`agents` 是中繼資料檢視，`tree` 才明確納入後代代理用量。跨 Task 分析須指定 `--all-tasks` 與時間範圍。報告可儲存私有的 Markdown、HTML 或 JSON；除非指定 `--full`，簡短 CLI 輸出只會連到檔案。在 Codex 中，也可使用內建的 `usage-task`、`usage-agents`、`usage-window` skill。0.18.0 版報告新增各時間範圍的快取讀取占比、請求數，以及已觀測到的模型、推理強度或服務層級變動，不推斷快取未命中的原因。[範圍與證據](docs/REPORTS.md)。
+單獨執行 `report` 只會顯示選單，不會掃描。`task` 與 `window` 預設指向目前 Task；`report task` 只選該 Task，即使它是子代理。`agents` 是中繼資料檢視；選定父 Task 的 `tree` 才明確納入後代代理用量。子代理自己的總量可能已包含在父 Task 的樹狀小計，請勿再次相加。跨 Task 分析須指定 `--all-tasks` 與時間範圍。報告可儲存私有的 Markdown、HTML 或 JSON；除非指定 `--full`，簡短 CLI 輸出只會連到檔案。在 Codex 中，也可使用內建的 `usage-task`、`usage-agents`、`usage-window` skill。0.18.0 版報告新增各時間範圍的快取讀取占比、請求數，以及已觀測到的模型、推理強度或服務層級變動，不推斷快取未命中的原因。[範圍與證據](docs/REPORTS.md)。
 
 ### 讀取原生帳號額度
 

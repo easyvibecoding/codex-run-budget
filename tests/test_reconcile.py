@@ -495,6 +495,59 @@ class ReconcileTest(unittest.TestCase):
         finally:
             configure(self.data, enabled=False)
 
+    def test_subagent_stop_reconciles_own_turn_with_shared_root_identity(self):
+        child = "11111111-2222-4333-8444-555555555556"
+        child_turn = "example-child-turn"
+        source = {"subagent": {"thread_spawn": {"parent_thread_id": TASK}}}
+        child_path = self.home / "synthetic-child.jsonl"
+        copied_parent = fixtures.native_counter(TASK, "example-root-turn", 1000)
+        child_path.write_text("".join(json.dumps(item) + "\n" for item in (
+            {"type": "session_meta", "payload": {"id": child, "source": source}},
+            {"type": "session_meta", "payload": {"id": TASK, "source": "vscode"}},
+            copied_parent,
+            fixtures.counter(1000),
+            self.native_event("task_started", turn=child_turn, thread_id=child),
+            {"type": "turn_context", "payload": {"turn_id": child_turn,
+                                                "model": "example-child-model"}},
+            fixtures.counter(100),
+        )))
+        with sqlite3.connect(self.home / "state_5.sqlite") as db:
+            db.execute("INSERT INTO threads VALUES (?,?,?,NULL,?,?,?,?)",
+                       (child, "Synthetic child", "EXAMPLE PRIVATE TITLE", "worker",
+                        "/root/child", json.dumps(source), str(child_path)))
+        event = {"hook_event_name": "SubagentStart", "session_id": TASK, "agent_id": child,
+                 "turn_id": child_turn, "transcript_path": str(child_path)}
+        self.assertIn("hookSpecificOutput", handle(event, self.data, home=self.home,
+                                                   wall=self.now, monotonic=5000))
+        with child_path.open("a") as output:
+            output.write(json.dumps(fixtures.counter(300)) + "\n")
+        stop = {**event, "hook_event_name": "SubagentStop", "transcript_path": str(self.path),
+                "agent_transcript_path": str(child_path)}
+        self.assertIn("systemMessage", handle(stop, self.data, home=self.home,
+                                              wall=self.now + 1, monotonic=5001))
+        child_key = stable_hash([child, child_turn])
+        original = (self.directory / (child_key + ".json")).read_bytes()
+        self.assertEqual(json.loads(original)["usage"]["total"], 200)
+        with patch("codex_run_budget.reconcile.subprocess.Popen", return_value=Mock()) as spawn:
+            self.assertTrue(schedule(stop, self.data, home=self.home))
+            spawn.assert_called_once()
+        late = fixtures.native_counter(child, child_turn, 450, request=150, turn_total=350)
+        late["payload"].update(session_id=TASK, root_turn_id="example-root-turn")
+        with child_path.open("a") as output:
+            output.write(json.dumps(late) + "\n")
+            output.write(json.dumps(self.native_event(
+                "task_complete", turn=child_turn, stamp=self.now + 2,
+                thread_id=child, session_id=TASK, root_turn_id="example-root-turn"
+            )) + "\n")
+        result = run(stop, self.data, home=self.home, delays=(0,))
+        self.assertEqual(result, {"status": "complete", "attempts": 1})
+        revised = json.loads((self.directory / (child_key + ".reconciled.json")).read_text())
+        self.assertEqual(revised["usage"]["total"], 350)
+        self.assertEqual(revised["scope"], "subagent_turn_completion_boundary")
+        self.assertEqual(revised["task"]["parent_hash"], stable_hash(TASK))
+        self.assertNotIn("agent_path", revised["task"])
+        self.assertEqual((self.directory / (child_key + ".json")).read_bytes(), original)
+
 
 if __name__ == "__main__":
     unittest.main()

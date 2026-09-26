@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import sys
 import tempfile
 import unittest
@@ -497,12 +498,151 @@ class AutoReportTest(unittest.TestCase):
         self.assertNotIn("decision", result)
         self.assertNotIn("continue", result)
 
-    def test_subagent_start_never_injects_footer(self):
+    def test_unproven_subagent_cannot_start_report(self):
         self.assertIsNone(self.event("UserPromptSubmit", agent_id="child"))
         self.meta["payload"]["source"] = {"subagent": {"thread_spawn": {}}}
         self.page.write_text(json.dumps(self.meta) + "\n")
         self.assertIsNone(self.event("UserPromptSubmit"))
         self.assertFalse(self.data.exists())
+
+    def _native_child_fixture(self):
+        root_id = "00000000-0000-7000-8000-000000000001"
+        child_id = "00000000-0000-7000-8000-000000000002"
+        source = {"subagent": {"thread_spawn": {"parent_thread_id": root_id}}}
+        root_page = self.root / "synthetic-root.jsonl"
+        root_page.write_text(json.dumps({"type": "session_meta", "payload": {
+            "id": root_id
+        }}) + "\n" + json.dumps(counter(1000)) + "\n")
+        child_page = self.root / "synthetic-child.jsonl"
+        child_page.write_text(json.dumps({"type": "session_meta", "payload": {
+            "id": child_id, "source": source
+        }}) + "\n" + json.dumps(counter(100)) + "\n")
+        with sqlite3.connect(self.root / "state_5.sqlite") as catalog:
+            catalog.execute(
+                "CREATE TABLE threads (id TEXT PRIMARY KEY,name TEXT,agent_nickname TEXT,"
+                "agent_role TEXT,agent_path TEXT,source TEXT,rollout_path TEXT)"
+            )
+            catalog.executemany(
+                "INSERT INTO threads VALUES(?,?,?,?,?,?,?)",
+                (
+                    (root_id, "synthetic root", None, None, None, '"vscode"', str(root_page)),
+                    (child_id, "same name", "worker", "worker", "/root/worker",
+                     json.dumps(source), str(child_page)),
+                ),
+            )
+        payload = {
+            "session_id": root_id,
+            "agent_id": child_id,
+            "turn_id": "synthetic-child-turn",
+            "transcript_path": str(child_page),
+        }
+        return root_id, child_id, root_page, child_page, payload
+
+    def test_native_subagent_start_and_stop_publish_own_receipt_once(self):
+        root_id, child_id, root_page, child_page, payload = self._native_child_fixture()
+        start = handle({**payload, "hook_event_name": "SubagentStart"}, self.data,
+                       wall=1000000, monotonic=5000, home=self.root)
+        self.assertEqual(set(start), {"hookSpecificOutput"})
+        self.assertIn("--preview " + child_id, start["hookSpecificOutput"]["additionalContext"])
+        self.assertEqual(len(recent(self.data)), 1)
+        native = native_counter(child_id, payload["turn_id"], 300,
+                                request=200, turn_total=200)
+        native["payload"].update(session_id=root_id, root_turn_id="synthetic-root-turn")
+        with child_page.open("a") as output:
+            output.write(json.dumps(native) + "\n")
+        stop = handle({**payload, "hook_event_name": "SubagentStop",
+                       "transcript_path": str(root_page),
+                       "agent_transcript_path": str(child_page)},
+                      self.data, wall=1000001, monotonic=5001, home=self.root)
+        self.assertEqual(set(stop), {"systemMessage"})
+        receipts = list((self.data / "auto-reports").glob("*.json"))
+        self.assertEqual(len(receipts), 1)
+        receipt = json.loads(receipts[0].read_text())
+        self.assertEqual(receipt["task_hash"], stable_hash(child_id))
+        self.assertEqual(receipt["task"]["selector"], stable_hash(child_id)[:12])
+        self.assertEqual(receipt["usage"]["total"], 200)
+        self.assertTrue(receipt["source_identity_verified"])
+        self.assertNotEqual(receipt["task_hash"], stable_hash(root_id))
+        self.assertIsNone(handle({**payload, "hook_event_name": "SubagentStop",
+                                  "transcript_path": str(root_page),
+                                  "agent_transcript_path": str(child_page)},
+                                 self.data, wall=1000002, monotonic=5002, home=self.root))
+        self.assertIsNone(handle({**payload, "hook_event_name": "Stop"}, self.data,
+                                 wall=1000003, monotonic=5003, home=self.root))
+        self.assertEqual(len(list((self.data / "auto-reports").glob("*.json"))), 1)
+
+    def test_native_subagent_start_rejects_wrong_lineage_and_foreign_transcript(self):
+        root_id, child_id, _, child_page, payload = self._native_child_fixture()
+        bad_records = (
+            {"id": child_id, "source": {"subagent": {"thread_spawn": {
+                "parent_thread_id": "-".join(("00000000", "0000", "7000", "8000", "000000000009"))
+            }}}},
+            {"id": "-".join(("00000000", "0000", "7000", "8000", "000000000010")), "source": {
+                "subagent": {"thread_spawn": {"parent_thread_id": root_id}}
+            }},
+        )
+        for index, metadata in enumerate(bad_records):
+            with self.subTest(index=index):
+                self.data = self.root / f"bad-data-{index}"
+                child_page.write_text(json.dumps({"type": "session_meta", "payload": metadata})
+                                      + "\n" + json.dumps(counter(100)) + "\n")
+                self.assertIsNone(handle({**payload, "hook_event_name": "SubagentStart"},
+                                         self.data, wall=1000000, monotonic=5000,
+                                         home=self.root))
+                self.assertEqual(recent(self.data), [])
+                self.assertFalse(list(self.data.glob("auto-reports/*.json")))
+
+    def test_child_snapshot_ignores_copied_parent_counter_before_own_start(self):
+        root_id, child_id, _, child_page, payload = self._native_child_fixture()
+        source = {"subagent": {"thread_spawn": {"parent_thread_id": root_id}}}
+        child_page.write_text("".join(json.dumps(record) + "\n" for record in (
+            {"type": "session_meta", "payload": {"id": child_id, "source": source}},
+            {"type": "session_meta", "payload": {"id": root_id}},
+            counter(900),
+        )))
+        before = snapshot(str(child_page), payload["turn_id"], allow_subagent=True,
+                          root_hash=stable_hash(root_id))
+        self.assertEqual(before["status"], "observed")
+        self.assertIsNone(before["usage"])
+        with child_page.open("a") as output:
+            output.write(json.dumps({"type": "event_msg", "payload": {
+                "type": "task_started", "thread_id": child_id,
+                "turn_id": payload["turn_id"],
+            }}) + "\n" + json.dumps(counter(100)) + "\n")
+        after = snapshot(str(child_page), payload["turn_id"], allow_subagent=True,
+                         root_hash=stable_hash(root_id))
+        self.assertEqual(after["usage"]["total"], 100)
+
+    def test_governor_merges_child_preview_context_and_does_not_start_after_halt(self):
+        _, child_id, _, _, payload = self._native_child_fixture()
+        event = {**payload, "hook_event_name": "SubagentStart"}
+        governor = Governor(self.data)
+        self.addCleanup(governor.close)
+        existing = {"hookSpecificOutput": {
+            "hookEventName": "SubagentStart", "additionalContext": "budget rules",
+        }}
+        with patch.dict("os.environ", {"CODEX_HOME": str(self.root)}), patch.object(
+            governor, "_handle_budget", return_value=existing
+        ):
+            result = governor.handle(event)
+        context = result["hookSpecificOutput"]["additionalContext"]
+        self.assertTrue(context.startswith("budget rules\n"))
+        self.assertIn("--preview " + child_id, context)
+        self.assertEqual(len(recent(self.data)), 1)
+
+        for denied in (
+            {"decision": "block", "systemMessage": "blocked"},
+            {"continue": False, "stopReason": "HALT", "systemMessage": "halted"},
+            {"systemMessage": "HALT already active"},
+        ):
+            with self.subTest(denied=denied):
+                blocked_event = {**event, "turn_id": "denied-" + str(len(denied))
+                                 + str(denied.get("stopReason", ""))}
+                with patch.dict("os.environ", {"CODEX_HOME": str(self.root)}), patch.object(
+                    governor, "_handle_budget", return_value=denied
+                ):
+                    self.assertEqual(governor.handle(blocked_event), denied)
+                self.assertEqual(len(recent(self.data)), 1)
 
     def test_optional_threshold_strictly_exceeds_and_start_idempotent(self):
         self.start(300)

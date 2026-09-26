@@ -18,13 +18,13 @@ from pathlib import Path
 from typing import Any
 
 from .report_i18n import ReportText, resolve_locale
-from .task_catalog import task_description
+from .task_catalog import TaskCatalog, _uuid, task_description
 from .transcript import _usage_from_line, request_usage
 from .util import stable_hash
 
 SCAN_BYTES = 8 * 1024 * 1024
 MAX_ROWS = 10_000
-START_EVENTS = {"UserPromptSubmit", "PreToolUse", "PostToolUse"}
+START_EVENTS = {"UserPromptSubmit", "PreToolUse", "PostToolUse", "SubagentStart"}
 EVENTS = START_EVENTS | {"Stop", "Interrupt", "SessionEnd", "SubagentStop"}
 
 
@@ -48,13 +48,20 @@ def _footer(directory: Path, key: str, payload: dict[str, Any], locale="zh-Hant"
         if digest else Path(__file__).resolve().parents[2] / "scripts/hook.py"
     )
     command = shlex.join([
-        "python3", "-I", str(runner), "--preview", payload["session_id"], payload["turn_id"],
+        "python3", "-I", str(runner), "--preview",
+        payload.get("agent_id") or payload["session_id"], payload["turn_id"],
         "--data-dir", str(directory.parent.absolute()),
     ])
+    owner = (
+        "This command belongs to this subagent; skip inherited parent preview commands. "
+        if payload.get("agent_id") else
+        "This command belongs to the parent Task; subagents must skip it and use their "
+        "own SubagentStart command. "
+    )
     return {"hookSpecificOutput": {
         "hookEventName": payload.get("hook_event_name", "UserPromptSubmit"),
         "additionalContext": (
-            "Before final, run once: " + command
+            owner + "Before final, run once: " + command
             + " --output-dir <Task visualization root from writable roots; else cwd/work>. "
             "Append its visualize reference unchanged on a final-answer line. "
             "Do not read/analyze the card or load skills for it; no retries. "
@@ -153,15 +160,24 @@ def _model(value: Any) -> str | None:
     )
 
 
-def _request_thread_counter(payload: dict, task: str, turn: str) -> dict | None:
+def _request_thread_counter(
+    payload: dict, task: str, turn: str, *, root_hash: str | None = None
+) -> dict | None:
     """Use the native cumulative counter, never add request and event totals.
 
     A request record can precede the post-tool token_count event. Its own
     usage is not a thread total; require explicit, consistent native scopes.
     """
-    if (payload.get("thread_id") != task or payload.get("turn_id") != turn
-            or payload.get("session_id", task) != task
-            or payload.get("root_turn_id", turn) != turn):
+    if payload.get("thread_id") != task or payload.get("turn_id") != turn:
+        return None
+    if root_hash is None:
+        if (payload.get("session_id", task) != task
+                or payload.get("root_turn_id", turn) != turn):
+            return None
+    elif (not isinstance(payload.get("session_id"), str)
+          or stable_hash(payload["session_id"]) != root_hash
+          or not isinstance(payload.get("root_turn_id"), str)
+          or not 0 < len(payload["root_turn_id"]) <= 256):
         return None
     response = payload.get("response_id")
     if not isinstance(response, str) or not 0 < len(response) <= 512:
@@ -203,7 +219,8 @@ def _setting_values(payload: dict) -> dict:
     return values
 
 
-def _turn_contexts(records: list, task: str, turn: str, *, limited=False) -> tuple[list, bool]:
+def _turn_contexts(records: list, task: str, turn: str, *, limited=False,
+                   root_hash: str | None = None) -> tuple[list, bool]:
     """A bounded, chronological settings lane, isolated from previous turns.
 
     Settings without a turn ID may refine only an active matching turn (or
@@ -291,7 +308,11 @@ def _turn_contexts(records: list, task: str, turn: str, *, limited=False) -> tup
             continue
         if active != turn or payload.get("turn_id", active) != turn:
             continue
-        if payload.get("root_turn_id", turn) != turn:
+        if root_hash is None and payload.get("root_turn_id", turn) != turn:
+            continue
+        if (root_hash is not None and is_request
+                and (not isinstance(payload.get("session_id"), str)
+                     or stable_hash(payload["session_id"]) != root_hash)):
             continue
         now = timestamp(record)
         if now is not None and stamp is not None and now < stamp:
@@ -303,7 +324,7 @@ def _turn_contexts(records: list, task: str, turn: str, *, limited=False) -> tup
     return contexts, limited
 
 
-def _first_turn_proof(records, turn: str) -> tuple[bool, bool]:
+def _first_turn_proof(records, turn: str, *, root_hash: str | None = None) -> tuple[bool, bool]:
     """Prove a full, original first-turn prefix; absence alone is never zero."""
     if not records or records[0].get("type") != "session_meta":
         return False, False
@@ -345,7 +366,9 @@ def _first_turn_proof(records, turn: str) -> tuple[bool, bool]:
                 values = asdict(usage)
         if kind == "token_usage_record":
             model_seen = True
-            values = _request_thread_counter(payload, metadata.get("id"), turn)
+            values = _request_thread_counter(
+                payload, metadata.get("id"), turn, root_hash=root_hash
+            )
             # Older clients may only have per-request usage. They establish
             # model activity, but cannot supply a cumulative counter.
             if "thread_token_usage" in payload and values is None:
@@ -359,7 +382,8 @@ def _first_turn_proof(records, turn: str) -> tuple[bool, bool]:
     return began, began and not model_seen and not usage_seen
 
 
-def _completion_prefix(lines: list[tuple[bytes, int]], task: str, turn: str) -> tuple:
+def _completion_prefix(lines: list[tuple[bytes, int]], task: str, turn: str,
+                       *, root_hash: str | None = None) -> tuple:
     """Find a witnessed terminal boundary without reading any later turn as evidence.
 
     A completion marker alone cannot identify the preceding unscoped counters.
@@ -385,11 +409,27 @@ def _completion_prefix(lines: list[tuple[bytes, int]], task: str, turn: str) -> 
         kind, payload = record["type"], record["payload"]
         event = payload.get("type")
         if kind == "session_meta":
-            if index != 0 or payload.get("id") != task:
+            if index == 0 and payload.get("id") == task:
+                continue
+            if (root_hash is not None and not target_seen
+                    and isinstance(payload.get("id"), str)
+                    and payload["id"] != task):
+                # A child rollout can contain a copied parent metadata row.
+                continue
+            else:
                 return unavailable("completion_identity_ambiguous")
+        # A spawned child's transcript may carry a copied parent prefix.
+        # Explicitly foreign records before this child's start are history,
+        # never evidence for its terminal boundary or counters.
+        if (root_hash is not None and not target_seen
+                and isinstance(payload.get("thread_id"), str)
+                and payload["thread_id"] != task):
             continue
         if (payload.get("thread_id", task) != task
-                or payload.get("session_id", task) != task):
+                or (root_hash is None and payload.get("session_id", task) != task)
+                or (root_hash is not None and "session_id" in payload
+                    and (not isinstance(payload["session_id"], str)
+                         or stable_hash(payload["session_id"]) != root_hash))):
             return unavailable("completion_identity_ambiguous")
         is_context = kind == "turn_context" or kind == "event_msg" and event == "turn_context"
         is_start = kind == "event_msg" and event == "task_started"
@@ -409,7 +449,7 @@ def _completion_prefix(lines: list[tuple[bytes, int]], task: str, turn: str) -> 
                     return unavailable("completion_aborted")
                 if not target_seen or active != turn:
                     return unavailable("completion_start_unobserved")
-                if payload.get("root_turn_id", turn) != turn:
+                if root_hash is None and payload.get("root_turn_id", turn) != turn:
                     return unavailable("completion_identity_ambiguous")
                 evidence = {"completion_observed": True, "completion_status": "observed",
                             "completion_end": line_end}
@@ -428,15 +468,22 @@ def _completion_prefix(lines: list[tuple[bytes, int]], task: str, turn: str) -> 
                 active = None
             continue
         if active == turn and (payload.get("turn_id", turn) != turn
-                               or payload.get("root_turn_id", turn) != turn):
+                               or root_hash is None
+                               and payload.get("root_turn_id", turn) != turn):
             return unavailable("completion_identity_ambiguous")
     return unavailable("completion_not_observed")
 
 
 def snapshot(path_value: Any, turn_id: str, *, at_turn_start: bool = False,
-             completed_only: bool = False) -> dict[str, Any]:
+             completed_only: bool = False, allow_subagent: bool = False,
+             root_hash: str | None = None) -> dict[str, Any]:
     """Only header identity and a bounded tail are read; no text is persisted."""
     unavailable: dict[str, Any] = {"status": "unavailable", "usage": None, "contexts": []}
+    if allow_subagent and (
+        not isinstance(root_hash, str)
+        or re.fullmatch(r"[0-9a-f]{64}", root_hash) is None
+    ):
+        return unavailable
     if completed_only:
         unavailable.update(completion_observed=False, completion_status="unavailable")
         if at_turn_start:
@@ -460,8 +507,20 @@ def snapshot(path_value: Any, turn_id: str, *, at_turn_start: bool = False,
             if not isinstance(identity, str) or not 0 < len(identity) <= 256:
                 return result
             source = payload.get("source")
-            if isinstance(source, dict) and source.get("subagent") is not None:
-                return {**result, "status": "subagent"}
+            subagent = source.get("subagent") if isinstance(source, dict) else None
+            if subagent is not None:
+                spawn = subagent.get("thread_spawn") if isinstance(subagent, dict) else None
+                parent_id = (
+                    _uuid(spawn.get("parent_thread_id")) if isinstance(spawn, dict) else None
+                )
+                if not allow_subagent or not parent_id or parent_id == identity:
+                    return {**result, "status": "subagent"}
+                result["parent_hash"] = stable_hash(parent_id)
+                result["source_role"] = "subagent"
+            elif allow_subagent:
+                return result
+            else:
+                result["source_role"] = "parent"
             offset = max(0, info.st_size - SCAN_BYTES)
             stream.seek(offset)
             raw = stream.read(info.st_size - offset)
@@ -488,7 +547,9 @@ def snapshot(path_value: Any, turn_id: str, *, at_turn_start: bool = False,
         if offset:
             lines = lines[1:]
         if completed_only:
-            prefix, evidence = _completion_prefix(lines, identity, turn_id)
+            prefix, evidence = _completion_prefix(
+                lines, identity, turn_id, root_hash=root_hash if allow_subagent else None
+            )
             result.update(evidence)
             if prefix is None:
                 return {**result, "status": "unavailable", "usage": None, "contexts": []}
@@ -500,6 +561,20 @@ def snapshot(path_value: Any, turn_id: str, *, at_turn_start: bool = False,
             except (ValueError, RecursionError):
                 lines.pop()
                 result["invalid_records"] = True
+        child_start_end = None
+        if allow_subagent:
+            for line, line_end in lines:
+                try:
+                    record = json.loads(line)
+                except (ValueError, RecursionError):
+                    continue
+                event = record.get("payload") if isinstance(record, dict) else None
+                if (record.get("type") == "event_msg" and isinstance(event, dict)
+                        and event.get("type") == "task_started"
+                        and event.get("turn_id") == turn_id
+                        and event.get("thread_id", identity) == identity):
+                    child_start_end = line_end
+                    break
         # Native request totals and token_count events can have different
         # historical baselines. Never compare or subtract across these lanes.
         counters = {}
@@ -545,13 +620,18 @@ def snapshot(path_value: Any, turn_id: str, *, at_turn_start: bool = False,
             records.append(record)
             counter = None
             source = None
-            if record.get("type") == "event_msg" and payload.get("type") == "token_count":
+            if (record.get("type") == "event_msg" and payload.get("type") == "token_count"
+                    and (not allow_subagent or child_start_end is not None
+                         and line_end >= child_start_end)):
                 observed = _usage_from_line(record)
                 counter = asdict(observed) if observed else None
                 source = "token_count"
             if (record.get("type") == "token_usage_record" and payload.get("turn_id") == turn_id
                     and "thread_token_usage" in payload):
-                cumulative = _request_thread_counter(payload, identity, turn_id)
+                cumulative = _request_thread_counter(
+                    payload, identity, turn_id,
+                    root_hash=root_hash if allow_subagent else None,
+                )
                 counter = cumulative
                 source = "native_request"
                 if not turn_usage_seen:
@@ -591,11 +671,15 @@ def snapshot(path_value: Any, turn_id: str, *, at_turn_start: bool = False,
         result["contexts"], result["contexts_limited"] = _turn_contexts(
             list(reversed(records)), identity, turn_id,
             limited=bool(offset or result.get("invalid_records")),
+            root_hash=root_hash if allow_subagent else None,
         )
         result["requested_turn_hash"] = stable_hash(turn_id)
         first, fresh = (False, False)
         if not offset and not result.get("invalid_records"):
-            first, fresh = _first_turn_proof(list(reversed(records)), turn_id)
+            first, fresh = _first_turn_proof(
+                list(reversed(records)), turn_id,
+                root_hash=root_hash if allow_subagent else None,
+            )
         result.update(first_turn_only=first, fresh_turn_start=fresh)
         return result
     except (OSError, ValueError, TypeError, AttributeError, RecursionError,
@@ -686,6 +770,17 @@ def child_coverage(children: dict, locale="zh-Hant") -> str:
     )
 
 
+def _markdown_label(value: str) -> str:
+    """Treat native display names as text in private Markdown receipts."""
+    result = escape(value, quote=False)
+    for character, replacement in (
+        ("[", "&#91;"), ("]", "&#93;"), ("*", "&#42;"),
+        ("_", "&#95;"), ("`", "&#96;"), ("|", "&#124;"),
+    ):
+        result = result.replace(character, replacement)
+    return result
+
+
 def _documents(receipt: dict[str, Any]) -> tuple[str, str]:
     from .quota_view import render_html, render_markdown
 
@@ -734,17 +829,24 @@ def _documents(receipt: dict[str, Any]) -> tuple[str, str]:
     title = text("title")
     task = receipt.get("task") or {}
     label = task.get("display_name") or f"{text('unnamed')} · {receipt['task_hash'][:12]}"
+    if task.get("role") == "subagent" and task.get("selector"):
+        label += " · @" + task["selector"]
     identity = label + " · " + text("turn", value=receipt['turn_hash'][:12])
-    markdown_identity = escape(identity, quote=False)
-    for character, replacement in (
-        ("[", "&#91;"),
-        ("]", "&#93;"),
-        ("*", "&#42;"),
-        ("_", "&#95;"),
-        ("`", "&#96;"),
-    ):
-        markdown_identity = markdown_identity.replace(character, replacement)
+    markdown_identity = _markdown_label(identity)
     period = f"{receipt['started_at']} → {receipt['stopped_at']}"
+    child_rows = children.get("rows", [])[:32]
+    child_markdown = []
+    child_html = []
+    for child in child_rows:
+        child_label = child.get("display_name") or text("unnamed")
+        if child.get("selector"):
+            child_label += " · @" + child["selector"]
+        safe_label = _markdown_label(child_label)
+        amount = text.number((child.get("usage") or {}).get("total"))
+        child_markdown.append(f"| {safe_label} | {amount} |")
+        child_html.append(
+            "<tr><th>" + escape(child_label) + "</th><td>" + escape(amount) + "</td></tr>"
+        )
     markdown = "\n".join(
         [
             f"# {title}",
@@ -757,6 +859,11 @@ def _documents(receipt: dict[str, Any]) -> tuple[str, str]:
             "| --- | --- |",
             *(f"| {k} | {v} |" for k, v in rows),
             "",
+            *(
+                ["## " + text("children"), "", f"| {text('children')} | {text('total')} |",
+                 "| --- | --- |", *child_markdown, ""]
+                if child_rows else []
+            ),
             "## " + text("context_heading"),
             "",
             *context_lines,
@@ -785,7 +892,9 @@ def _documents(receipt: dict[str, Any]) -> tuple[str, str]:
         "border-bottom:1px solid light-dark(#d3ded8,#394640)}td{text-align:right;"
         "font-variant-numeric:tabular-nums}li{margin:8px 0}</style><main>"
         f"<h1>{title}</h1><p>{escape(identity)}</p><p>{escape(period)}</p><table>{body}</table>"
-        f"<h2>{escape(text('context_heading'))}</h2>"
+        + (f"<h2>{escape(text('children'))}</h2><table>{''.join(child_html)}</table>"
+           if child_html else "")
+        + f"<h2>{escape(text('context_heading'))}</h2>"
         + "".join(f"<p>{escape(line)}</p>" for line in context_lines)
         + f"<p>{escape(text('status', value=receipt['usage_status']))}</p>"
         + render_html(receipt.get("quota"), text)
@@ -835,6 +944,29 @@ def _publish(root: Path, key: str, receipt: dict[str, Any]) -> str:
     return str(target.absolute())
 
 
+def _child_task(payload: dict[str, Any], home: Path | None) -> dict[str, Any] | None:
+    """Prove an agent belongs to the shared root without treating it as its direct parent."""
+    agent = _uuid(payload.get("agent_id"))
+    root = _uuid(payload.get("session_id"))
+    if not agent or not root or agent == root:
+        return None
+    try:
+        with TaskCatalog(home) as catalog:
+            row = catalog.get(agent)
+            if row["role"] != "subagent" or not row["parent_id"]:
+                return None
+            description = catalog.describe(row)
+            if (description["lineage_status"] != "observed"
+                    or description["root_hash"] != stable_hash(root)):
+                return None
+            return {
+                "id": agent, "parent_hash": stable_hash(row["parent_id"]),
+                "root_hash": stable_hash(root),
+            }
+    except (OSError, ValueError, sqlite3.Error):
+        return None
+
+
 def handle(
     payload: dict[str, Any],
     root: Path,
@@ -853,10 +985,15 @@ def handle(
         if event == "SubagentStop":
             from .child_usage import capture
             capture(payload, root, home=home, now=wall)
+        child = _child_task(payload, home) if payload.get("agent_id") else None
+        if payload.get("agent_id") and child is None:
             return None
-        if payload.get("agent_id"):
+        if event in ("SubagentStart", "SubagentStop") and child is None:
             return None
-        session, turn = payload.get("session_id"), payload.get("turn_id")
+        session = child["id"] if child else payload.get("session_id")
+        turn = payload.get("turn_id")
+        source_path = (payload.get("agent_transcript_path") if event == "SubagentStop"
+                       else payload.get("transcript_path"))
         if not isinstance(session, str) or not session or len(session) > 256:
             return None
         if event != "SessionEnd" and (not isinstance(turn, str) or not turn or len(turn) > 256):
@@ -875,8 +1012,15 @@ def handle(
                     connection = _connect(root)
                     if connection.execute("SELECT 1 FROM turns WHERE key=?", (key,)).fetchone():
                         return None
-                recovery = event != "UserPromptSubmit"
-                observed = snapshot(payload.get("transcript_path"), turn, at_turn_start=recovery)
+                recovery = event not in ("UserPromptSubmit", "SubagentStart")
+                observed = snapshot(
+                    source_path, turn, at_turn_start=recovery,
+                    allow_subagent=bool(child),
+                    root_hash=child["root_hash"] if child else None,
+                )
+                if child and (observed.get("task_hash") != stable_hash(session)
+                              or observed.get("parent_hash") != child["parent_hash"]):
+                    return None
                 if observed["status"] == "subagent":
                     return None
                 if recovery:
@@ -955,9 +1099,15 @@ def handle(
             if state != "generating":
                 return None
             started = json.loads(row["baseline"])
-            stopped = snapshot(payload.get("transcript_path"), turn)
+            stopped = snapshot(
+                source_path, turn, allow_subagent=bool(child),
+                root_hash=child["root_hash"] if child else None,
+            )
             source_verified = (started.get("task_hash") == stable_hash(session)
-                               and stopped.get("task_hash") == stable_hash(session))
+                               and stopped.get("task_hash") == stable_hash(session)
+                               and (not child or
+                                    started.get("parent_hash") == child["parent_hash"]
+                                    == stopped.get("parent_hash")))
             usage, status = _delta(started, stopped)
             if not source_verified:
                 usage, status = None, "source_identity_unavailable"
@@ -967,13 +1117,18 @@ def handle(
             from .turn_quota import saved
             children = collect(root, session, row["started"], now, home=home,
                                unnamed_label=text("unnamed"))
+            task = (task_description(session, home=home, unnamed_label=text("unnamed"))
+                    if source_verified else None)
+            if child and task is not None:
+                # The display label already carries allowed native metadata;
+                # a raw agent path adds no identity proof to a persisted receipt.
+                task.pop("agent_path", None)
             receipt = {
                 "schema_version": 2,
-                "scope": "user_turn_stop_boundary",
+                "scope": "subagent_turn_stop_boundary" if child else "user_turn_stop_boundary",
                 "task_hash": stable_hash(session),
                 "source_identity_verified": source_verified,
-                "task": task_description(session, home=home, unnamed_label=text("unnamed"))
-                if source_verified else None,
+                "task": task,
                 "turn_hash": row["turn_hash"],
                 "elapsed_seconds": round(elapsed, 3),
                 "started_at": datetime.fromtimestamp(row["started"], timezone.utc).isoformat(),

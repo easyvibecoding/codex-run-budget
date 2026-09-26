@@ -19,6 +19,10 @@ UUID or listed selector can be supplied with `--thread`. Do not identify a Task
 from its title alone when names are duplicated.
 
 Only when descendants are requested, use `report tree --thread SELECTOR`.
+`report task` for a selected subagent describes that subagent's own observed
+usage. To relate it to a parent Task, select the parent with `report tree`;
+do not add the subagent's own total to a tree subtotal that already includes it.
+Native parent metadata, not similar names or timestamps, establishes lineage.
 For ownership without usage, use the `usage-agents` skill instead. A different
 window can be selected with `--windows 5h` or `--windows 7d`; do not expand it
 automatically to multiple windows.

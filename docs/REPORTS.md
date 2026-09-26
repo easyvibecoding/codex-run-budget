@@ -55,6 +55,16 @@ and bounded strings; the local schema is not a public contract, so unavailable
 or conflicting metadata remains explicit. The catalog does not modify Codex.
 Names can reveal work topics: keep exports private and review before sharing.
 
+`report task` is one native Task, including when the selected Task is a
+subagent. `report tree --thread PARENT` is the explicit parent-plus-descendant
+view. The subagent's own card or Task report and the parent's descendant subtotal
+can contain the same observed requests; do not add those displayed totals to
+each other. Automatic parent-turn cards use only their bounded turn observation
+window, whereas a manual tree report uses its selected time window. Missing
+lineage, truncated discovery, or unavailable counters stay partial or unknown.
+Automatic child and ancestor cards show a matching short hashed `@selector` for
+visual correspondence. The selector itself is not proof of parent ownership.
+
 ## Window and evidence semantics
 
 - Default: one `24h` window. Positive integer `Nh` and `Nd` rolling windows use

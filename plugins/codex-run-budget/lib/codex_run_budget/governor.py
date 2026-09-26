@@ -109,15 +109,17 @@ class Governor:
         result = self._handle_budget(payload)
         if payload.get("hook_event_name") in (
             "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop", "Interrupt", "SessionEnd",
-            "SubagentStop"
+            "SubagentStart", "SubagentStop"
         ):
             # Preserve decisions and context; reporting may add one start footer.
             # Rejected prompts/tools and HALT must never activate a report.
             if payload.get("hook_event_name") in (
-                "UserPromptSubmit", "PreToolUse", "PostToolUse"
+                "UserPromptSubmit", "PreToolUse", "PostToolUse", "SubagentStart"
             ) and result and (
                 result.get("decision") == "block" or result.get("continue") is False
                 or (result.get("hookSpecificOutput") or {}).get("permissionDecision") == "deny"
+                or (payload.get("hook_event_name") == "SubagentStart"
+                    and bool(result.get("systemMessage")))
             ):
                 return result
             try:

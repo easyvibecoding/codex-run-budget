@@ -617,20 +617,24 @@ def capture(payload: dict, root: Path, *, home=None, now=None) -> None:
     try:
         if not isinstance(payload, dict) or payload.get("hook_event_name") != "SubagentStop":
             return None
-        parent = _bounded_text(payload.get("session_id"))
-        if parent is None:
+        root_id = _bounded_text(payload.get("session_id"))
+        agent_id = payload.get("agent_id")
+        if root_id is None or _uuid(agent_id) is None:
             return None
-        parent_hash = stable_hash(parent)
-        agent_hash = _hash(payload.get("agent_id"))
+        parent_id, catalog_path = _agent_path(agent_id, root_id, home)
+        if parent_id is None:
+            return None
+        parent_hash = stable_hash(parent_id)
+        agent_hash = _hash(agent_id)
         stamp = _stamp(now) if now is not None else time.time()
         if stamp is None:
             stamp = time.time()
         path = payload.get("agent_transcript_path")
         if not _bounded_text(path):
-            path = _agent_path(payload.get("agent_id"), parent, home)
-        expected_child = payload.get("agent_id") if _uuid(payload.get("agent_id")) else None
+            path = catalog_path
+        expected_child = agent_id
         scan = (
-            _scan(path, expected_child=expected_child, expected_parent=parent)
+            _scan(path, expected_child=expected_child, expected_parent=parent_id)
             if _bounded_text(path)
             else _empty_scan()
         )
@@ -698,19 +702,23 @@ def _paths(catalog: TaskCatalog, rows: list[dict[str, Any]]) -> dict[str, str]:
         return {}
 
 
-def _agent_path(agent_id: Any, parent_id: str, home=None) -> str | None:
-    """Resolve an agent UUID only when native lineage proves it is a child."""
+def _agent_path(agent_id: Any, root_id: str, home=None) -> tuple[str | None, str | None]:
+    """Resolve the direct parent only after native lineage proves the shared root."""
 
-    if _uuid(agent_id) is None:
-        return None
+    if _uuid(agent_id) is None or _uuid(root_id) is None:
+        return None, None
     try:
         with TaskCatalog(home) as catalog:
             row = catalog.get(agent_id)
-            if row.get("role") != "subagent" or row.get("parent_id") != parent_id:
-                return None
-            return _paths(catalog, [row]).get(row["id"])
+            if row.get("role") != "subagent" or not row.get("parent_id"):
+                return None, None
+            description = catalog.describe(row)
+            if (description["lineage_status"] != "observed"
+                    or description["root_hash"] != stable_hash(root_id)):
+                return None, None
+            return row["parent_id"], _paths(catalog, [row]).get(row["id"])
     except (OSError, sqlite3.Error, TypeError, ValueError):
-        return None
+        return None, None
 
 
 def _load_cache(
@@ -1147,6 +1155,7 @@ def collect(root: Path, session: str, since: float, until: float, *, home=None,
             rows_out.append(
                 {
                     "display_name": description.get("display_name") or unnamed_label,
+                    "selector": description.get("selector"),
                     "parent_name": description.get("parent_name"),
                     "usage": child_subtotal,
                     "status": status,

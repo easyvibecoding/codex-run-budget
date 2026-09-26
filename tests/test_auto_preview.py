@@ -267,6 +267,113 @@ class AutoPreviewTest(unittest.TestCase):
         self.assertEqual(receipt["usage"]["total"], 500)
         self.assertEqual(next(self.output.glob("*.html")).read_text(), card)
 
+    def test_native_child_start_preview_matches_same_name_rows_in_root_card(self):
+        child = "00000000-0000-7000-8000-000000000002"
+        sibling = "00000000-0000-7000-8000-000000000003"
+        child_turn = "synthetic-child-turn"
+        sibling_turn = "synthetic-sibling-turn"
+        source = {"subagent": {"thread_spawn": {"parent_thread_id": TASK}}}
+        stamp = datetime.fromtimestamp(time.time(), timezone.utc).isoformat()
+        child_page = self.root / "synthetic-child.jsonl"
+        sibling_page = self.root / "synthetic-sibling.jsonl"
+        child_page.write_text("".join(json.dumps(row) + "\n" for row in (
+            {"type": "session_meta", "timestamp": stamp,
+             "payload": {"id": child, "source": source}},
+            counter(100),
+        )))
+        sibling_page.write_text("".join(json.dumps(row) + "\n" for row in (
+            {"type": "session_meta", "timestamp": stamp,
+             "payload": {"id": sibling, "source": source}},
+            {"type": "token_usage_record", "timestamp": stamp, "payload": {
+                "thread_id": sibling, "session_id": TASK,
+                "turn_id": sibling_turn, "root_turn_id": "turn-1",
+                "response_id": "synthetic-sibling-response", "usage": {
+                    "total_tokens": 70, "input_tokens": 60, "output_tokens": 10,
+                    "cached_input_tokens": 30, "reasoning_output_tokens": 5,
+                },
+            }},
+            {"type": "event_msg", "timestamp": stamp,
+             "payload": {"type": "task_complete", "turn_id": sibling_turn}},
+        )))
+        unsafe_name = "same <worker> [bad](https://example.invalid)"
+        self.db.executemany(
+            "INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                (child, unsafe_name, "worker", "worker", "/root/worker",
+                 json.dumps(source), str(child_page), str(self.workspace)),
+                (sibling, unsafe_name, "worker", "worker", "/root/worker",
+                 json.dumps(source), str(sibling_page), str(self.workspace)),
+            ),
+        )
+        self.db.commit()
+        child_payload = {
+            "session_id": TASK, "agent_id": child, "turn_id": child_turn,
+            "hook_event_name": "SubagentStart", "transcript_path": str(child_page),
+        }
+        start = handle(child_payload, self.data, home=self.root)
+        self.assertEqual(set(start), {"hookSpecificOutput"})
+        self.assertIn("--preview " + child, start["hookSpecificOutput"]["additionalContext"])
+        native = native_counter(child, child_turn, 300, request=200, turn_total=200)
+        native["timestamp"] = stamp
+        native["payload"].update(session_id=TASK, root_turn_id="turn-1",
+                                 response_id="synthetic-child-response")
+        with child_page.open("a") as output:
+            output.write("".join(json.dumps(row) + "\n" for row in (
+                {"type": "turn_context", "payload": {
+                    "turn_id": child_turn, "model": "gpt-6-sol", "effort": "high"
+                }},
+                native,
+                counter(300),
+            )))
+
+        own = preview(self.data, child, child_turn, output_dir=self.output, home=self.root)
+        self.assertEqual(own["status"], "preview")
+        own_path = Path(json.loads(own["reference"].split("\ue202")[1][:-1])["path"])
+        own_card = own_path.read_text()
+        child_selector = "@" + stable_hash(child)[:12]
+        sibling_selector = "@" + stable_hash(sibling)[:12]
+        self.assertIn(child_selector, own_card)
+        self.assertNotIn(sibling_selector, own_card)
+        self.assertIn("same &lt;worker&gt;", own_card)
+        self.assertIn('data-metric="task-total">300</dd>', own_card)
+        self.assertIn('data-metric="turn-delta">+200</dd>', own_card)
+        root_visuals = self.root / "visualizations/1970/01/01" / TASK
+        shared = preview(self.data, child, child_turn, output_dir=root_visuals, home=self.root)
+        self.assertEqual(shared["status"], "preview")
+        self.assertEqual(len(list(root_visuals.glob("*.html"))), 1)
+
+        parent = self.preview()
+        self.assertEqual(parent["status"], "preview")
+        parent_path = Path(json.loads(parent["reference"].split("\ue202")[1][:-1])["path"])
+        parent_card = parent_path.read_text()
+        self.assertIn(child_selector, parent_card)
+        self.assertIn(sibling_selector, parent_card)
+        self.assertIn('data-metric="turn-delta">+500</dd>', parent_card)
+        self.assertNotIn('data-metric="turn-delta">+770</dd>', parent_card)
+        self.assertNotIn(child, parent_card)
+        self.assertNotIn(sibling, parent_card)
+
+        stop = handle({**child_payload, "hook_event_name": "SubagentStop",
+                       "transcript_path": str(self.transcript),
+                       "agent_transcript_path": str(child_page)}, self.data, home=self.root)
+        self.assertEqual(set(stop), {"systemMessage"})
+        handle({**self.payload, "hook_event_name": "Stop"}, self.data, home=self.root)
+        receipts = [json.loads(path.read_text())
+                    for path in (self.data / "auto-reports").glob("*.json")]
+        self.assertEqual(len(receipts), 2)
+        by_task = {receipt["task_hash"]: receipt for receipt in receipts}
+        self.assertEqual(by_task[stable_hash(child)]["task"]["selector"], child_selector[1:])
+        self.assertEqual(by_task[stable_hash(child)]["usage"]["total"], 200)
+        root = by_task[stable_hash(TASK)]
+        self.assertEqual(root["usage"]["total"], 500)
+        self.assertEqual(root["subagents"]["usage"]["total"], 270)
+        self.assertEqual(root["subagents"]["request_count"], 2)
+        parent_markdown = (self.data / "auto-reports" / (
+            stable_hash([TASK, "turn-1"]) + ".md"
+        )).read_text()
+        self.assertIn("&#91;bad&#93;", parent_markdown)
+        self.assertNotIn("[bad](https://example.invalid)", parent_markdown)
+
     def test_card_preserves_paired_turn_switches_and_does_not_render_fast(self):
         contexts = [
             {"model": "example-a", "reasoning_effort": "low", "fast_mode": True},

@@ -6,7 +6,7 @@ different language without changing its meaning or numeric values.
 
 | Surface | Language behavior |
 | --- | --- |
-| Automatic cards and Stop Markdown/HTML | Localized, including incomplete-data notices |
+| Parent and subagent automatic cards and Stop/SubagentStop Markdown/HTML | Localized, including incomplete-data notices |
 | Manual Task/window Markdown/HTML | Localized headings, labels, controls and caveats |
 | CLI help, user errors and summaries | Localized when shown to a person |
 | Workflow observation reports and meter/survey summaries | Localized labels; original evidence codes retained |

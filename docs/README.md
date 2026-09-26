@@ -11,7 +11,7 @@ observation does not automatically start or change a budget.
 | Task | Guide |
 | --- | --- |
 | Start, inspect, halt, resume, or disable a shared budget | [Quick start](../README.md#quick-start) and [design](DESIGN.md) |
-| Control and interpret automatic turn cards and completion revisions | [Automatic receipts](AUTO_REPORTS.md) |
+| Control and interpret parent/subagent turn cards and completion revisions | [Automatic receipts](AUTO_REPORTS.md) |
 | Select Task, agent, tree, or time-window reports | [Scoped reports](REPORTS.md) |
 | Read native quota, saved snapshots, local Task context, rates, and scenarios | [Native meter](METER.md) and [mechanics](METER_MECHANICS.md) |
 | Select language for human-facing output | [Localization](LOCALIZATION.md) |

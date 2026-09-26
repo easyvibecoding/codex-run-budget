@@ -1,6 +1,6 @@
 [project]
 name = "codex-run-budget"
-version = "0.19.2"
+version = "0.19.3"
 description = "Shared token guardrails and local usage reports for Codex Tasks and subagents"
 requires-python = ">=3.10"
 license = "MIT"
