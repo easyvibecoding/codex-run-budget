@@ -239,6 +239,15 @@ Copied parent metadata or history in a child transcript is not the child's own
 usage; the child report counts only evidence after its own start. If no native
 child counter is established, usage stays unknown.
 
+The timing baseline stores only hashes of the child's original root and direct
+parent. Preview, Stop and completion reconciliation preserve the original report
+role and require that original root
+proof; an older child baseline without it stays unverified. A current catalog
+lookup cannot fill in the missing historical root. Conflicting parent metadata
+for the same child also invalidates saved request evidence, so a cached subtotal
+cannot reappear after its source becomes unavailable. Metadata for different
+Tasks in ordinary copied-parent history remains valid.
+
 The parent's pre-final preview and Stop receipt select only descendants linked
 by native parent metadata. They combine saved child evidence with a bounded fresh
 read, select native `token_usage_record` timestamps in `[parent start, capture)`,
@@ -249,6 +258,8 @@ The same short hashed `@selector` appears beside a child on its own card and
 in an ancestor's child row, so the two views can be matched without persisting
 a raw Task ID. The selector is a display aid; native parent metadata still
 establishes ownership.
+Child cards and receipts name their direct parent and label their own usage
+separately from descendant subtotals; the root Task keeps its existing labels.
 
 This is observation-window attribution, not proof the parent caused every request
 in that interval. Reused children contribute only records in this window. Names

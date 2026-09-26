@@ -797,6 +797,9 @@ def _documents(receipt: dict[str, Any]) -> tuple[str, str]:
 
     text = ReportText(receipt.get("locale", "zh-Hant"))
     children = receipt.get("subagents") or {"status": "unavailable"}
+    child_scope = receipt.get("scope", "").startswith("subagent_")
+    children_label = text("child_descendant_subtotal" if child_scope else "children")
+    context_heading = text("child_context_heading" if child_scope else "context_heading")
     usage, complete = observed_total(receipt["usage"], children)
 
     def number(key: str) -> str:
@@ -808,11 +811,12 @@ def _documents(receipt: dict[str, Any]) -> tuple[str, str]:
             "reconciliation_status", "pending"))),
         (text("report_updated"), receipt.get("reconciled_at", receipt["stopped_at"])),
         (text("elapsed_wait"), text.duration(receipt['elapsed_seconds'], minutes=False)),
-        (text("task_total"), text.number((receipt.get("task_usage") or {}).get("total"))),
+        (text("child_task_total" if child_scope else "task_total"),
+         text.number((receipt.get("task_usage") or {}).get("total"))),
         (text("total" if complete else "subtotal"), number("total")),
-        (text("turn_delta"),
+        (text("child_turn_delta" if child_scope else "turn_delta"),
          text.number(receipt['usage']['total'] if receipt["usage"] else None)),
-        (text("children"), text("na") if children.get("status") == "none" else
+        (children_label, text("na") if children.get("status") == "none" else
          text.number(children['usage']['total'] if children.get("usage") else None)),
         (text("coverage"), child_coverage(children, text.locale)),
         (text("input"), number("input")),
@@ -824,7 +828,11 @@ def _documents(receipt: dict[str, Any]) -> tuple[str, str]:
         "stop", "usage", "counter", "subsets", "scope", "children", "render"
     )]
     if receipt.get("completion_observed"):
-        notes[0] = text("note_completion")
+        notes[0] = text("child_note_completion" if child_scope else "note_completion")
+    elif child_scope:
+        notes[0] = text("child_note_stop")
+    if child_scope:
+        notes[1] = text("child_note_usage")
     notes.append(text("note_reconcile"))
     contexts = receipt["stop_contexts"]
     context_lines = []
@@ -840,8 +848,9 @@ def _documents(receipt: dict[str, Any]) -> tuple[str, str]:
     title = text("title")
     task = receipt.get("task") or {}
     label = task.get("display_name") or f"{text('unnamed')} · {receipt['task_hash'][:12]}"
-    if task.get("role") == "subagent" and task.get("selector"):
+    if child_scope and task.get("selector"):
         label += " · @" + task["selector"]
+        label += " · " + text("owner", name=task.get("parent_name") or text("unknown_parent"))
     identity = label + " · " + text("turn", value=receipt['turn_hash'][:12])
     markdown_identity = _markdown_label(identity)
     period = f"{receipt['started_at']} → {receipt['stopped_at']}"
@@ -871,11 +880,11 @@ def _documents(receipt: dict[str, Any]) -> tuple[str, str]:
             *(f"| {k} | {v} |" for k, v in rows),
             "",
             *(
-                ["## " + text("children"), "", f"| {text('children')} | {text('total')} |",
+                ["## " + children_label, "", f"| {children_label} | {text('total')} |",
                  "| --- | --- |", *child_markdown, ""]
                 if child_rows else []
             ),
-            "## " + text("context_heading"),
+            "## " + context_heading,
             "",
             *context_lines,
             "",
@@ -903,9 +912,9 @@ def _documents(receipt: dict[str, Any]) -> tuple[str, str]:
         "border-bottom:1px solid light-dark(#d3ded8,#394640)}td{text-align:right;"
         "font-variant-numeric:tabular-nums}li{margin:8px 0}</style><main>"
         f"<h1>{title}</h1><p>{escape(identity)}</p><p>{escape(period)}</p><table>{body}</table>"
-        + (f"<h2>{escape(text('children'))}</h2><table>{''.join(child_html)}</table>"
+        + (f"<h2>{escape(children_label)}</h2><table>{''.join(child_html)}</table>"
            if child_html else "")
-        + f"<h2>{escape(text('context_heading'))}</h2>"
+        + f"<h2>{escape(context_heading)}</h2>"
         + "".join(f"<p>{escape(line)}</p>" for line in context_lines)
         + f"<p>{escape(text('status', value=receipt['usage_status']))}</p>"
         + render_html(receipt.get("quota"), text)
@@ -976,6 +985,26 @@ def _child_task(payload: dict[str, Any], home: Path | None) -> dict[str, Any] | 
             }
     except (OSError, ValueError, sqlite3.Error):
         return None
+
+
+def _baseline_identity_matches(
+    baseline: dict, task_hash: str, *, root_hash: str | None = None,
+    parent_hash: str | None = None,
+) -> bool:
+    """Require the original report role and lineage, including older child starts."""
+    was_child = (baseline.get("source_role") == "subagent"
+                 or baseline.get("parent_hash") is not None
+                 or baseline.get("root_hash") is not None)
+    is_child = root_hash is not None
+    return (
+        baseline.get("task_hash") == task_hash
+        and was_child == is_child
+        and (not is_child or (
+            parent_hash is not None
+            and baseline.get("root_hash") == root_hash
+            and baseline.get("parent_hash") == parent_hash
+        ))
+    )
 
 
 def handle(
@@ -1049,6 +1078,10 @@ def handle(
                     # seed counters, contexts, or identity in its private state.
                     observed = {"status": "source_unavailable", "usage": None, "contexts": []}
                 observed["start_event"] = event
+                if child:
+                    # Bind this baseline to the original shared root. The direct
+                    # parent can stay the same while its own ancestry changes.
+                    observed["root_hash"] = child["root_hash"]
                 # A later tool's model is not evidence of the original start model.
                 observed["hook_model"] = None if recovery else _model(payload.get("model"))
                 observed["report_locale"] = resolve_locale(home=home)["locale"]
@@ -1117,11 +1150,15 @@ def handle(
                 source_path, turn, allow_subagent=bool(child),
                 root_hash=child["root_hash"] if child else None,
             )
-            source_verified = (started.get("task_hash") == stable_hash(session)
-                               and stopped.get("task_hash") == stable_hash(session)
-                               and (not child or
-                                    started.get("parent_hash") == child["parent_hash"]
-                                    == stopped.get("parent_hash")))
+            source_verified = (
+                _baseline_identity_matches(
+                    started, stable_hash(session),
+                    root_hash=child["root_hash"] if child else None,
+                    parent_hash=child["parent_hash"] if child else None,
+                )
+                and stopped.get("task_hash") == stable_hash(session)
+                and (not child or stopped.get("parent_hash") == child["parent_hash"])
+            )
             usage, status = _delta(started, stopped)
             if not source_verified:
                 usage, status = None, "source_identity_unavailable"

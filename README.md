@@ -42,7 +42,7 @@ run-budget:off
 
 `resume tokens=` sets a new absolute ceiling above observed spend. A control line quoted later in a message does not activate a command. [Control syntax, policy order, and state](docs/DESIGN.md) · [Run inspection](#inspect-a-budget-run).
 
-Automatic usage cards are enabled by default even when no budget is active. An eligible subagent can show its own card on its page; the parent card keeps a separate observed descendant subtotal. A matching hashed `@selector` identifies the child in both views. [Turn receipts](docs/AUTO_REPORTS.md).
+Automatic usage cards are enabled by default even when no budget is active. An eligible subagent can show its own card on its page; the parent card keeps a separate observed descendant subtotal. A matching hashed `@selector` identifies the child in both views. The child's card names its direct parent and distinguishes its own usage from descendants; conflicting lineage stays unverified. [Turn receipts](docs/AUTO_REPORTS.md).
 
 ## Capabilities
 

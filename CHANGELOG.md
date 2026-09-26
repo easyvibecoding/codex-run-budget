@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.19.5 - 2026-09-26
+
+- Reject contradictory parent metadata for the same child, including previously cached usage, while retaining valid copied-parent history.
+- Bind child timing baselines to the original shared root; preview, Stop and completion reconciliation reject changed or missing root evidence.
+- Label child cards and Markdown/HTML receipts with their own usage and descendant subtotals, show the direct parent and matching selector, and localize the scope in all nine report languages.
+- Preserve the existing hook definitions, shared root budget and policy decisions. Existing Tasks remain pinned to their prior runtime.
+
 ## 0.19.4 - 2026-09-26
 
 - Bound SQLite write contention across concurrent Task starts with one shared deadline below the native hook timeout. Slow storage no longer drops otherwise valid start baselines at the prior short lock wait.

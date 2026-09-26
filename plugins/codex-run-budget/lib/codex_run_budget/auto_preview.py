@@ -19,7 +19,14 @@ from pathlib import Path
 from string import Template
 from urllib.parse import quote
 
-from .auto_report import _delta, child_coverage, observed_total, settings, snapshot
+from .auto_report import (
+    _baseline_identity_matches,
+    _delta,
+    child_coverage,
+    observed_total,
+    settings,
+    snapshot,
+)
 from .child_usage import collect
 from .report_i18n import ReportText, resolve_locale
 from .task_catalog import MAX_DEPTH, TaskCatalog, _uuid
@@ -60,6 +67,8 @@ def render_card(receipt: dict) -> str:
     parent = receipt["usage"]
     task_usage = receipt.get("task_usage")
     children = receipt.get("subagents") or {"status": "unavailable"}
+    scope = receipt.get("scope", "")
+    child_scope = scope == "subagent" or scope.startswith("subagent_")
     usage, complete = observed_total(parent, children)
     pending = receipt.get("usage_status") in ("first_turn_usage_pending", "turn_usage_pending")
 
@@ -107,6 +116,13 @@ def render_card(receipt: dict) -> str:
         "input", "cached", "output", "reasoning", "card_note", "task_total", "turn_delta",
         "context_heading", "context_note", "combined",
     )})
+    if child_scope:
+        values.update({"label_" + key: text(child_key) for key, child_key in (
+            ("parent", "own_agent"), ("combined", "child_combined"),
+            ("task_total", "child_task_total"), ("turn_delta", "child_turn_delta"),
+            ("context_heading", "child_context_heading"),
+            ("child_subtotal", "child_descendant_subtotal"), ("card_note", "child_card_note"),
+        )})
     escaped = {k: escape(str(v)) for k, v in values.items()}
     # Native display names are data. Only this fixed markup is inserted unescaped.
     if len(context_pairs) > 1:
@@ -171,6 +187,7 @@ def preview(root: Path, session: str, turn: str, *, output_dir: Path, home=None)
         return {"status": "below_threshold"}
     locale = resolve_locale(home=home)
     text = ReportText(locale["locale"])
+    baseline = json.loads(row["baseline"])
     with TaskCatalog(home, unnamed_label=text("unnamed")) as catalog:
         task = catalog.get(session)
         description = catalog.describe(task)
@@ -187,6 +204,15 @@ def preview(root: Path, session: str, turn: str, *, output_dir: Path, home=None)
             if (root_task["parent_id"] or root_task["role"] != "parent"
                     or stable_hash(root_task["id"]) != description["root_hash"]):
                 return {"status": "subagent"}
+        # A current tree lookup cannot replace the identity observed at Start.
+        # Check every role: a child reclassified as a root must not skip its
+        # original root and parent evidence or expose foreign usage/settings.
+        if not _baseline_identity_matches(
+            baseline, stable_hash(session),
+            root_hash=description["root_hash"] if child else None,
+            parent_hash=description["parent_hash"] if child else None,
+        ):
+            return {"status": "source_unavailable"}
         native = catalog.connection.execute(
             "SELECT rollout_path FROM threads WHERE id=?", (session,)
         ).fetchone()
@@ -208,9 +234,6 @@ def preview(root: Path, session: str, turn: str, *, output_dir: Path, home=None)
     if (current.get("task_hash") != stable_hash(session)
             or child and current.get("parent_hash") != stable_hash(task["parent_id"])):
         return {"status": "source_unavailable"}
-    baseline = json.loads(row["baseline"])
-    if child and baseline.get("parent_hash") != stable_hash(task["parent_id"]):
-        return {"status": "source_unavailable"}
     usage, status = _delta(baseline, current)
     if (status == "counter_unavailable" and baseline.get("fresh_turn_start")
             and current.get("first_turn_only") and current.get("usage") is None):
@@ -222,7 +245,12 @@ def preview(root: Path, session: str, turn: str, *, output_dir: Path, home=None)
     quota = observe(root, key, home=home)
     receipt = {
         "key": key,
-        "task_name": task["display_name"] + (" · @" + description["selector"] if child else ""),
+        "task_name": task["display_name"] + (
+            " · @" + description["selector"] + " · "
+            + text("owner", name=description["parent_name"] or text("unknown_parent"))
+            if child else ""
+        ),
+        "scope": "subagent" if child else "parent",
         "usage": usage, "usage_status": status,
         "contexts": current["contexts"], "contexts_limited": current.get("contexts_limited", False),
         "task_usage": current.get("usage"), "elapsed_seconds": seconds,

@@ -269,6 +269,75 @@ class ChildUsageTest(unittest.TestCase):
         self.assertEqual(result["request_count"], 1)
         self.assertEqual(result["usage"]["total"], 12)
 
+    def test_conflicting_parent_metadata_rejects_native_requests_in_both_orders(self) -> None:
+        for index, (matching_first, capture_first) in enumerate(
+            ((True, False), (False, False), (True, True), (False, True)), start=1
+        ):
+            with self.subTest(matching_first=matching_first, capture_first=capture_first):
+                child = synthetic_child(index)
+                parents = (PARENT, UNRELATED) if matching_first else (UNRELATED, PARENT)
+                path = self._page(
+                    child,
+                    PARENT,
+                    [metadata(child, parents[0]), metadata(child, parents[1], 1),
+                     request(child, f"conflicting-{index}", 10, 23), complete(11)],
+                    name=f"conflicting-{index}",
+                )
+                if capture_first:
+                    self._stop(child, path)
+
+                result = collect(
+                    self.root, PARENT, WINDOW_START, WINDOW_START + 20, home=self.home
+                )
+
+                self.assertIsNone(result["usage"])
+                self.assertEqual(result["status"], "unavailable")
+                self.assertEqual(result["request_count"], 0)
+                self.assertEqual(result["agents_with_usage"], 0)
+                self.assertEqual(result["missing_agents"], index)
+                self.assertTrue(all(row["usage"] is None for row in result["rows"]))
+
+    def test_parent_metadata_conflict_invalidates_cached_native_requests(self) -> None:
+        records = [metadata(CHILD_A, PARENT), request(CHILD_A, "cached", 10, 23), complete(11)]
+        path = self._page(CHILD_A, PARENT, records, name="A")
+        self._stop(CHILD_A, path)
+        before = collect(self.root, PARENT, WINDOW_START, WINDOW_START + 20, home=self.home)
+        self.assertEqual(before["usage"]["total"], 23)
+
+        with path.open("a") as output:
+            output.write(json.dumps(metadata(CHILD_A, UNRELATED, 12)) + "\n")
+        after = collect(self.root, PARENT, WINDOW_START, WINDOW_START + 20, home=self.home)
+        self.assertIsNone(after["usage"])
+        self.assertEqual(after["status"], "partial")
+        self.assertEqual(after["request_count"], 0)
+        self.assertEqual(after["missing_agents"], 1)
+
+        # A later unreadable source cannot resurrect receipts already known
+        # to have contradictory attribution.
+        self._stop(CHILD_A, path)
+        path.unlink()
+        cached = collect(self.root, PARENT, WINDOW_START, WINDOW_START + 20, home=self.home)
+        self.assertIsNone(cached["usage"])
+        self.assertEqual(cached["status"], "partial")
+        self.assertEqual(cached["request_count"], 0)
+
+    def test_stop_parent_metadata_conflict_revokes_cache_before_source_disappears(self) -> None:
+        path = self._page(
+            CHILD_A, PARENT,
+            [metadata(CHILD_A, PARENT), request(CHILD_A, "cached", 10, 23), complete(11)],
+            name="A",
+        )
+        self._stop(CHILD_A, path)
+        with path.open("a") as output:
+            output.write(json.dumps(metadata(CHILD_A, UNRELATED, 12)) + "\n")
+        self._stop(CHILD_A, path)
+        path.unlink()
+
+        result = collect(self.root, PARENT, WINDOW_START, WINDOW_START + 20, home=self.home)
+        self.assertIsNone(result["usage"])
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["request_count"], 0)
+
     def test_window_is_strict_and_reused_child_does_not_include_history(self) -> None:
         path = self._page(
             CHILD_A,
@@ -447,6 +516,27 @@ class ChildUsageTest(unittest.TestCase):
         self._stop(CHILD_A, path)
         result = collect(self.root, PARENT, WINDOW_START, WINDOW_START + 20, home=self.home)
         self.assertEqual(result["usage"]["total"], 20)
+        self.assertEqual(result["request_count"], 1)
+
+    def test_fork_copied_parent_metadata_preserves_child_attribution(self) -> None:
+        path = self._page(
+            CHILD_A,
+            PARENT,
+            [
+                {"type": "session_meta", "timestamp": stamp(0),
+                 "payload": {"id": PARENT, "source": "vscode"}},
+                request(PARENT, "parent-copy", 1, 900),
+                complete(2, identifier=PARENT),
+                metadata(CHILD_A, PARENT, 3),
+                request(CHILD_A, "child", 10, 23),
+                complete(11, identifier=CHILD_A),
+            ],
+            name="A",
+        )
+        self._stop(CHILD_A, path)
+        result = collect(self.root, PARENT, WINDOW_START, WINDOW_START + 20, home=self.home)
+        self.assertEqual(result["status"], "observed")
+        self.assertEqual(result["usage"]["total"], 23)
         self.assertEqual(result["request_count"], 1)
 
     def test_absent_path_preserves_cache_and_late_records_are_reconciled(self) -> None:

@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT / "plugins/codex-run-budget/lib"))
 
 from codex_run_budget.auto_report import (  # noqa: E402
     SCAN_BYTES,
+    _documents,
     configure,
     handle,
     recent,
@@ -592,6 +593,8 @@ class AutoReportTest(unittest.TestCase):
         child_page = self.root / "synthetic-child.jsonl"
         child_page.write_text(json.dumps({"type": "session_meta", "payload": {
             "id": child_id, "source": source
+        }}) + "\n" + json.dumps({"type": "event_msg", "payload": {
+            "type": "task_started", "thread_id": child_id, "turn_id": "synthetic-child-turn"
         }}) + "\n" + json.dumps(counter(100)) + "\n")
         with sqlite3.connect(self.root / "state_5.sqlite") as catalog:
             catalog.execute(
@@ -646,6 +649,111 @@ class AutoReportTest(unittest.TestCase):
         self.assertIsNone(handle({**payload, "hook_event_name": "Stop"}, self.data,
                                  wall=1000003, monotonic=5003, home=self.root))
         self.assertEqual(len(list((self.data / "auto-reports").glob("*.json"))), 1)
+
+    def test_subagent_stop_rejects_changed_root_with_same_direct_parent(self):
+        root_id, child_id, root_page, child_page, payload = self._native_child_fixture()
+        self.assertIn("hookSpecificOutput", handle(
+            {**payload, "hook_event_name": "SubagentStart"}, self.data,
+            wall=1000000, monotonic=5000, home=self.root))
+        other_root = "00000000-0000-7000-8000-000000000003"
+        with sqlite3.connect(self.root / "state_5.sqlite") as catalog:
+            catalog.execute("INSERT INTO threads VALUES(?,?,?,?,?,?,?)", (
+                other_root, "synthetic other root", None, None, None, '"vscode"', str(root_page)))
+            catalog.execute("UPDATE threads SET source=? WHERE id=?", (
+                json.dumps({"subagent": {"thread_spawn": {"parent_thread_id": other_root}}}),
+                root_id))
+        with child_page.open("a") as output:
+            output.write(json.dumps(counter(150)) + "\n")
+        self.assertIn("systemMessage", handle(
+            {**payload, "session_id": other_root, "hook_event_name": "SubagentStop",
+             "agent_transcript_path": str(child_page)}, self.data,
+            wall=1000001, monotonic=5001, home=self.root))
+        receipt = self.report()
+        self.assertFalse(receipt["source_identity_verified"])
+        self.assertEqual(receipt["usage_status"], "source_identity_unavailable")
+        self.assertIsNone(receipt["usage"])
+        self.assertIsNone(receipt["task_usage"])
+        self.assertIsNone(receipt["task"])
+        self.assertEqual(receipt["stop_contexts"], [])
+        with sqlite3.connect(self.data / "auto-reports/timing.sqlite3") as timing:
+            baseline = json.loads(timing.execute("SELECT baseline FROM turns").fetchone()[0])
+        self.assertEqual(baseline["root_hash"], stable_hash(root_id))
+        self.assertEqual(baseline["parent_hash"], stable_hash(root_id))
+        self.assertEqual(baseline["usage"]["total"], 100)
+        self.assertNotIn(root_id, json.dumps(baseline))
+        self.assertNotIn(child_id, json.dumps(baseline))
+
+    def test_subagent_stop_requires_original_root_proof_in_legacy_baseline(self):
+        _, _, _, child_page, payload = self._native_child_fixture()
+        self.assertIn("hookSpecificOutput", handle(
+            {**payload, "hook_event_name": "SubagentStart"}, self.data,
+            wall=1000000, monotonic=5000, home=self.root))
+        with sqlite3.connect(self.data / "auto-reports/timing.sqlite3") as timing:
+            baseline = json.loads(timing.execute("SELECT baseline FROM turns").fetchone()[0])
+            baseline.pop("root_hash", None)
+            timing.execute("UPDATE turns SET baseline=?", (json.dumps(baseline),))
+        with child_page.open("a") as output:
+            output.write(json.dumps(counter(150)) + "\n")
+        self.assertIn("systemMessage", handle(
+            {**payload, "hook_event_name": "SubagentStop",
+             "agent_transcript_path": str(child_page)}, self.data,
+            wall=1000001, monotonic=5001, home=self.root))
+        receipt = self.report()
+        self.assertFalse(receipt["source_identity_verified"])
+        self.assertEqual(receipt["usage_status"], "source_identity_unavailable")
+        self.assertIsNone(receipt["usage"])
+
+    def test_child_baseline_cannot_be_reused_as_parent_report(self):
+        _, child_id, _, child_page, payload = self._native_child_fixture()
+        self.assertIn("hookSpecificOutput", handle(
+            {**payload, "hook_event_name": "SubagentStart"}, self.data,
+            wall=1000000, monotonic=5000, home=self.root))
+        with sqlite3.connect(self.root / "state_5.sqlite") as catalog:
+            catalog.execute("UPDATE threads SET source=? WHERE id=?", ('"vscode"', child_id))
+        child_page.write_text("".join(json.dumps(item) + "\n" for item in (
+            {"type": "session_meta", "payload": {"id": child_id, "source": "vscode"}},
+            {"type": "turn_context", "payload": {"turn_id": payload["turn_id"],
+                                                "model": "synthetic-other-root-model"}},
+            native_counter(child_id, payload["turn_id"], 150, turn_total=50),
+        )))
+        self.assertIn("systemMessage", handle(
+            {"session_id": child_id, "turn_id": payload["turn_id"],
+             "hook_event_name": "Stop", "transcript_path": str(child_page)},
+            self.data, wall=1000001, monotonic=5001, home=self.root))
+        receipt = self.report()
+        self.assertFalse(receipt["source_identity_verified"])
+        self.assertIsNone(receipt["usage"])
+        self.assertIsNone(receipt["task_usage"])
+        self.assertEqual(receipt["stop_contexts"], [])
+
+    def test_subagent_receipt_documents_show_own_scope_and_escaped_parent(self):
+        _, _, _, child_page, payload = self._native_child_fixture()
+        handle({**payload, "hook_event_name": "SubagentStart"}, self.data,
+               wall=1000000, monotonic=5000, home=self.root)
+        with child_page.open("a") as output:
+            output.write(json.dumps(counter(150)) + "\n")
+        handle({**payload, "hook_event_name": "SubagentStop",
+                "agent_transcript_path": str(child_page)}, self.data,
+               wall=1000001, monotonic=5001, home=self.root)
+        receipt = self.report()
+        receipt["task"]["parent_name"] = "Synthetic <parent> [data]"
+        for completed in (False, True):
+            with self.subTest(completed=completed):
+                receipt["completion_observed"] = completed
+                receipt["scope"] = ("subagent_turn_completion_boundary" if completed
+                                    else "subagent_turn_stop_boundary")
+                markdown, html = _documents(receipt)
+                self.assertNotIn("主代理", markdown)
+                self.assertNotIn("主代理", html)
+                self.assertIn("@" + receipt["task"]["selector"], markdown)
+                self.assertIn("Synthetic &lt;parent&gt; &#91;data&#93;", markdown)
+                self.assertIn("Synthetic &lt;parent&gt; [data]", html)
+                self.assertNotIn("Synthetic <parent>", html)
+        # Missing identity still has child scope, without invented parent names.
+        receipt["task"] = None
+        markdown, html = _documents(receipt)
+        self.assertNotIn("主代理", markdown)
+        self.assertNotIn("主代理", html)
 
     def test_native_subagent_start_rejects_wrong_lineage_and_foreign_transcript(self):
         root_id, child_id, _, child_page, payload = self._native_child_fixture()

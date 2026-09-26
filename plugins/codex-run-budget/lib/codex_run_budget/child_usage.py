@@ -251,6 +251,7 @@ def _scan(
         "malformed": False,
         "lifecycle_malformed": False,
         "identity_ambiguous": False,
+        "metadata_conflict": False,
         "terminal_reset": False,
         # Lifecycle evidence is retained in memory only.  It lets collection
         # distinguish a child that finished before the parent window from a
@@ -320,11 +321,21 @@ def _scan(
         payload_type = payload.get("type")
         if record_type == "session_meta":
             candidate, candidate_parent = _metadata(payload)
+            raw_id = _bounded_text(payload.get("id"))
+            if (
+                expected_child is not None
+                and raw_id == expected_child
+                and expected_parent is not None
+                and candidate_parent != expected_parent
+            ):
+                # A later matching record cannot repair contradictory
+                # attribution for the same child. Metadata for other ids is
+                # expected when a fork includes its parent's history.
+                result["metadata_conflict"] = True
             if candidate is not None and candidate_parent is not None:
                 if expected_child is None or candidate == expected_child:
                     if expected_parent is None or candidate_parent == expected_parent:
                         child_id, parent_id, matched_metadata = candidate, candidate_parent, True
-            raw_id = _bounded_text(payload.get("id"))
             active_thread = raw_id
         if record_type != "token_usage_record":
             if record_type == "event_msg" and payload_type in (
@@ -410,6 +421,10 @@ def _scan(
             or prior["stamp"] != item["stamp"]
         ):
             prior["conflict"] = True
+    if result["metadata_conflict"]:
+        result["identity_ambiguous"] = True
+        result["terminal_observed"] = False
+        return result
     result["child_id"] = child_id if matched_metadata else None
     result["parent_id"] = parent_id if matched_metadata else None
     result["requests"] = list(observations.values())
@@ -494,6 +509,21 @@ def _save_scan(root: Path, scan: dict[str, Any], *, parent_hash: str, agent_hash
     try:
         connection = _connect(root)
         connection.execute("BEGIN IMMEDIATE")
+        if scan.get("metadata_conflict"):
+            # Revoke previously cached attribution as well. Keeping a
+            # conflicting receipt as merely partial would still include its
+            # tokens, and a missing later source could resurrect that sum.
+            if _valid_hash(agent_hash):
+                connection.execute(
+                    "UPDATE requests SET conflict=1 WHERE child_hash=?", (agent_hash,)
+                )
+                connection.execute(
+                    "UPDATE agents SET status=CASE WHEN status='observed' THEN 'partial' "
+                    "ELSE status END, terminal_observed=0 WHERE child_hash=?",
+                    (agent_hash,),
+                )
+            connection.commit()
+            return
         existing = connection.execute(
             "SELECT * FROM agents WHERE identity_hash=?", (identity_hash,)
         ).fetchone()
@@ -670,6 +700,7 @@ def _empty_scan() -> dict[str, Any]:
         "malformed": False,
         "lifecycle_malformed": False,
         "identity_ambiguous": False,
+        "metadata_conflict": False,
         "terminal_reset": False,
         "lifecycle": [],
         "lifecycle_suffix_observed": False,
@@ -1037,7 +1068,26 @@ def collect(root: Path, session: str, since: float, until: float, *, home=None,
                 )
                 scans[child_hash] = scan
                 scan_bytes += int(scan.get("scan_bytes", 0) or 0)
-                if scan.get("child_id") == child_id:
+                if scan.get("metadata_conflict"):
+                    # Both the fresh scan and older receipts now have
+                    # disputed lineage. Preserve the missing row, never its
+                    # subtotal, and retain the rejection in the cache.
+                    statuses[child_hash] = (
+                        "partial"
+                        if all_items[child_hash]
+                        or (cached_agent and cached_agent["status"] != "unavailable")
+                        else "unavailable"
+                    )
+                    all_items[child_hash].clear()
+                    terminals[child_hash] = False
+                    _save_scan(
+                        Path(root),
+                        scan,
+                        parent_hash=stable_hash(row.get("parent_id") or session),
+                        agent_hash=child_hash,
+                        now=time.time(),
+                    )
+                elif scan.get("child_id") == child_id:
                     all_items[child_hash].extend(scan.get("requests", []))
                     # A fresh transcript is authoritative for terminal state.
                     # A later task_started/request invalidates an old Stop;

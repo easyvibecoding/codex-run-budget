@@ -7,6 +7,7 @@ import tempfile
 import time
 import unittest
 from datetime import datetime, timezone
+from html import escape
 from pathlib import Path
 from unittest.mock import patch
 
@@ -16,6 +17,7 @@ sys.path.insert(0, str(ROOT / "plugins/codex-run-budget/lib"))
 from codex_run_budget.auto_preview import preview, render_card  # noqa: E402
 from codex_run_budget.auto_report import configure, handle, observed_total, recent  # noqa: E402
 from codex_run_budget.governor import Governor  # noqa: E402
+from codex_run_budget.report_i18n import LOCALES, ReportText  # noqa: E402
 from codex_run_budget.util import stable_hash  # noqa: E402
 from test_auto_report import counter, native_counter  # noqa: E402
 
@@ -65,6 +67,135 @@ class AutoPreviewTest(unittest.TestCase):
 
     def preview(self, **extra):
         return preview(self.data, TASK, "turn-1", output_dir=self.output, home=self.root, **extra)
+
+    def nested_child(self):
+        parent = "00000000-0000-7000-8000-000000000002"
+        child = "00000000-0000-7000-8000-000000000003"
+        turn = "synthetic-nested-turn"
+        parent_source = {"subagent": {"thread_spawn": {"parent_thread_id": TASK}}}
+        child_source = {"subagent": {"thread_spawn": {"parent_thread_id": parent}}}
+        transcript = self.root / "synthetic-nested.jsonl"
+        stamp = datetime.fromtimestamp(time.time(), timezone.utc).isoformat()
+        transcript.write_text("".join(json.dumps(row) + "\n" for row in (
+            {"type": "session_meta", "timestamp": stamp,
+             "payload": {"id": child, "source": child_source}},
+            {"type": "event_msg", "timestamp": stamp,
+             "payload": {"type": "task_started", "turn_id": turn, "thread_id": child}},
+            counter(100),
+        )))
+        self.db.executemany(
+            "INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                (parent, 'direct <parent> "example"', "parent", "worker", "/root/parent",
+                 json.dumps(parent_source), None, str(self.workspace)),
+                (child, "nested <child>", "child", "worker", "/root/parent/child",
+                 json.dumps(child_source), str(transcript), str(self.workspace)),
+            ),
+        )
+        self.db.commit()
+        payload = {"session_id": TASK, "agent_id": child, "turn_id": turn,
+                   "hook_event_name": "SubagentStart", "transcript_path": str(transcript)}
+        self.assertEqual(set(handle(payload, self.data, home=self.root)), {"hookSpecificOutput"})
+        with transcript.open("a") as output:
+            output.write("".join(json.dumps(row) + "\n" for row in (
+                {"type": "turn_context", "payload": {
+                    "turn_id": turn, "model": "synthetic-child-model", "effort": "high"
+                }},
+                counter(150),
+            )))
+        return child, parent, turn, transcript
+
+    def test_nested_child_card_shows_own_usage_and_escaped_direct_parent(self):
+        child, parent, turn, _ = self.nested_child()
+        result = preview(self.data, child, turn, output_dir=self.output, home=self.root)
+        self.assertEqual(result["status"], "preview")
+        content = next(self.output.glob("*.html")).read_text()
+        for expected in ("nested &lt;child&gt;", "@" + stable_hash(child)[:12],
+                         '由 direct &lt;parent&gt; &quot;example&quot; 派生',
+                         "Task 累積 Token（此子代理）", "本輪增加 Token（此子代理）",
+                         "本輪此子代理設定", "此子代理＋其後代", "後代已觀測小計",
+                         'data-metric="task-total">150</dd>',
+                         'data-metric="turn-delta">+50</dd>'):
+            self.assertIn(expected, content)
+        for unexpected in ("<parent>", "<child>", "主代理", parent, child, TASK):
+            self.assertNotIn(unexpected, content)
+
+    def test_child_preview_rejects_changed_ancestor_root_before_reading_usage(self):
+        child, parent, turn, _ = self.nested_child()
+        other_root = "00000000-0000-7000-8000-000000000004"
+        self.db.execute("INSERT INTO threads VALUES (?, ?, NULL, NULL, NULL, 'vscode', NULL, ?)",
+                        (other_root, "synthetic other root", str(self.workspace)))
+        self.db.execute("UPDATE threads SET source=? WHERE id=?", (
+            json.dumps({"subagent": {"thread_spawn": {"parent_thread_id": other_root}}}), parent
+        ))
+        self.db.commit()
+        self.assert_child_identity_unavailable(child, turn)
+
+    def test_child_preview_rejects_legacy_baseline_without_root_evidence(self):
+        child, _, turn, _ = self.nested_child()
+        with sqlite3.connect(self.data / "auto-reports/timing.sqlite3") as timing:
+            key = stable_hash([child, turn])
+            baseline = json.loads(timing.execute(
+                "SELECT baseline FROM turns WHERE key=?", (key,)
+            ).fetchone()[0])
+            baseline.pop("root_hash", None)
+            timing.execute("UPDATE turns SET baseline=? WHERE key=?", (json.dumps(baseline), key))
+        self.assert_child_identity_unavailable(child, turn)
+
+    def test_child_preview_rejects_changed_direct_parent_before_reading_usage(self):
+        child, _, turn, transcript = self.nested_child()
+        source = {"subagent": {"thread_spawn": {"parent_thread_id": TASK}}}
+        self.db.execute("UPDATE threads SET source=? WHERE id=?", (json.dumps(source), child))
+        self.db.commit()
+        rows = [json.loads(row) for row in transcript.read_text().splitlines()]
+        rows[0]["payload"]["source"] = source
+        transcript.write_text("".join(json.dumps(row) + "\n" for row in rows))
+        self.assert_child_identity_unavailable(child, turn)
+
+    def test_child_preview_rejects_role_change_to_root_with_foreign_usage_and_settings(self):
+        child, _, turn, transcript = self.nested_child()
+        self.db.execute("UPDATE threads SET source='vscode' WHERE id=?", (child,))
+        self.db.commit()
+        rows = [json.loads(row) for row in transcript.read_text().splitlines()]
+        rows[0]["payload"]["source"] = "vscode"
+        rows.extend((
+            {"type": "turn_context", "payload": {
+                "turn_id": turn, "model": "synthetic-foreign-root-model", "effort": "low"
+            }},
+            counter(98700),
+        ))
+        transcript.write_text("".join(json.dumps(row) + "\n" for row in rows))
+        result = preview(self.data, child, turn, output_dir=self.output, home=self.root)
+        self.assertEqual(result["status"], "source_unavailable")
+        self.assertFalse(self.output.exists())
+        self.assert_child_identity_unavailable(child, turn)
+
+    def test_root_preview_rejects_role_change_to_child(self):
+        other_root = "00000000-0000-7000-8000-000000000004"
+        source = {"subagent": {"thread_spawn": {"parent_thread_id": other_root}}}
+        self.db.execute("INSERT INTO threads VALUES (?, ?, NULL, NULL, NULL, 'vscode', NULL, ?)",
+                        (other_root, "synthetic other root", str(self.workspace)))
+        self.db.execute("UPDATE threads SET source=? WHERE id=?", (json.dumps(source), TASK))
+        self.db.commit()
+        rows = [json.loads(row) for row in self.transcript.read_text().splitlines()]
+        rows[0]["payload"]["source"] = source
+        self.transcript.write_text("".join(json.dumps(row) + "\n" for row in rows))
+        self.assertEqual(self.preview()["status"], "source_unavailable")
+        self.assert_child_identity_unavailable(TASK, "turn-1")
+
+    def assert_child_identity_unavailable(self, child, turn):
+        with patch("codex_run_budget.auto_preview.snapshot") as observed, patch(
+            "codex_run_budget.auto_preview.collect"
+        ) as children, patch("codex_run_budget.turn_quota.observe") as quota, patch(
+            "codex_run_budget.auto_preview.render_card"
+        ) as renderer:
+            result = preview(self.data, child, turn, output_dir=self.output, home=self.root)
+        self.assertEqual(result["status"], "source_unavailable")
+        observed.assert_not_called()
+        children.assert_not_called()
+        quota.assert_not_called()
+        renderer.assert_not_called()
+        self.assertFalse(self.output.exists())
 
     def test_inline_reference_real_snapshot_escaped_private_and_no_state_change(self):
         before = recent(self.data)
@@ -335,6 +466,10 @@ class AutoPreviewTest(unittest.TestCase):
         self.assertIn(child_selector, own_card)
         self.assertNotIn(sibling_selector, own_card)
         self.assertIn("same &lt;worker&gt;", own_card)
+        self.assertIn("由 改善 &lt;報告&gt; $total 派生", own_card)
+        self.assertIn("本輪增加 Token（此子代理）", own_card)
+        self.assertIn("本輪此子代理設定", own_card)
+        self.assertNotIn("主代理", own_card)
         self.assertIn('data-metric="task-total">300</dd>', own_card)
         self.assertIn('data-metric="turn-delta">+200</dd>', own_card)
         root_visuals = self.root / "visualizations/1970/01/01" / TASK
@@ -349,6 +484,9 @@ class AutoPreviewTest(unittest.TestCase):
         self.assertIn(child_selector, parent_card)
         self.assertIn(sibling_selector, parent_card)
         self.assertIn('data-metric="turn-delta">+500</dd>', parent_card)
+        self.assertIn("Task 累積 Token（主代理）", parent_card)
+        self.assertIn("本輪增加 Token（主代理）", parent_card)
+        self.assertIn("本輪主代理設定", parent_card)
         self.assertNotIn('data-metric="turn-delta">+770</dd>', parent_card)
         self.assertNotIn(child, parent_card)
         self.assertNotIn(sibling, parent_card)
@@ -411,6 +549,30 @@ class AutoPreviewTest(unittest.TestCase):
         self.assertIn('data-metric="turn-delta">0</dd>', card)
         self.assertIn('<p class="report-context-single">未觀測</p>', card)
         self.assertNotIn("Fast", card)
+
+    def test_child_and_root_card_scopes_are_localized_in_all_nine_languages(self):
+        receipt = {
+            "key": "synthetic", "task_name": "Synthetic example", "usage": None,
+            "contexts": [], "elapsed_seconds": 0, "captured_at": "12:00:00 UTC",
+            "subagents": {"status": "none"},
+        }
+        labels = {
+            "parent": "own_agent", "combined": "child_combined",
+            "task_total": "child_task_total", "turn_delta": "child_turn_delta",
+            "context_heading": "child_context_heading",
+            "child_subtotal": "child_descendant_subtotal", "card_note": "child_card_note",
+        }
+        for locale in LOCALES:
+            with self.subTest(locale=locale):
+                text = ReportText(locale)
+                root = render_card({**receipt, "locale": locale, "scope": "parent"})
+                for scope in ("subagent", "subagent_turn_stop_boundary"):
+                    child = render_card({**receipt, "locale": locale, "scope": scope})
+                    for root_key, child_key in labels.items():
+                        self.assertIn(escape(text(root_key)), root)
+                        self.assertIn(escape(text(child_key)), child)
+                        if root_key != "parent":
+                            self.assertNotIn(escape(text(root_key)), child)
 
     def test_old_task_counter_without_this_turn_write_is_pending_not_zero(self):
         lines = self.transcript.read_text().splitlines()

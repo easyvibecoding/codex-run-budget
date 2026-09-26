@@ -495,7 +495,7 @@ class ReconcileTest(unittest.TestCase):
         finally:
             configure(self.data, enabled=False)
 
-    def test_subagent_stop_reconciles_own_turn_with_shared_root_identity(self):
+    def _stopped_subagent(self):
         child = "11111111-2222-4333-8444-555555555556"
         child_turn = "example-child-turn"
         source = {"subagent": {"thread_spawn": {"parent_thread_id": TASK}}}
@@ -528,6 +528,10 @@ class ReconcileTest(unittest.TestCase):
         child_key = stable_hash([child, child_turn])
         original = (self.directory / (child_key + ".json")).read_bytes()
         self.assertEqual(json.loads(original)["usage"]["total"], 200)
+        return child, child_turn, child_path, stop, child_key, original
+
+    def test_subagent_stop_reconciles_own_turn_with_shared_root_identity(self):
+        child, child_turn, child_path, stop, child_key, original = self._stopped_subagent()
         with patch("codex_run_budget.reconcile.subprocess.Popen", return_value=Mock()) as spawn:
             self.assertTrue(schedule(stop, self.data, home=self.home))
             spawn.assert_called_once()
@@ -547,6 +551,53 @@ class ReconcileTest(unittest.TestCase):
         self.assertEqual(revised["task"]["parent_hash"], stable_hash(TASK))
         self.assertNotIn("agent_path", revised["task"])
         self.assertEqual((self.directory / (child_key + ".json")).read_bytes(), original)
+
+    def test_child_baseline_cannot_reconcile_as_parent(self):
+        child, child_turn, child_path, _, child_key, original = self._stopped_subagent()
+        with sqlite3.connect(self.home / "state_5.sqlite") as catalog:
+            catalog.execute("UPDATE threads SET source=? WHERE id=?", ('"vscode"', child))
+        child_path.write_text("".join(json.dumps(item) + "\n" for item in (
+            {"type": "session_meta", "payload": {"id": child, "source": "vscode"}},
+            fixtures.native_counter(child, child_turn, 450, turn_total=350),
+            self.native_event("task_complete", turn=child_turn, stamp=self.now + 2),
+        )))
+        stop = {"hook_event_name": "Stop", "session_id": child, "turn_id": child_turn,
+                "transcript_path": str(child_path)}
+        with patch("codex_run_budget.reconcile.subprocess.Popen", return_value=Mock()):
+            self.assertTrue(schedule(stop, self.data, home=self.home))
+        self.assertEqual(run(stop, self.data, home=self.home, delays=(0,))["status"], "failed")
+        self.assertFalse((self.directory / (child_key + ".reconciled.json")).exists())
+        self.assertEqual((self.directory / (child_key + ".json")).read_bytes(), original)
+
+    def test_subagent_reconcile_requires_original_baseline_root(self):
+        child, child_turn, child_path, stop, child_key, original = self._stopped_subagent()
+        late = fixtures.native_counter(child, child_turn, 450, request=150, turn_total=350)
+        late["payload"].update(session_id=TASK, root_turn_id="example-root-turn")
+        with child_path.open("a") as output:
+            output.write(json.dumps(late) + "\n")
+            output.write(json.dumps(self.native_event(
+                "task_complete", turn=child_turn, stamp=self.now + 2,
+                thread_id=child, session_id=TASK, root_turn_id="example-root-turn"
+            )) + "\n")
+        for proof in (None, stable_hash("synthetic-original-other-root")):
+            with self.subTest(original_root=proof):
+                with sqlite3.connect(self.directory / "timing.sqlite3") as timing:
+                    baseline = json.loads(timing.execute(
+                        "SELECT baseline FROM turns WHERE key=?", (child_key,)).fetchone()[0])
+                    if proof is None:
+                        baseline.pop("root_hash", None)
+                    else:
+                        baseline["root_hash"] = proof
+                    timing.execute("UPDATE turns SET baseline=? WHERE key=?",
+                                   (json.dumps(baseline), child_key))
+                with patch("codex_run_budget.reconcile.subprocess.Popen", return_value=Mock()):
+                    self.assertTrue(schedule(stop, self.data, home=self.home))
+                self.assertEqual(run(stop, self.data, home=self.home, delays=(0,))["status"],
+                                 "failed")
+                self.assertFalse((self.directory / (child_key + ".reconciled.json")).exists())
+                self.assertEqual((self.directory / (child_key + ".json")).read_bytes(), original)
+                with sqlite3.connect(self.directory / "timing.sqlite3") as timing:
+                    timing.execute("DELETE FROM reconciliations WHERE key=?", (child_key,))
 
 
 if __name__ == "__main__":

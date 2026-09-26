@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .auto_report import (
+    _baseline_identity_matches,
     _connect,
     _delta,
     _directory,
@@ -218,6 +219,15 @@ def run(payload: dict, root: Path, *, home=None, delays=DELAYS) -> dict:
                 or not original.get("source_identity_verified")):
             raise ValueError("receipt identity unavailable")
         baseline = json.loads(row["baseline"])
+        if (not _baseline_identity_matches(
+            baseline, row["session_hash"],
+            root_hash=selected.get("root_hash"),
+            parent_hash=(original.get("task") or {}).get("parent_hash")
+            if selected.get("allow_subagent") else None,
+        ) or (selected.get("allow_subagent")
+              and (original.get("task") or {}).get("root_hash") != selected["root_hash"])):
+            # A Stop receipt cannot supply missing proof of the Start root.
+            raise ValueError("baseline identity unavailable")
         until = datetime.fromisoformat(original["stopped_at"]).timestamp()
         deadline = time.monotonic() + 25
         state = "expired"
@@ -240,7 +250,7 @@ def run(payload: dict, root: Path, *, home=None, delays=DELAYS) -> dict:
                 raise ValueError("completion identity mismatch")
             if selected.get("allow_subagent") and (
                 current.get("parent_hash") != baseline.get("parent_hash")
-                or (original.get("task") or {}).get("root_hash") != selected["root_hash"]
+                or (original.get("task") or {}).get("parent_hash") != baseline.get("parent_hash")
             ):
                 raise ValueError("subagent lineage mismatch")
             usage, status = _delta(baseline, current)

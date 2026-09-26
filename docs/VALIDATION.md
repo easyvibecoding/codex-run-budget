@@ -5,6 +5,38 @@ This file preserves dated release checks. The current package version is in
 [changelog](../CHANGELOG.md) for later changes. Historical installed canaries
 do not establish the trust or active runtime of a current installation.
 
+## 0.19.5 child lineage and presentation — 2026-09-26
+
+The compatible signed runtime has sequence `1790390014` and SHA-256
+`04d0077053b479d9caee5822f0cdbf8bc51a283d9b222bc99dfc482b10274e69`.
+Ruff, 466 unit tests, repository and plugin validation, signature verification,
+and the staged sensitive-data scan passed. Regressions first reproduced both
+orders of contradictory parent metadata, reuse of an older accepted child cache,
+missing or changed baseline roots, and incorrect child labels. Independent
+review then found a child-to-root role change could bypass the preview guard;
+the shared baseline identity check closed that case across preview, Stop and
+completion reconciliation. The reviewer's original counterexample now returns
+`source_unavailable` without creating an artifact.
+
+A disposable Codex home installed 0.19.5 with a separate Run Budget data directory.
+All 12 hook definitions matched the previous reviewed definitions and trust
+hashes; only this isolated fixture received those existing grants. Native
+`hooks/list` read-back reported 12 enabled/trusted hooks and zero needing review.
+A real `codex exec` spawned one child, and both supplied inline preview references.
+Installed hooks produced two Stop receipts and two completion revisions. The
+child's preview used the child-specific labels, showed its direct parent and
+the same hashed selector as the parent report's child row. The saved child
+baseline's root and direct-parent hashes matched the parent receipt. Observed
+own-turn totals were 53,600 for the child and 62,772 for the parent, with a
+separate parent descendant subtotal of 53,600. Receipts contained no raw native
+UUIDs. Temporary authentication material was removed after the run.
+
+The canary initially saved a native API capture under the reserved `hooks.json`
+filename, causing a configuration warning. It was renamed, and the final native
+trust read-back passed. This check proves CLI lifecycle and generated preview
+content; Desktop painting was not observed. Token totals are canary observations,
+not plugin overhead or account billing.
+
 ## 0.19.4 concurrent starts and child preview — 2026-09-26
 
 The signed runtime was rebuilt at sequence `1790388094` with SHA-256
