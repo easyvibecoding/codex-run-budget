@@ -74,6 +74,13 @@ verifies the source remote and decides `alignment-needed`,
 `no-alignment-needed`, or `blocked` from actual diffs and destination state.
 Only an evidenced decision advances that pair's cursor.
 
+Review prompts and subsequent relay instructions request that user-visible JSON
+be enclosed in a Markdown fenced code block with the `json` language label.
+Required usage-card or visualization references stay outside the block. The
+coordinator does not parse the final reply as JSON; CLI output remains ordinary
+JSON for command callers. This presentation request guides future model replies;
+it does not rewrite historical replies or control the Desktop renderer.
+
 The two Tasks are bound only within their pair. Their later Stops send short
 summaries through the native `send_message_to_thread` tool to the same bound
 counterpart. A relayed turn's Stop is suppressed so it does not echo back.

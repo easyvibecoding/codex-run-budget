@@ -2,6 +2,7 @@
 
 ## 0.19.6 - 2026-09-26
 
+- Request JSON code blocks consistently in paired review prompts, Task creation and later relays, keeping usage-card references outside the block.
 - Keep a durable, hashed child revocation when native parent metadata conflicts, including when no request has been cached yet.
 - Reject delayed scans atomically after revocation and recheck revocations before collecting subtotals. An ordinary matching scan cannot restore an unverified child's usage.
 - Bound revocation storage without discarding exclusion evidence; unreadable or saturated revocation state preserves partial or unavailable reporting.

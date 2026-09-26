@@ -5,6 +5,21 @@ This file preserves dated release checks. The current package version is in
 [changelog](../CHANGELOG.md) for later changes. Historical installed canaries
 do not establish the trust or active runtime of a current installation.
 
+## 0.19.6 paired review JSON presentation — 2026-09-26
+
+The compatible signed runtime has sequence `1790394896` and SHA-256
+`b1672ae5b7b2701e19eb2c0bf1e5dc1e52f0bc4557e3bbd62cda3d356148157b`.
+Ruff, all 480 tests, repository validation and signature verification passed.
+Synthetic local Git pairs exercised the actual signed archive's initial prompt,
+Task-creation instruction and bound relay. All three requested a `json` fenced
+code block with visualization references outside it; the relay also passed the
+rule to its recipient. Independent inspection confirmed that only presentation
+strings changed, and the archive's source matched the checkout.
+
+These checks establish the generated instructions, not guaranteed model
+compliance or Desktop rendering. Existing Task runtime pins and historical
+messages are unchanged.
+
 ## 0.19.6 concurrent child-cache revocation — 2026-09-26
 
 The compatible signed runtime has sequence `1790393593` and SHA-256

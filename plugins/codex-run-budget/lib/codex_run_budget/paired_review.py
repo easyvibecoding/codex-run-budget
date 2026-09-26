@@ -24,6 +24,11 @@ SHA = re.compile(r"[0-9a-f]{40}\Z")
 PAIR_ID = re.compile(r"[a-z][a-z0-9_-]{0,63}\Z")
 PAIR_DIR = "paired-review-pairs"
 FEATURE_FILE = "paired-review-experimental.json"
+JSON_REPLY_FORMAT = (
+    "Wrap user-visible JSON in a Markdown fenced code block: put ```json on its "
+    "own opening line and ``` on its own closing line. Do not emit bare JSON. "
+    "Keep any required usage-card or visualization reference outside the code block."
+)
 
 
 def _run(command: list[str], *, timeout: int = 60) -> str:
@@ -245,7 +250,8 @@ def _prompt(source: dict[str, str], destination: dict[str, str], mirror: Path,
         "Choose alignment-needed, no-alignment-needed, or blocked. "
         "Do not copy source behavior solely because these projects are paired. "
         "If evidence is unavailable, choose blocked. In the final JSON, include a short "
-        "reason and concrete file paths or observations."
+        "reason and concrete file paths or observations. "
+        f"{JSON_REPLY_FORMAT}"
     )
 
 
@@ -529,7 +535,9 @@ def _stop_decision_pair(root: Path, pair_id: str,
                 "decision or blocker when relevant; omit credentials and private "
                 "transcript text. Do not create another Task. Prefix the message "
                 "with 'Paired review relay:' and ask the receiver to review only "
-                "new evidence. After the send succeeds, run "
+                "new evidence. Include this presentation rule in the message for "
+                f"the receiver, and apply it to your own reply: {JSON_REPLY_FORMAT} "
+                "After the send succeeds, run "
                 f"{command} relay-sent {shlex.quote(name)} "
                 f"{shlex.quote(session_id)} {shlex.quote(turn_id)}. "
                 "If sending is uncertain, leave the relay reserved and report it."
@@ -559,7 +567,9 @@ def _stop_decision_pair(root: Path, pair_id: str,
         "list_projects before creation. First run "
         f"{command} prompt {shlex.quote(name)} and "
         f"{command} reserve {shlex.quote(name)} {pending['head']}; "
-        "then create the Task with title 'Review counterpart changes: "
+        "then include this presentation rule in the Task prompt, even if the "
+        f"installed prompt command omits it: {JSON_REPLY_FORMAT} "
+        "Create the Task with title 'Review counterpart changes: "
         f"{name} {pending['head'][:7]}', record its real threadId with dispatched to bind "
         "this Task one-to-one with that counterpart using the same pair ID, and "
         "resolve only after reading its evidenced decision. Pin the created "
