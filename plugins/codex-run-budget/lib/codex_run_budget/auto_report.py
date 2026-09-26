@@ -993,8 +993,17 @@ def _baseline_identity_matches(
 ) -> bool:
     """Require the original report role and lineage, including older child starts."""
     was_child = (baseline.get("source_role") == "subagent"
+                 or baseline.get("start_event") == "SubagentStart"
                  or baseline.get("parent_hash") is not None
                  or baseline.get("root_hash") is not None)
+    if "source_role" in baseline:
+        role = baseline["source_role"]
+        if role not in ("parent", "subagent") or (role == "parent" and was_child):
+            return False
+    elif not was_child and baseline.get("start_event") not in START_EVENTS:
+        # Older baselines retain child hashes or a supported Start event.
+        # Do not turn an explicit contradiction or absent role proof into a root.
+        return False
     is_child = root_hash is not None
     return (
         baseline.get("task_hash") == task_hash

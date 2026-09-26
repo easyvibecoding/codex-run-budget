@@ -19,7 +19,7 @@ from codex_run_budget.auto_report import configure, handle, observed_total, rece
 from codex_run_budget.governor import Governor  # noqa: E402
 from codex_run_budget.report_i18n import LOCALES, ReportText  # noqa: E402
 from codex_run_budget.util import stable_hash  # noqa: E402
-from test_auto_report import counter, native_counter  # noqa: E402
+from test_auto_report import baseline_role_case, counter, native_counter  # noqa: E402
 
 TASK = "00000000-0000-7000-8000-000000000001"
 
@@ -141,6 +141,27 @@ class AutoPreviewTest(unittest.TestCase):
             baseline.pop("root_hash", None)
             timing.execute("UPDATE turns SET baseline=? WHERE key=?", (json.dumps(baseline), key))
         self.assert_child_identity_unavailable(child, turn)
+
+    def test_child_preview_rejects_conflicting_or_unknown_explicit_role(self):
+        child, _, turn, _ = self.nested_child()
+        key = stable_hash([child, turn])
+        with sqlite3.connect(self.data / "auto-reports/timing.sqlite3") as timing:
+            baseline = json.loads(timing.execute(
+                "SELECT baseline FROM turns WHERE key=?", (key,)).fetchone()[0])
+        for case in ("parent", "unknown", "null", "legacy", "control"):
+            with self.subTest(case=case):
+                with sqlite3.connect(self.data / "auto-reports/timing.sqlite3") as timing:
+                    timing.execute("UPDATE turns SET baseline=? WHERE key=?", (
+                        json.dumps(baseline_role_case(baseline, case)), key))
+                if case in ("legacy", "control"):
+                    result = preview(self.data, child, turn, output_dir=self.output, home=self.root)
+                    self.assertEqual(result["status"], "preview")
+                    path = Path(json.loads(result["reference"].split("\ue202")[1][:-1])["path"])
+                    self.assertIn('data-metric="turn-delta">+50</dd>', path.read_text())
+                else:
+                    self.assertEqual(preview(self.data, child, turn,
+                        output_dir=self.output, home=self.root)["status"], "source_unavailable")
+                    self.assert_child_identity_unavailable(child, turn)
 
     def test_child_preview_rejects_changed_direct_parent_before_reading_usage(self):
         child, _, turn, transcript = self.nested_child()

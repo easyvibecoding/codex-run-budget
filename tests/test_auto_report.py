@@ -55,6 +55,19 @@ def native_counter(task, turn, total, *, request=None, turn_total=None):
     }}
 
 
+def baseline_role_case(baseline, case):
+    result = dict(baseline)
+    if case in ("legacy", "no-evidence"):
+        result.pop("source_role", None)
+        if case == "no-evidence":
+            for key in ("start_event", "root_hash", "parent_hash"):
+                result.pop(key, None)
+    elif case != "control":
+        result["source_role"] = {"parent": "parent", "unknown": "synthetic-unknown-role",
+                                 "null": None}[case]
+    return result
+
+
 class AutoReportTest(unittest.TestCase):
     def setUp(self):
         locale = patch("codex_run_budget.auto_report.resolve_locale",
@@ -702,6 +715,62 @@ class AutoReportTest(unittest.TestCase):
         self.assertFalse(receipt["source_identity_verified"])
         self.assertEqual(receipt["usage_status"], "source_identity_unavailable")
         self.assertIsNone(receipt["usage"])
+
+    def test_child_stop_rejects_explicit_role_contradiction_and_keeps_legacy_control(self):
+        _, child, _, child_page, payload = self._native_child_fixture()
+        original_source = child_page.read_bytes()
+        for case in ("parent", "unknown", "null", "legacy", "control"):
+            with self.subTest(case=case):
+                self.data = self.root / ("child-role-" + case)
+                child_page.write_bytes(original_source)
+                self.assertIn("hookSpecificOutput", handle(
+                    {**payload, "hook_event_name": "SubagentStart"}, self.data,
+                    wall=1000000, monotonic=5000, home=self.root))
+                with sqlite3.connect(self.data / "auto-reports/timing.sqlite3") as timing:
+                    baseline = json.loads(timing.execute(
+                        "SELECT baseline FROM turns").fetchone()[0])
+                    timing.execute("UPDATE turns SET baseline=?", (
+                        json.dumps(baseline_role_case(baseline, case)),))
+                with child_page.open("a") as output:
+                    output.write(json.dumps(counter(150)) + "\n")
+                self.assertIn("systemMessage", handle(
+                    {**payload, "hook_event_name": "SubagentStop",
+                     "agent_transcript_path": str(child_page)}, self.data,
+                    wall=1000001, monotonic=5001, home=self.root))
+                receipt = self.report()
+                self.assertEqual(receipt["task_hash"], stable_hash(child))
+                if case in ("legacy", "control"):
+                    self.assertTrue(receipt["source_identity_verified"])
+                    self.assertEqual(receipt["usage"]["total"], 50)
+                    self.assertEqual(receipt["task_usage"]["total"], 150)
+                else:
+                    self.assertFalse(receipt["source_identity_verified"])
+                    self.assertEqual(receipt["usage_status"], "source_identity_unavailable")
+                    self.assertIsNone(receipt["usage"])
+                    self.assertIsNone(receipt["task_usage"])
+                    self.assertEqual(receipt["stop_contexts"], [])
+
+    def test_root_stop_keeps_legacy_start_proof_and_rejects_unknown_or_absent_role(self):
+        for case in ("unknown", "null", "no-evidence", "legacy", "control"):
+            with self.subTest(case=case):
+                self.data = self.root / ("root-role-" + case)
+                self.page.write_text(json.dumps(self.meta) + "\n"
+                                     + json.dumps(counter(1000)) + "\n")
+                self.start()
+                with sqlite3.connect(self.data / "auto-reports/timing.sqlite3") as timing:
+                    baseline = json.loads(timing.execute(
+                        "SELECT baseline FROM turns").fetchone()[0])
+                    timing.execute("UPDATE turns SET baseline=?", (
+                        json.dumps(baseline_role_case(baseline, case)),))
+                self.append(counter(1200))
+                self.assertIn("systemMessage", self.event("Stop", 1))
+                receipt = self.report()
+                if case in ("legacy", "control"):
+                    self.assertTrue(receipt["source_identity_verified"])
+                    self.assertEqual(receipt["usage"]["total"], 200)
+                else:
+                    self.assertFalse(receipt["source_identity_verified"])
+                    self.assertIsNone(receipt["usage"])
 
     def test_child_baseline_cannot_be_reused_as_parent_report(self):
         _, child_id, _, child_page, payload = self._native_child_fixture()

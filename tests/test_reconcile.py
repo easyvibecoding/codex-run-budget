@@ -599,6 +599,38 @@ class ReconcileTest(unittest.TestCase):
                 with sqlite3.connect(self.directory / "timing.sqlite3") as timing:
                     timing.execute("DELETE FROM reconciliations WHERE key=?", (child_key,))
 
+    def test_child_completion_rejects_role_contradictions_and_accepts_legacy_role(self):
+        child, child_turn, child_path, stop, child_key, original = self._stopped_subagent()
+        with child_path.open("a") as output:
+            output.write(json.dumps(fixtures.counter(450)) + "\n")
+            output.write(json.dumps(self.native_event(
+                "task_complete", turn=child_turn, stamp=self.now + 2,
+                thread_id=child, session_id=TASK,
+            )) + "\n")
+        with sqlite3.connect(self.directory / "timing.sqlite3") as timing:
+            baseline = json.loads(timing.execute(
+                "SELECT baseline FROM turns WHERE key=?", (child_key,)).fetchone()[0])
+        for case in ("parent", "unknown", "null", "legacy"):
+            with self.subTest(case=case):
+                with sqlite3.connect(self.directory / "timing.sqlite3") as timing:
+                    timing.execute("UPDATE turns SET baseline=? WHERE key=?", (
+                        json.dumps(fixtures.baseline_role_case(baseline, case)), child_key))
+                with patch("codex_run_budget.reconcile.subprocess.Popen", return_value=Mock()):
+                    self.assertTrue(schedule(stop, self.data, home=self.home))
+                result = run(stop, self.data, home=self.home, delays=(0,))
+                if case == "legacy":
+                    self.assertEqual(result, {"status": "complete", "attempts": 1})
+                    revised = json.loads((self.directory / (child_key + ".reconciled.json"))
+                                         .read_text())
+                    self.assertEqual(revised["usage"]["total"], 350)
+                    self.assertEqual(revised["scope"], "subagent_turn_completion_boundary")
+                else:
+                    self.assertEqual(result, {"status": "failed", "attempts": 0})
+                    self.assertFalse((self.directory / (child_key + ".reconciled.json")).exists())
+                self.assertEqual((self.directory / (child_key + ".json")).read_bytes(), original)
+                with sqlite3.connect(self.directory / "timing.sqlite3") as timing:
+                    timing.execute("DELETE FROM reconciliations WHERE key=?", (child_key,))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -7,9 +7,9 @@ do not establish the trust or active runtime of a current installation.
 
 ## 0.19.6 concurrent child-cache revocation — 2026-09-26
 
-The compatible signed runtime has sequence `1790391315` and SHA-256
-`0aa005b43731a259697993d5b96f8f8f19e0e171bee0a21bf5718808574e52cc`.
-Ruff, all 473 tests, repository and plugin validation, and signature verification
+The compatible signed runtime has sequence `1790392148` and SHA-256
+`486053ba705bca83aaa6962083082e4f0668beaa508a3a745cb45fd50f77d032`.
+Ruff, all 477 tests, repository and plugin validation, and signature verification
 passed. Real SQLite regressions first reproduced stale scans restoring unseen
 requests after a parent conflict, including an identity with no prior cache.
 They now preserve revocation after database reopen and source removal. Tests also
@@ -24,6 +24,13 @@ hashes. Four targeted concurrency and recovery regressions then passed while
 importing the actual installed signed zipapp, with no model request. Independent
 read-only checks also exercised transaction rollback, cache-only races and
 bounded saturation. Governor, ledger and hook definitions were unchanged.
+
+The final runtime also rejected explicit role/lineage contradictions and
+unknown roles across preview, Stop and completion, while keeping supported
+legacy baselines. Independent SQLite checks covered nine rejection/control
+cases and byte-preserved original Stop artifacts. The installed final zipapp
+accepted both real parent/child baselines from the recorded 0.19.5 canary and
+rejected contradictory or unknown role variants of that same evidence.
 
 This release check proves installed runtime selection and report-cache behavior.
 It does not repeat the 0.19.5 model-driven lifecycle canary or establish Desktop
