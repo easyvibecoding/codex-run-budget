@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sqlite3
 import sys
 from pathlib import Path
@@ -63,13 +64,26 @@ def _help_requested(argv: list[str]) -> bool:
     return any(token in {"-h", "--help"} for token in argv)
 
 
-def _resolve_run(ledger: Ledger, value: str) -> str:
-    if value != "latest":
-        return value
-    runs = ledger.list_runs(1)
-    if not runs:
-        raise ValueError("no run-budget records found")
-    return str(runs[0]["run_id"])
+class RunSelectionError(ValueError):
+    def __init__(self, message_key: str):
+        self.message_key = message_key
+        super().__init__(message_key)
+
+
+def _resolve_run(ledger: Ledger, value: str, *, all_tasks: bool = False) -> str:
+    if value == "current":
+        session = os.environ.get("CODEX_SESSION_ID")
+        if not session:
+            raise RunSelectionError("cli_current_unavailable")
+        return session
+    if value == "latest":
+        if not all_tasks:
+            raise RunSelectionError("cli_global_scope_error")
+        runs = ledger.list_runs(1)
+        if not runs:
+            raise ValueError("no run-budget records found")
+        return str(runs[0]["run_id"])
+    return value
 
 
 def _public_run(run: dict[str, Any]) -> dict[str, Any]:
@@ -206,6 +220,7 @@ def build_parser(
 
     listing = sub.add_parser("list", help=text("cli_list_help"))
     listing.add_argument("--limit", type=int, default=20)
+    listing.add_argument("--all-tasks", action="store_true", help=text("cli_global_scope_help"))
 
     show = sub.add_parser("show", help=text("cli_show_help"))
     show.add_argument("run_id")
@@ -225,6 +240,10 @@ def build_parser(
 
     off = sub.add_parser("off", help=text("cli_off_help"))
     off.add_argument("run_id")
+    for command in (show, events, halt, resume, off):
+        command.add_argument(
+            "--all-tasks", action="store_true", help=text("cli_global_scope_help")
+        )
     return parser
 
 
@@ -406,23 +425,47 @@ def main(argv: list[str] | None = None) -> int:
     ledger = governor.ledger
     try:
         if args.command == "list":
+            if not args.all_tasks:
+                raise RunSelectionError("cli_global_scope_error")
             for run in ledger.list_runs(args.limit):
                 text = human or _cli_text()
                 print(_status_summary(run, text) + f" {text('run_id')}: {run['run_id']}")
             return 0
 
-        run_id = _resolve_run(ledger, args.run_id)
+        run_id = _resolve_run(ledger, args.run_id, all_tasks=args.all_tasks)
         if args.command == "show":
             run = ledger.get_run(run_id)
             if not run:
-                raise ValueError(f"unknown run: {run_id}")
-            print(
-                json.dumps(_public_run(run), indent=2, sort_keys=True)
-                if args.json
-                else _status_summary(run, human or _cli_text())
-            )
+                if args.run_id != "current":
+                    raise ValueError(f"unknown run: {run_id}")
+                print(
+                    json.dumps({"scope": "current_session", "status": "not_configured"})
+                    if args.json
+                    else (human or _cli_text())("cli_current_not_configured")
+                )
+                return 0
+            scope = {
+                "current": "current_session",
+                "latest": "all_tasks_latest",
+            }.get(args.run_id)
+            if args.json:
+                public = _public_run(run)
+                if scope:
+                    public["scope"] = scope
+                print(json.dumps(public, indent=2, sort_keys=True))
+            else:
+                labels = human or _cli_text()
+                prefix = (
+                    labels("cli_global_latest_prefix") if scope == "all_tasks_latest"
+                    else labels("cli_current_prefix") if scope == "current_session"
+                    else ""
+                )
+                print(prefix + _status_summary(run, labels) + f" {labels('run_id')}: {run_id}")
             return 0
         if args.command == "events":
+            if args.run_id == "current" and not ledger.get_run(run_id):
+                print((human or _cli_text())("cli_current_not_configured"), file=sys.stderr)
+                return 2
             for event in ledger.events(run_id, args.epoch):
                 print(json.dumps(event, sort_keys=True, separators=(",", ":")))
             return 0
@@ -441,6 +484,9 @@ def main(argv: list[str] | None = None) -> int:
             governor._write_marker(run_id, run)
         print(_status_summary(run, human or _cli_text()))
         return 0
+    except RunSelectionError as exc:
+        print((human or _cli_text())(exc.message_key), file=sys.stderr)
+        return 2
     except (OSError, ValueError):
         print((human or _cli_text())("cli_run_error"), file=sys.stderr)
         return 2

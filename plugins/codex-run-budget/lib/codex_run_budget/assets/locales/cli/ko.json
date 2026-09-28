@@ -32,7 +32,7 @@
   "cli_auto_report_help": "결정적 Stop 경계 영수증 설정",
   "cli_auto_report_threshold_help": "선택적 최소 경과 시간, 기본 0이면 매 턴 보고",
   "cli_list_help": "최근 관리된 실행 목록",
-  "cli_show_help": "실행 하나 표시, 최신 실행에는 latest 사용",
+  "cli_show_help": "run 표시: current는 현재 session, latest에는 --all-tasks 필요",
   "cli_events_help": "개인정보를 보호하는 lineage 이벤트 내보내기",
   "cli_halt_help": "운영자 HALT",
   "cli_resume_help": "중지된 실행 재개",
@@ -103,5 +103,11 @@
   "workflow_yes": "예",
   "workflow_no": "아니요",
   "group": ",",
-  "decimal": "."
+  "decimal": ".",
+  "cli_global_scope_help": "모든 Task에서 최신 run을 명시적으로 선택",
+  "cli_current_unavailable": "run-budget: 현재 session ID를 사용할 수 없습니다. 정확한 run ID를 사용하세요",
+  "cli_current_not_configured": "이 session에는 Run Budget이 설정되지 않았습니다.",
+  "cli_current_prefix": "현재 session: ",
+  "cli_global_latest_prefix": "모든 Task 중 최신: ",
+  "cli_global_scope_error": "run-budget: 이 선택은 모든 Task에 걸칩니다. --all-tasks를 추가하거나 show current/정확한 run ID를 사용하세요"
 }

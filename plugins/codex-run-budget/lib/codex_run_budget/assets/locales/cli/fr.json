@@ -32,7 +32,7 @@
   "cli_auto_report_help": "configurer des reçus déterministes à la limite Stop",
   "cli_auto_report_threshold_help": "durée minimale facultative ; 0 par défaut signale chaque tour",
   "cli_list_help": "lister les exécutions récemment gouvernées",
-  "cli_show_help": "afficher une exécution ; utiliser latest pour la plus récente",
+  "cli_show_help": "afficher un run ; current désigne cette session, latest exige --all-tasks",
   "cli_events_help": "exporter les événements de lignée respectueux de la vie privée",
   "cli_halt_help": "HALT opérateur",
   "cli_resume_help": "reprendre une exécution arrêtée",
@@ -103,5 +103,11 @@
   "workflow_yes": "oui",
   "workflow_no": "non",
   "group": " ",
-  "decimal": ","
+  "decimal": ",",
+  "cli_global_scope_help": "sélectionner explicitement le dernier run parmi toutes les Tasks",
+  "cli_current_unavailable": "run-budget : ID de session actuel indisponible ; utilisez un ID de run exact",
+  "cli_current_not_configured": "Aucun Run Budget n’est configuré pour cette session.",
+  "cli_current_prefix": "Session actuelle : ",
+  "cli_global_latest_prefix": "Dernier run parmi toutes les Tasks : ",
+  "cli_global_scope_error": "run-budget : cette sélection couvre toutes les Tasks ; ajoutez --all-tasks ou utilisez show current/un ID de run exact"
 }

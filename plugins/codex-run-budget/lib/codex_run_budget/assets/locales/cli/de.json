@@ -32,7 +32,7 @@
   "cli_auto_report_help": "deterministische Stop-Grenzbelege konfigurieren",
   "cli_auto_report_threshold_help": "optionale Mindestdauer; Standard 0 meldet jeden Turn",
   "cli_list_help": "zuletzt gesteuerte Runs auflisten",
-  "cli_show_help": "einen Run anzeigen; latest für den neuesten verwenden",
+  "cli_show_help": "Run anzeigen; current ist diese Session, latest erfordert --all-tasks",
   "cli_events_help": "datenschutzfreundliche Lineage-Ereignisse exportieren",
   "cli_halt_help": "HALT durch Bediener",
   "cli_resume_help": "einen angehaltenen Run fortsetzen",
@@ -103,5 +103,11 @@
   "workflow_yes": "ja",
   "workflow_no": "nein",
   "group": ".",
-  "decimal": ","
+  "decimal": ",",
+  "cli_global_scope_help": "den neuesten Run über alle Tasks ausdrücklich wählen",
+  "cli_current_unavailable": "run-budget: aktuelle Session-ID nicht verfügbar; genaue Run-ID verwenden",
+  "cli_current_not_configured": "Für diese Session ist kein Run Budget konfiguriert.",
+  "cli_current_prefix": "Aktuelle Session: ",
+  "cli_global_latest_prefix": "Neuester Run aller Tasks: ",
+  "cli_global_scope_error": "run-budget: diese Auswahl umfasst alle Tasks; --all-tasks angeben oder show current/eine genaue Run-ID verwenden"
 }

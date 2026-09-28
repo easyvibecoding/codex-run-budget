@@ -68,10 +68,13 @@ run-budget:off
 ### 检查预算执行记录
 
 ```sh
-python3 plugins/codex-run-budget/scripts/run_budget.py list
-python3 plugins/codex-run-budget/scripts/run_budget.py show latest --json
-python3 plugins/codex-run-budget/scripts/run_budget.py events latest
+python3 plugins/codex-run-budget/scripts/run_budget.py show current --json
+python3 plugins/codex-run-budget/scripts/run_budget.py events current
+python3 plugins/codex-run-budget/scripts/run_budget.py list --all-tasks
+python3 plugins/codex-run-budget/scripts/run_budget.py show latest --all-tasks --json
 ```
+
+`current` 使用 `CODEX_SESSION_ID`；如果该 session 没有预算，会返回 `not_configured`。确认已设置后再运行 `events current`。`list` 和 `latest` 查询的是**所有 Task**，必须明确加上 `--all-tasks`，不能用来证明当前 Task 设置了预算。在 Task 消息中，`run-budget:status` 会查询 hook 收到的精确 session 身份。
 
 账本保存计数、政策决策、时间及经哈希处理的谱系标识符；不刻意保存 prompt 或工具内容。[设计](docs/DESIGN.md) · [安全](SECURITY.md)。
 

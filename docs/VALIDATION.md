@@ -5,6 +5,26 @@ This file preserves dated release checks. The current package version is in
 [changelog](../CHANGELOG.md) for later changes. Historical installed canaries
 do not establish the trust or active runtime of a current installation.
 
+## 0.19.10 budget CLI scope — 2026-09-29
+
+The compatible signed runtime has sequence `1790639490` and SHA-256
+`eb2d528608213ec48d81c0942fa6b4091a576ea041b6cf7fe4a1cc8075759df8`.
+Ruff, all 493 tests, repository validation, reproducible runtime checks and
+signature verification passed. Hook definitions and the publisher bootstrap
+are unchanged; this release changes CLI selection and its operator guidance,
+not budget policy or ledger state.
+
+With an active Codex Task's `CODEX_SESSION_ID`, a disposable local copy of the
+signed plugin runtime read an isolated SQLite backup of the real budget ledger.
+That ledger contained older halted runs but no run for the current session.
+`show current --json` returned `current_session` / `not_configured` with exit 0;
+unscoped `show latest --json` returned exit 2 and required `--all-tasks`;
+`show latest --all-tasks --json` returned the older halted run labeled
+`all_tasks_latest`. The temporary plugin copy and ledger backup were removed.
+This verifies the CLI scope distinction in the actual Codex environment; it
+does not claim that a new native Task loaded the release or that model behavior
+is enforced by the CLI.
+
 ## 0.19.9 subagent visualization output — 2026-09-26
 
 The compatible signed runtime has sequence `1790433141` and SHA-256

@@ -32,7 +32,7 @@
   "cli_auto_report_help": "configure deterministic Stop-boundary receipts",
   "cli_auto_report_threshold_help": "optional minimum elapsed time; default 0 reports every turn",
   "cli_list_help": "list recent governed runs",
-  "cli_show_help": "show one run; use 'latest' for the newest",
+  "cli_show_help": "show a run; current is this session, latest needs --all-tasks",
   "cli_events_help": "export privacy-preserving lineage events",
   "cli_halt_help": "operator HALT",
   "cli_resume_help": "resume a halted run",
@@ -103,5 +103,11 @@
   "workflow_yes": "yes",
   "workflow_no": "no",
   "group": ",",
-  "decimal": "."
+  "decimal": ".",
+  "cli_global_scope_help": "explicitly select the newest run across all Tasks",
+  "cli_current_unavailable": "run-budget: current session ID unavailable; use an exact run ID",
+  "cli_current_not_configured": "Run Budget is not configured for this session.",
+  "cli_current_prefix": "Current session: ",
+  "cli_global_latest_prefix": "Latest across all Tasks: ",
+  "cli_global_scope_error": "run-budget: this selection spans all Tasks; add --all-tasks or use show current/an exact run ID"
 }

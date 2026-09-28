@@ -32,7 +32,7 @@
   "cli_auto_report_help": "決定的な Stop 境界レシートを設定",
   "cli_auto_report_threshold_help": "任意の最小経過時間；既定 0 で毎ターン報告",
   "cli_list_help": "最近の管理対象ターンを一覧表示",
-  "cli_show_help": "1 つのターンを表示；最新には latest を使用",
+  "cli_show_help": "run を表示。current は現在の session、latest には --all-tasks が必要",
   "cli_events_help": "プライバシーを守る lineage イベントを出力",
   "cli_halt_help": "オペレーター HALT",
   "cli_resume_help": "停止したターンを再開",
@@ -103,5 +103,11 @@
   "workflow_yes": "はい",
   "workflow_no": "いいえ",
   "group": ",",
-  "decimal": "."
+  "decimal": ".",
+  "cli_global_scope_help": "全 Task の中から最新の run を明示的に選択",
+  "cli_current_unavailable": "run-budget: 現在の session ID を取得できません。正確な run ID を使ってください",
+  "cli_current_not_configured": "この session に Run Budget は設定されていません。",
+  "cli_current_prefix": "現在の session: ",
+  "cli_global_latest_prefix": "全 Task の中で最新: ",
+  "cli_global_scope_error": "run-budget: この選択は全 Task が対象です。--all-tasks を付けるか show current／正確な run ID を使ってください"
 }

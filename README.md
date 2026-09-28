@@ -68,10 +68,13 @@ Commands below run from a repository checkout. From an installed plugin director
 ### Inspect a budget run
 
 ```sh
-python3 plugins/codex-run-budget/scripts/run_budget.py list
-python3 plugins/codex-run-budget/scripts/run_budget.py show latest --json
-python3 plugins/codex-run-budget/scripts/run_budget.py events latest
+python3 plugins/codex-run-budget/scripts/run_budget.py show current --json
+python3 plugins/codex-run-budget/scripts/run_budget.py events current
+python3 plugins/codex-run-budget/scripts/run_budget.py list --all-tasks
+python3 plugins/codex-run-budget/scripts/run_budget.py show latest --all-tasks --json
 ```
+
+`current` uses `CODEX_SESSION_ID` and reports `not_configured` when that session has no budget. Run `events current` only after confirming a configured run. `list` and `latest` inspect **all** Tasks and require `--all-tasks`; their results are never evidence that the current Task has a budget. In a Task message, `run-budget:status` queries the hook's exact session identity.
 
 The ledger stores counters, policy decisions, times, and hashed lineage keys. It does not intentionally store prompts or tool bodies. [Design](docs/DESIGN.md) · [Security](SECURITY.md).
 

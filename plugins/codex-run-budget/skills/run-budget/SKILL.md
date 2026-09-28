@@ -77,10 +77,15 @@ State these boundaries when relevant:
 For local operator diagnostics, use the bundled CLI:
 
 ```sh
-python3 "$PLUGIN_ROOT/scripts/run_budget.py" list
-python3 "$PLUGIN_ROOT/scripts/run_budget.py" show latest
-python3 "$PLUGIN_ROOT/scripts/run_budget.py" events latest
+python3 "$PLUGIN_ROOT/scripts/run_budget.py" show current --json
+python3 "$PLUGIN_ROOT/scripts/run_budget.py" events current
 ```
+
+`current` resolves `CODEX_SESSION_ID`; run `events current` only when `show`
+reports a configured budget. If it reports `not_configured`, this session has
+no run to resume or halt. `list` and `latest` select across Tasks and require
+`--all-tasks`; never use them as evidence for the current Task. For the exact
+hook session, prefer the `run-budget:status` control line from the user.
 
 The ledger intentionally contains no prompt, command, input, output, or
 transcript content. Never bypass that privacy rule when troubleshooting.

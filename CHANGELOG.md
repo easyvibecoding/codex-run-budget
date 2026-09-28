@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.19.10 - 2026-09-29
+
+- Scope budget CLI inspection to `CODEX_SESSION_ID` with `show current`; an unconfigured session reports `not_configured` even when older runs exist.
+- Require `--all-tasks` for `list` and `latest` to prevent an unrelated run from being mistaken for the current Task. Label cross-Task `show` output explicitly.
+- Update the Run Budget skill and multilingual examples to distinguish current-session checks from cross-Task history. Hook policy and ledger data are unchanged.
+
 ## 0.19.9 - 2026-09-26
 
 - Relocate a verified subagent's inherited root-Task visualization directory into the subagent's own native visualization root, using the child's UUIDv7 UTC date and preserving safe subdirectories.

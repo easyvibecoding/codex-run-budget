@@ -68,10 +68,13 @@ run-budget:off
 ### 予算実行の確認
 
 ```sh
-python3 plugins/codex-run-budget/scripts/run_budget.py list
-python3 plugins/codex-run-budget/scripts/run_budget.py show latest --json
-python3 plugins/codex-run-budget/scripts/run_budget.py events latest
+python3 plugins/codex-run-budget/scripts/run_budget.py show current --json
+python3 plugins/codex-run-budget/scripts/run_budget.py events current
+python3 plugins/codex-run-budget/scripts/run_budget.py list --all-tasks
+python3 plugins/codex-run-budget/scripts/run_budget.py show latest --all-tasks --json
 ```
+
+`current` は `CODEX_SESSION_ID` を使用し、その session に予算がなければ `not_configured` を返します。設定を確認してから `events current` を実行してください。`list` と `latest` は**全 Task** を対象とするため、`--all-tasks` が必要です。現在の Task の予算の証拠にはなりません。Task メッセージの `run-budget:status` は hook に渡された正確な session ID を照会します。
 
 台帳にはカウンター、ポリシー判断、時刻、ハッシュ化された系統キーを保存します。プロンプトやツール本文は意図的に保存しません。[設計](docs/DESIGN.md) · [セキュリティ](SECURITY.md)。
 
