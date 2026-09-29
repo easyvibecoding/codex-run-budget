@@ -5,6 +5,24 @@ This file preserves dated release checks. The current package version is in
 [changelog](../CHANGELOG.md) for later changes. Historical installed canaries
 do not establish the trust or active runtime of a current installation.
 
+## Unreleased Stop timeout canary — 2026-09-29
+
+The generated hook manifest changes only the native `Stop` and `SubagentStop`
+timeouts from 3 to 10 seconds. The publisher bootstrap and signed runtime bytes
+remain unchanged. Ruff, all 493 unit tests, repository validation and Plugin
+Creator validation passed against this checkout.
+
+In a disposable Codex home, Codex CLI 0.158.0 installed the local marketplace
+and plugin package. Native `hooks/list` reported 12 enabled hooks: `stop` and
+`subagentStop` had `timeoutSec: 10`, and the other hooks had `timeoutSec: 3`.
+The changed definitions were `untrusted`; this canary did not grant native
+trust or alter the active Desktop installation. Direct execution of the
+installed `UserPromptSubmit` and `Stop` commands against a synthetic transcript
+returned exit 0 with empty stderr in 0.647 and 1.335 seconds respectively.
+The Stop produced one report with an observed 40-token delta. This verifies
+installed command behavior and native timeout parsing, not a trusted model turn
+or success on an overloaded host.
+
 ## 0.19.10 budget CLI scope — 2026-09-29
 
 The compatible signed runtime has sequence `1790639490` and SHA-256

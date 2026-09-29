@@ -397,9 +397,10 @@ budget ledger or policy decisions.
   `report` or `meter` commands for richer, separately requested analysis.
 - Each start/Stop reads at most a 128 KiB header and an 8 MiB tail. At most 16
   exact-turn setting observations are retained. SQLite initialization and start
-  writes share a two-second wait deadline; the synchronous hook timeout remains
-  three seconds. This bounds
-  work but cannot guarantee success on an overloaded disk or host.
+  writes share a two-second wait deadline. `Stop` and `SubagentStop` have a
+  ten-second native hook timeout; other hooks retain three seconds. The longer
+  Stop window allows bounded, synchronous snapshots to keep their exact boundary,
+  but cannot guarantee success on an overloaded disk or host.
 - Child reconciliation selects at most 32 descendants, reading at most a 128 KiB
   header and 1 MiB tail for each. The numeric store has a 0.25-second SQLite wait,
   at most 512 agent entries and 50,000 request entries; capacity refuses new

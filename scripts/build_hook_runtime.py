@@ -74,7 +74,10 @@ def artifacts(plugin: Path = PLUGIN) -> dict[Path, bytes]:
                 {
                     "type": "command",
                     "command": command,
-                    "timeout": 3,
+                    # Stop also snapshots the current Task and bounded descendants.
+                    # Keep admission hooks short while allowing this synchronous
+                    # snapshot to finish on a busy host.
+                    "timeout": 10 if event in {"Stop", "SubagentStop"} else 3,
                     "statusMessage": "Checking run budget",
                 }
             ]

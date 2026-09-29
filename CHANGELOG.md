@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Give the synchronous `Stop` and `SubagentStop` hooks 10 seconds to finish their bounded usage snapshots; keep other hook timeouts at 3 seconds and preserve the exact Stop boundary.
+
 ## 0.19.10 - 2026-09-29
 
 - Scope budget CLI inspection to `CODEX_SESSION_ID` with `show current`; an unconfigured session reports `not_configured` even when older runs exist.
