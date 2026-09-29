@@ -11,6 +11,8 @@ New events, changes to the verifier/key, or plugin and skill metadata still need
 normal plugin installation and any changed-hook review. Disabling the plugin or
 all applicable hooks prevents automatic checking. No native trust is granted by
 this code and no model request or scheduled Task is created.
+Changing a hook's native timeout also changes its trust hash even when the
+launcher command stays identical; review that updated hook in `/hooks`.
 
 ## Update lifecycle and controls
 

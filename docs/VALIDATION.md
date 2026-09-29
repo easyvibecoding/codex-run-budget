@@ -23,6 +23,13 @@ The Stop produced one report with an observed 40-token delta. This verifies
 installed command behavior and native timeout parsing, not a trusted model turn
 or success on an overloaded host.
 
+A separate native `hooks/list` read-back of the active installation showed its
+3-second `stop` and `subagentStop` hooks enabled and trusted. Their `currentHash`
+values differ from the isolated 10-second definitions, while both
+`userPromptSubmit` hashes match. The stable launcher command therefore keeps
+runtime updates under its existing grant, but this native timeout change needs
+normal `/hooks` review before it can run in the active installation.
+
 ## 0.19.10 budget CLI scope — 2026-09-29
 
 The compatible signed runtime has sequence `1790639490` and SHA-256
