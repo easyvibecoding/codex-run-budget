@@ -1,7 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.19.11 - 2026-10-10
 
+- Read complete hook and reconciliation JSON without the fixed 2 MiB input limit; preserve Governor policy decisions and run ceilings.
+- Classify bootstrap failures by phase and report input validation codes, exception classes and byte counts without exposing input or exception text. Malformed JSON is no longer reported as an unavailable runtime.
 - Give the synchronous `Stop` and `SubagentStop` hooks 10 seconds to finish their bounded usage snapshots; keep other hook timeouts at 3 seconds and preserve the exact Stop boundary.
 
 ## 0.19.10 - 2026-09-29

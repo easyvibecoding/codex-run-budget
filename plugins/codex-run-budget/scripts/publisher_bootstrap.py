@@ -409,10 +409,55 @@ def data_root(policy):
                                str(Path.home() / ".codex" / PLUGINS[name])))
 
 
-def unavailable(event, enforcing):
+class HookInputError(ValueError):
+    """Input failure labels/counts only; never echo input or parser messages."""
+
+    def __init__(self, code, byte_count):
+        super().__init__(code)
+        self.code = code
+        self.byte_count = byte_count
+
+
+def read_hook_input(stream, event):
+    """Parse complete stdin; preserve accepted bytes for the Governor."""
+    raw = stream.read()
+    try:
+        payload = parse(raw)
+    except (ValueError, UnicodeError, RecursionError) as error:
+        raise HookInputError("HOOK_INPUT_INVALID_JSON", len(raw)) from error
+    if not isinstance(payload, dict) or payload.get("hook_event_name") != event:
+        raise HookInputError("HOOK_INPUT_INVALID_METADATA", len(raw))
+    task = payload.get("session_id")
+    if not isinstance(task, str) or not 0 < len(task) <= 256:
+        raise HookInputError("HOOK_INPUT_INVALID_SESSION", len(raw))
+    return raw, payload
+
+
+def failure_message(phase, error):
+    """Emit fixed phase/class labels and counts, never exception text or payload."""
+    phases = {"publisher-initialize", "publisher-seed", "hook-event", "hook-input",
+              "runtime-select", "update-schedule", "runtime-execute", "runtime-output",
+              "runtime-notice"}
+    phase = phase if phase in phases else "runtime"
+    cause = error.__cause__ if isinstance(error, HookInputError) and error.__cause__ else error
+    classes = (HookInputError, json.JSONDecodeError, UnicodeDecodeError, RecursionError,
+               FileNotFoundError, PermissionError, MemoryError, ValueError, OSError, RuntimeError)
+    name = next((cls.__name__ for cls in classes if isinstance(cause, cls)), "Exception")
+    codes = {"HOOK_INPUT_INVALID_JSON", "HOOK_INPUT_INVALID_METADATA",
+             "HOOK_INPUT_INVALID_SESSION"}
+    if isinstance(error, HookInputError) and error.code in codes:
+        return (f"Signed Run Budget {error.code} [{phase}; {name}; "
+                f"input_bytes={error.byte_count}]. "
+                "Operation remains blocked.")
+    return f"Signed Run Budget failure [{phase}; {name}]. Operation remains blocked."
+
+
+def unavailable(event, enforcing, *, phase=None, error=None):
     if not enforcing:
         return {}
     message = "Signed Run Budget runtime unavailable; restore a verified version."
+    if error is not None:
+        message = failure_message(phase, error)
     result = {"systemMessage": message}
     if event == "PreToolUse":
         result["hookSpecificOutput"] = {"hookEventName": event, "permissionDecision": "deny",
@@ -428,6 +473,7 @@ def main(source, policy, argv=None):
     args = list(sys.argv[1:] if argv is None else argv)
     event = args[0] if args else "unknown"
     publisher = None
+    phase = "publisher-initialize"
     try:
         root = Path(args[1]) if event in {"--worker", "--control", "--cli"} else data_root(policy)
         publisher = Publisher(root, policy, source)
@@ -440,6 +486,7 @@ def main(source, policy, argv=None):
             signal.alarm(20)
             publisher.update(automatic=True)
             return 0
+        phase = "publisher-seed"
         publisher.seed(plugin_root)
         if event == "--control":
             print(json.dumps(publisher.control(args[2]), ensure_ascii=False))
@@ -448,24 +495,25 @@ def main(source, policy, argv=None):
             _, blob, _ = publisher.select()
             RuntimeLoader(blob, policy["plugin"].replace("-", "_")).run(["--cli", *args[2:]])
             return 0
+        phase = "hook-event"
         if event not in policy["events"]:
             raise ValueError("unknown hook event")
-        raw = sys.stdin.buffer.read(2 * 1024 * 1024 + 1)
-        payload = parse(raw)
-        if (len(raw) > 2 * 1024 * 1024 or not isinstance(payload, dict)
-                or payload.get("hook_event_name") != event):
-            raise ValueError("invalid hook input")
-        task = payload.get("session_id")
-        if not isinstance(task, str) or not 0 < len(task) <= 256:
-            raise ValueError("missing Task identity")
+        phase = "hook-input"
+        raw, payload = read_hook_input(sys.stdin.buffer, event)
+        task = payload["session_id"]
+        phase = "runtime-select"
         manifest, blob, fresh = publisher.select(task)
         if event == "UserPromptSubmit" and not payload.get("agent_id"):
+            phase = "update-schedule"
             publisher.schedule()
         output = io.StringIO()
         sys.stdin = io.TextIOWrapper(io.BytesIO(raw), encoding="utf-8")
+        phase = "runtime-execute"
         with contextlib.redirect_stdout(output):
             RuntimeLoader(blob, policy["plugin"].replace("-", "_")).run(["--event", event])
+        phase = "runtime-output"
         result = parse(output.getvalue() or "{}")
+        phase = "runtime-notice"
         if fresh and event in {"SessionStart", "UserPromptSubmit"}:
             message = f"{policy['plugin']}: verified signed runtime {manifest['version']}. "
             message += "此任務固定使用這一版 / version pinned for this Task."
@@ -477,12 +525,13 @@ def main(source, policy, argv=None):
                 filter(None, (result.get("systemMessage"), message)))
         print(json.dumps(result, ensure_ascii=False))
         return 0
-    except Exception:
+    except Exception as error:
         if event in {"--cli", "--control"}:
             print(json.dumps({"status": "unavailable"}))
             return 1
         if event != "--worker":
-            print(json.dumps(unavailable(event, policy["plugin"] == "codex-run-budget")))
+            print(json.dumps(unavailable(event, policy["plugin"] == "codex-run-budget",
+                                         phase=phase, error=error)))
         return 0
     finally:
         if publisher is not None:

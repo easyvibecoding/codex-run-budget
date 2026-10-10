@@ -263,7 +263,7 @@ class HookFailureTest(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn(b"Traceback", result.stderr)
-        return json.loads(result.stdout)
+        return json.loads(result.stdout) if result.stdout else None
 
     def assert_stopped(self, event, result):
         if event == "PreToolUse":
@@ -275,7 +275,7 @@ class HookFailureTest(unittest.TestCase):
             self.assertIs(result["continue"], False)
             self.assertNotEqual(result.get("decision"), "block")
 
-    def test_malformed_and_oversized_input_blocks_without_stop_loop(self):
+    def test_malformed_input_blocks_without_stop_loop(self):
         with tempfile.TemporaryDirectory() as temporary:
             for event in ("PreToolUse", "UserPromptSubmit", "Stop", "PostToolUse", "SubagentStop"):
                 for raw in (
@@ -288,6 +288,42 @@ class HookFailureTest(unittest.TestCase):
                         result = self.invoke(temporary, event, raw)
                         self.assert_stopped(event, result)
                         self.assertNotIn("PRIVATE", json.dumps(result))
+
+    def test_large_valid_input_reaches_governor_and_preserves_budget_ceiling(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            transcript = root / "synthetic.jsonl"
+            transcript.write_text(token_line(0) + "\n")
+            state = root / "state"
+            payload = {"session_id": "synthetic-run", "turn_id": "synthetic-turn",
+                       "transcript_path": str(transcript)}
+            governor = Governor(state)
+            try:
+                governor.handle({**payload, "hook_event_name": "UserPromptSubmit",
+                                 "prompt": "run-budget:start tokens=10k"})
+            finally:
+                governor.close()
+            tool = {**payload, "hook_event_name": "PreToolUse", "tool_name": "Bash",
+                    "tool_use_id": "synthetic-large-call", "tool_input": {"command": "pwd"},
+                    "padding": "SYNTHETIC_PRIVATE_PADDING" * 230_000}
+            raw = json.dumps(tool).encode()
+            self.assertGreater(len(raw), 5 * 1024 * 1024)
+            result = self.invoke(state, "PreToolUse", raw)
+            self.assertNotEqual((result or {}).get("hookSpecificOutput", {}).get(
+                "permissionDecision"), "deny")
+            transcript.write_text(token_line(10_000) + "\n")
+            result = self.invoke(state, "PreToolUse", raw)
+            self.assert_stopped("PreToolUse", result)
+            self.assertNotIn("rejected hook input", json.dumps(result))
+            governor = Governor(state)
+            try:
+                run = governor.ledger.get_run("synthetic-run")
+                self.assertEqual(run["spent_tokens"], 10_000)
+                self.assertEqual(run["status"], "halted")
+                self.assertEqual(run["epoch"], 1)
+            finally:
+                governor.close()
+            self.assertNotIn(b"SYNTHETIC_PRIVATE_PADDING", (state / "ledger.sqlite3").read_bytes())
 
     def test_corrupt_database_bootstrap_honors_saved_policy(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -8,7 +8,6 @@ import sys
 
 from .governor import Governor
 
-MAX_INPUT_BYTES = 2 * 1024 * 1024
 EVENTS = (
     "SessionStart",
     "UserPromptSubmit",
@@ -63,9 +62,7 @@ def main() -> int:
 
             if event:
                 return 0
-            raw = sys.stdin.buffer.read(MAX_INPUT_BYTES + 1)
-            if len(raw) > MAX_INPUT_BYTES:
-                return 0
+            raw = sys.stdin.buffer.read()
             payload = json.loads(raw.decode("utf-8"))
             if not isinstance(payload, dict):
                 return 0
@@ -83,9 +80,7 @@ def main() -> int:
         print(message, file=sys.stderr)
         return 2
 
-    raw = sys.stdin.buffer.read(MAX_INPUT_BYTES + 1)
-    if len(raw) > MAX_INPUT_BYTES:
-        return reject("input exceeded 2 MiB")
+    raw = sys.stdin.buffer.read()
     try:
         payload = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, ValueError, RecursionError):

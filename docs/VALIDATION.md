@@ -5,7 +5,38 @@ This file preserves dated release checks. The current package version is in
 [changelog](../CHANGELOG.md) for later changes. Historical installed canaries
 do not establish the trust or active runtime of a current installation.
 
-## Unreleased Stop timeout canary — 2026-09-29
+## 0.19.11 complete hook input and failure diagnostics — 2026-10-10
+
+The signed release has sequence `1791614386` and runtime SHA-256
+`baad97f019be18b9134c2eaa6e6050de66c6cb4afc8397d9e26b495f3344c3d5`.
+Ruff, all 505 unit tests, repository validation, reproducible runtime checks
+and signature verification passed. Plugin Creator validation passed using the
+official validator and identifier helper from OpenAI Codex commit
+`84aa75204ad604bcf498df180d128181c89b2f0b`; the previously bundled validator
+was absent from the current installation. No runtime dependency was added.
+
+The actual local Codex CLI 0.160.1 installed package 0.19.11 through the native
+installer with a retention backup. Source/cache contents matched, and the
+previous installed version was retained unchanged. Normal CLI hook review
+trusted the changed bootstrap definitions. A fresh native `hooks/list` read
+back all 12 Run Budget hooks as enabled and trusted, with no warnings or
+errors. `Stop` and `SubagentStop` use 10 seconds; the other hooks use 3 seconds.
+The installed publisher control reported active signed runtime 0.19.11.
+
+Direct execution of those installed native commands used a synthetic transcript
+and separate private test store. A valid 6,000,387-byte `PreToolUse` JSON reached
+the Governor without an input denial in 0.151 seconds. Invalid 6,000,012-byte
+JSON was denied in 0.119 seconds with `HOOK_INPUT_INVALID_JSON`, phase
+`hook-input`, exception class `JSONDecodeError` and the complete byte count;
+it was not reported as an unavailable runtime. After the synthetic transcript
+reached the existing 10,000-token ceiling, the same large valid payload was
+denied by budget policy in 0.138 seconds. Read-back preserved epoch 1, the
+10,000-token total and halted status; private input content was absent from
+the test databases. The installed synchronous Stop command completed in
+0.143 seconds. These are installed-command checks, not a guarantee about
+native delivery of every large tool result or timeout-free overloaded hosts.
+
+## Pre-release Stop timeout canary — 2026-09-29
 
 The generated hook manifest changes only the native `Stop` and `SubagentStop`
 timeouts from 3 to 10 seconds. The publisher bootstrap and signed runtime bytes

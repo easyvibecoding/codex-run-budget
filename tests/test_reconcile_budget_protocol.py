@@ -46,6 +46,16 @@ class ReconcileBudgetProtocolTest(unittest.TestCase):
             self.assertEqual(self.invoke(["--reconcile", "--event", "Stop"], {}), (0, ""))
             dispatch.assert_not_called()
 
+    def test_large_valid_worker_input_is_complete_and_report_only(self):
+        payload = {"session_id": "example-task", "turn_id": "example-turn",
+                   "padding": "x" * (5 * 1024 * 1024)}
+        with (patch.object(Governor, "dispatch") as dispatch,
+              patch("codex_run_budget.reconcile.worker") as worker):
+            self.assertEqual(self.invoke(["--reconcile"], payload), (0, ""))
+            worker.assert_called_once()
+            self.assertEqual(worker.call_args.args[0], payload)
+            dispatch.assert_not_called()
+
     def test_background_launch_failure_preserves_all_stop_policy_fields(self):
         payload = {"session_id": "example-task", "hook_event_name": "Stop"}
         decisions = ({"continue": False, "stopReason": "HALT", "systemMessage": "budget"},

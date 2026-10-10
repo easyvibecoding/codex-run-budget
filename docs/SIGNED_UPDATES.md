@@ -52,6 +52,27 @@ than the active runtime. The normal CLI uses the signed active runtime after the
 store has been initialized. `updates check` compares package versions and native
 trust; `publisher_updates.py status` is authoritative for the runtime.
 
+## Hook input and failure diagnostics
+
+The bootstrap and runtime adapter read complete UTF-8 JSON from stdin without
+a fixed byte limit. Valid input larger than 2 MiB reaches the normal signed
+runtime unchanged. Removing the input limit does not increase a run ceiling;
+the Governor still makes the same policy decisions. Invalid JSON, UTF-8, duplicate keys,
+metadata, session identity and parser recursion failures remain rejected.
+
+Failure messages contain only fixed input codes, bootstrap phase and exception
+class labels, plus complete input byte counts for input validation failures.
+Parser/exception text, input content, local
+paths and credentials are never included. Initialization, seed, signed runtime
+selection, execution and output failures retain their existing fail-closed
+decisions and reporting-only behavior.
+
+This is a bootstrap change: it needs a reviewed package build, publisher-signed
+release and changed-hook trust review. A source-only patch does not update
+installed hooks or pinned Tasks. Existing Task pins, original refusals, budget
+epochs and attempt limits must remain retained; original-environment recovery
+needs its own supported procedure rather than a new Task or fresh pin.
+
 ## Verification and failure behavior
 
 The signed manifest binds plugin ID, stable channel, version, monotonically
