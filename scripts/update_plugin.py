@@ -445,24 +445,19 @@ def main() -> int:
     # must not run if the configured retention location would follow a user
     # supplied link.
     _validate_path(data_root / "cache-backups", "retention directory")
+    retained_names: set[str] = set()
 
     def install() -> int:
         if args.retain_only:
             return 0
+        # preserve_install has validated and backed up these exact versions.
+        if cache.exists():
+            retained_names.update(version.name for version in cache.iterdir())
         result = subprocess.run(
             ["codex", "plugin", "add", "codex-run-budget@codex-run-budget", "--json"],
             env={**os.environ, "CODEX_HOME": str(codex_home)},
             check=False,
         ).returncode
-        if result == 0:
-            if cache.is_symlink() or (_lexists(cache) and not cache.is_dir()):
-                raise ValueError("plugin cache is not a real directory after install")
-            if not _lexists(cache):
-                return result
-            for version in sorted(cache.iterdir()):
-                if version.is_symlink() or not version.is_dir():
-                    raise ValueError("unexpected entry in plugin version cache after install")
-                prewarm_runtime(version, data_root)
         return result
 
     result = preserve_install(
@@ -471,6 +466,26 @@ def main() -> int:
         backup_root=data_root / "cache-backups",
     )
     if result == 0 and not args.retain_only:
+        # Recovery/integrity checks must finish before activating installed bytes.
+        if cache.is_symlink() or (_lexists(cache) and not cache.is_dir()):
+            raise ValueError("plugin cache is not a real directory after install")
+        if _lexists(cache):
+            reviewed_source = _read_regular(
+                Path(__file__).resolve().parents[1]
+                / "plugins/codex-run-budget/scripts/publisher_bootstrap.py"
+            )
+            for version in sorted(cache.iterdir()):
+                if version.is_symlink() or not version.is_dir():
+                    raise ValueError("unexpected entry in plugin version cache after install")
+                old_source = version / "scripts/publisher_bootstrap.py"
+                if (version.name in retained_names and _lexists(old_source)
+                        and _read_regular(_validate_path(old_source, "retained bootstrap"))
+                        != reviewed_source):
+                    # Retained Tasks keep their prior reviewed command and durable
+                    # runtime. Never import or activate an older bootstrap here.
+                    print(f"Kept prior bootstrap without reactivation: {version.name}", flush=True)
+                    continue
+                prewarm_runtime(version, data_root)
         print(
             "Installation complete; hook trust was not changed. Review changed "
             "codex-run-budget hooks in Codex CLI /hooks, then start a new Task. "

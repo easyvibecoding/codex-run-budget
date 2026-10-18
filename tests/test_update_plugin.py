@@ -150,6 +150,57 @@ class UpdateTest(unittest.TestCase):
             run.assert_not_called()
             self.assertEqual(list(outside.iterdir()), [])
 
+    def test_reviewed_bootstrap_upgrade_retains_old_entry_without_reactivating_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "codex-home"
+            cache = home / "plugins/cache/codex-run-budget/codex-run-budget"
+            old = self.make_version(cache)
+            (old / "scripts").mkdir()
+            old_source = old / "scripts/publisher_bootstrap.py"
+            old_source.write_text("# synthetic prior reviewed bootstrap\n")
+            new = cache / "0.2.0"
+
+            def install(*args, **kwargs):
+                self.make_version(cache, new.name)
+                return mock.Mock(returncode=0)
+
+            def prewarm(plugin, data):
+                self.assertEqual(plugin, new)
+                self.assertEqual(old_source.read_text(), "# synthetic prior reviewed bootstrap\n")
+                return True
+
+            with mock.patch.dict(os.environ, {"CODEX_RUN_BUDGET_HOME": str(root / "data")}), \
+                    mock.patch.object(sys, "argv",
+                                      ["update_plugin.py", "--codex-home", str(home)]), \
+                    mock.patch("update_plugin.subprocess.run", side_effect=install), \
+                    mock.patch("update_plugin.prewarm_runtime", side_effect=prewarm) as warmed:
+                self.assertEqual(main(), 0)
+            warmed.assert_called_once()
+            self.assertEqual(old_source.read_text(), "# synthetic prior reviewed bootstrap\n")
+
+    def test_new_mismatched_bootstrap_is_still_validated_and_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "codex-home"
+            cache = home / "plugins/cache/codex-run-budget/codex-run-budget"
+
+            def install(*args, **kwargs):
+                new = self.make_version(cache)
+                (new / "scripts").mkdir()
+                (new / "scripts/publisher_bootstrap.py").write_text("# unknown entry\n")
+                return mock.Mock(returncode=0)
+
+            with mock.patch.dict(os.environ, {"CODEX_RUN_BUDGET_HOME": str(root / "data")}), \
+                    mock.patch.object(sys, "argv",
+                                      ["update_plugin.py", "--codex-home", str(home)]), \
+                    mock.patch("update_plugin.subprocess.run", side_effect=install), \
+                    mock.patch("update_plugin.prewarm_runtime", side_effect=ValueError(
+                        "publisher bootstrap requires the matching installer")) as warmed:
+                with self.assertRaisesRegex(ValueError, "matching installer"):
+                    main()
+            warmed.assert_called_once()
+
     def test_dangling_runtime_archive_is_not_treated_as_legacy(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

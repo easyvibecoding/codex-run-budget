@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.19.12 - 2026-10-18
+
+- Avoid publisher write locks for pinned Task reads and repeated package seeding; verify runtimes outside short pin transactions and recheck concurrent activation.
+- Recover bounded first-open WAL contention without suppressing ledger failures or changing budget accounting.
+- Preserve fail-closed hook behavior and classify SQLite failures without exposing private error text.
+- Retain older reviewed bootstraps during package upgrades without reactivating them through a mismatched installer; complete cache integrity checks before prewarming new bytes.
+- This bootstrap change requires a signed package update and renewed native hook review.
+
 ## 0.19.11 - 2026-10-10
 
 - Read complete hook and reconciliation JSON without the fixed 2 MiB input limit; preserve Governor policy decisions and run ceilings.

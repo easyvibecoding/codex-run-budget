@@ -5,6 +5,43 @@ This file preserves dated release checks. The current package version is in
 [changelog](../CHANGELOG.md) for later changes. Historical installed canaries
 do not establish the trust or active runtime of a current installation.
 
+## 0.19.12 concurrent hooks and bootstrap upgrades — 2026-10-18
+
+The release is signed with the existing publisher key: sequence `1792298263`,
+runtime SHA-256
+`72dfee7933ebd59892ddd9a445a1a03ac50b375de740586f6755dbdbe6385e15`,
+and bootstrap contract
+`c9d9f0d74abac06f03a62d331fd43700d40b6d6563885a709d4950e18622f05d`.
+The public policy/key is unchanged. All 526 tests, Ruff, repository validation,
+reproducible artifact checks and signature verification passed. Python 3.10
+also passed 31 focused concurrency, initialization and installer tests.
+Plugin Creator validation passed using the same official validator and
+identifier helper at OpenAI Codex commit
+`84aa75204ad604bcf498df180d128181c89b2f0b` as the preceding release.
+
+Publisher regressions and the deterministic first-open WAL race were reproduced
+before repair. Three 24-way diagnostic replays succeeded 24/24 after repair;
+24-process signed hook tests cover cold starts, shared/distinct Task pins,
+three budget runs, replay and policy isolation. Crash tests exercise rollback
+before commit and idempotent retry after commit. See
+[the root cause and concurrency evidence](SQLITE_CONCURRENCY.md).
+
+The official Codex CLI installed version 0.19.12 from a local marketplace into
+an isolated Codex home. Actual installed hook commands established a synthetic
+run with a one-tool ceiling, admitted/completed its first tool and denied the
+second by budget policy. Readback showed zero spent tokens, one tool, zero
+in-flight tools and halted status. No real ledger, installed Desktop plugin,
+Task pin or native hook trust grant was changed. This is an installed-command
+replay, not a trusted live model turn or a claim that active Tasks changed entry.
+
+The bootstrap update changes 11 governance hook definitions; the independent
+update reminder stays unchanged. Compatible runtime releases still use the
+existing one-time native trust grant. This structural update needs normal hook
+review when later installed during an idle window. Older retained bootstraps
+are preserved without being imported/reactivated by the new installer; newly
+installed mismatches remain rejected. Publication does not update active local
+installations or erase original refusals, usage or budget ceilings.
+
 ## 0.19.11 complete hook input and failure diagnostics — 2026-10-10
 
 The signed release has sequence `1791614386` and runtime SHA-256

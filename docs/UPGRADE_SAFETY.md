@@ -43,6 +43,11 @@ official installer, restores prior version directories, and prewarms validated
 runtimes without executing plugin code. `--retain-only` creates a recovery copy
 without installation. Neither mode changes trust or enabled state.
 
+When the reviewed publisher bootstrap changes, retained older entries are kept
+without importing or reactivating them through the new installer. Cache recovery
+and integrity checks finish before new runtime prewarming. Newly installed
+entries still must match the reviewed installer; this is not a trust bypass.
+
 After reviewing the new hook commands, enable/trust them through Codex and start
 a new task. Existing legacy-pathname tasks must finish or restart because they still
 hold the old pathname command. Do not remove retained caches while such tasks

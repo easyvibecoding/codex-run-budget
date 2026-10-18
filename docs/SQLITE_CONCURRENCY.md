@@ -67,31 +67,28 @@ Both implementations succeeded 24/24 sequentially. The original fixture's
 checksums were unchanged. This is controlled reproduction, not recovery of a
 historical exception that the old hook did not record.
 
-## Release status and adoption
+## Release and adoption
 
-This is a source-only repair, not an installable release. Changing the bootstrap
-changes the native trust contract. Existing committed hooks, runtime archives,
-publisher policy and signed release remain untouched. Consequently, release
-validation in this source checkout intentionally reports stale artifacts; the
-three packaged-release checks also cannot pass against its old signed release.
-The full candidate must be built and tested with a matching signature.
+Version 0.19.12 rebuilds the deterministic artifacts and signs the release with
+its existing publisher key. No public policy or trust root is changed. The
+bootstrap contract changes, so compatible runtime auto-updates alone cannot
+install this repair. Ordinary releases with an unchanged bootstrap continue to
+use the existing one-time native grant and automatic signature verification.
 
-For offline validation, a separate disposable package can use a generated test
-key and rebuilt artifacts, run the complete test suite and repository validator,
-then discard the key. Such a package must never be installed as a production
-update or replace the committed publisher key.
+The original source repair was first validated in a disposable test-signed
+package: all 524 tests, Ruff and repository validation passed. That package was
+never installed or published. The production candidate uses the existing
+publisher signature and adds installer regressions for retaining prior
+bootstraps and rejecting newly installed mismatched entries.
 
-On 2026-10-18 the matching test-signed candidate passed all 524 tests, Ruff and
-`scripts/validate_repo.py`. Its two modified runtime source files were checked
-byte-for-byte against this repair checkout. Production signing and live
-installation/canary verification remain pending.
+Install only while affected execution windows are idle. The supported updater
+retains old artifacts and completes their integrity checks before prewarming
+installed bytes. It does not import or activate an older retained bootstrap
+through a new installer. New entries must still match the reviewed installer.
+Use normal native hook review; do not modify trust records or hot-replace an
+active plugin. Record a real Codex canary before claiming live recovery.
 
-Maintainer adoption requires a reviewed version/sequence bump, artifact rebuild,
-publisher signing, all release checks, and coordinated installation while
-affected execution windows are idle. Use the supported updater with retained
-old artifacts and normal native hook review; do not modify trust records or
-hot-replace an active plugin. Record a real Codex canary before claiming live
-recovery. Verify which embedded hook each existing Task actually retains; this
-patch cannot silently upgrade an old captured command. Preserve original pins,
+Verify which embedded hook each existing Task actually retains; this patch
+cannot silently upgrade an old captured command. Preserve original pins,
 refusals, usage, epochs and ceilings. Do not reset a budget or create a fresh
 Task to erase an original refusal. See [signed updates](SIGNED_UPDATES.md).
