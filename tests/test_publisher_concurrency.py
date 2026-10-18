@@ -49,12 +49,7 @@ class PublisherConcurrencyTest(PublisherFixture):
                 capture_output=True, text=True, env=env, timeout=20,
             )
             self.assertEqual((result.returncode, result.stderr), (0, ""))
-            output = json.loads(result.stdout)
-            if ("internal error" in result.stdout or "Signed Run Budget failure" in result.stdout
-                    ) and diagnostics.exists():
-                output["test_sqlite_errors"] = [json.loads(line)
-                                                for line in diagnostics.read_text().splitlines()]
-            return output
+            return json.loads(result.stdout)
 
         with ThreadPoolExecutor(max_workers=len(payloads)) as pool:
             futures = [pool.submit(invoke, index) for index in range(len(payloads))]
@@ -66,7 +61,17 @@ class PublisherConcurrencyTest(PublisherFixture):
                     time.sleep(.005)
             finally:
                 gate.touch()
-            return [future.result() for future in futures]
+            outputs = [future.result() for future in futures]
+            failed = next((output for output in outputs if
+                           "internal error" in json.dumps(output) or
+                           "Signed Run Budget failure" in json.dumps(output)), None)
+            if failed is not None:
+                failed["test_sqlite_timelines"] = {
+                    str(index): json.loads(path.with_suffix(".sqlite-errors").read_text())
+                    for index, path in enumerate(ready)
+                    if path.with_suffix(".sqlite-errors").exists()
+                }
+            return outputs
 
     def governor_runtime(self):
         spec = importlib.util.spec_from_file_location("concurrency_builder",
