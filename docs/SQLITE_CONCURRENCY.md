@@ -75,6 +75,14 @@ Both implementations succeeded 24/24 sequentially. The original fixture's
 checksums were unchanged. This is controlled reproduction, not recovery of a
 historical exception that the old hook did not record.
 
+An additional diagnostic restricted all 24 interpreters to one Linux CPU.
+Even after removing redundant writes, 13 of 16 tests exhausted bounded busy
+waits at necessary fresh-pin/admission/migration transactions. That deliberately
+constrained experiment is not a passing result or a supported throughput
+guarantee. It remains fail-closed; waits and hook timeouts are not expanded to
+hide host saturation. The required repeated replay uses the normal CI runner,
+matching the original multi-process concurrency scope without CPU affinity.
+
 ## Release and adoption
 
 Version 0.19.13 rebuilds the deterministic artifacts and signs the release with

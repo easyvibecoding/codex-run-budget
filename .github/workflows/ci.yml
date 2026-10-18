@@ -43,11 +43,8 @@ jobs:
       - name: Repeat cold starts and ledger replay with 24 hook processes
         run: |
           python3 - <<'PY'
-          import os
           import sys
           import unittest
-          # Exercise contention on a busy host without starting unrelated load.
-          os.sched_setaffinity(0, {min(os.sched_getaffinity(0))})
           sys.path.insert(0, "tests")
           from test_publisher_concurrency import PublisherConcurrencyTest
           names = (
