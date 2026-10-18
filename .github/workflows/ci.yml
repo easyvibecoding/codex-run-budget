@@ -33,3 +33,27 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: python3 -m unittest discover -s tests -v
       - run: python3 scripts/validate_repo.py
+  concurrency:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Repeat cold starts and ledger replay with 24 hook processes
+        run: |
+          python3 - <<'PY'
+          import sys
+          import unittest
+          sys.path.insert(0, "tests")
+          from test_publisher_concurrency import PublisherConcurrencyTest
+          names = (
+              "test_24_process_cold_start_same_pin_and_distinct_jobs",
+              "test_24_process_governor_replay_accounting_isolation_and_halt",
+          )
+          suite = unittest.TestSuite(
+              PublisherConcurrencyTest(name) for _ in range(8) for name in names
+          )
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          sys.exit(not result.wasSuccessful())
+          PY
