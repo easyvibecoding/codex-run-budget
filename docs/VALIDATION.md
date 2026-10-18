@@ -5,6 +5,32 @@ This file preserves dated release checks. The current package version is in
 [changelog](../CHANGELOG.md) for later changes. Historical installed canaries
 do not establish the trust or active runtime of a current installation.
 
+## 0.19.13 concurrent hooks — 2026-10-18
+
+Signed with the existing publisher key, sequence `1792299814`, runtime SHA-256
+`dc701487d969141a480b9be75b79f49ea4c07145e735dc946d1faecc07faaa90`,
+and bootstrap contract
+`634be17002bb7ffe5380f0653f7ed9d96a4b06999f4e8a4f446b6aa949fe7278`.
+The public policy/key is unchanged. All 530 tests, Ruff, repository and official
+Plugin Creator validation passed. The official CLI installed this package in
+an isolated home; its actual hooks admitted/completed the first tool, denied
+the second at a one-tool ceiling, and retained counts `(0, 1, 0, halted)`.
+No active installation, real ledger or native trust grant was changed.
+
+[Linux CI run 39099764966](https://github.com/easyvibecoding/codex-run-budget/actions/runs/39099764966)
+passed the full Python 3.10–3.13 matrix, index/history sensitive-data scans and
+eight repetitions of both 24-process cold-start and three-run accounting replay
+(16 stress tests). This checks source commit
+`a88b718ef327bef967d097a9e75d7bd950052534`; subsequent documentation does not
+change packaged code or signed bytes. The additional four write-regression
+tests failed before repair and passed after it.
+
+A deliberately constrained single-CPU diagnostic did not pass: 13 of 16 tests
+exhausted bounded busy waits and remained fail-closed. This is recorded as a
+host-saturation limit, not a claim of universal timeout-free operation. See
+[concurrency evidence](SQLITE_CONCURRENCY.md) for the original reproduction,
+remaining limit, crash/replay coverage and safe adoption procedure.
+
 ## 0.19.12 unpublished candidate — 2026-10-18
 
 This candidate passed the local checks below but was withheld after Linux CI

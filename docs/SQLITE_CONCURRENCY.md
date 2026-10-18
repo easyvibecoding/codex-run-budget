@@ -75,6 +75,9 @@ Both implementations succeeded 24/24 sequentially. The original fixture's
 checksums were unchanged. This is controlled reproduction, not recovery of a
 historical exception that the old hook did not record.
 
+The final normal Linux runner passed eight repetitions of each cold-start and
+accounting test (16 stress tests), plus the full Python 3.10–3.13 matrix.
+
 An additional diagnostic restricted all 24 interpreters to one Linux CPU.
 Even after removing redundant writes, 13 of 16 tests exhausted bounded busy
 waits at necessary fresh-pin/admission/migration transactions. That deliberately
