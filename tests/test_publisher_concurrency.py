@@ -19,6 +19,9 @@ from test_publisher_updates import BOOT, PLUGIN, ROOT, SOURCE, PublisherFixture
 
 
 class PublisherConcurrencyTest(PublisherFixture):
+    # Keep safe phase/class labels visible when only a few workers fail in CI.
+    maxDiff = None
+
     def parallel_hooks(self, payloads, plugin, *, data=None):
         """Start separate native-command interpreters, then release them together."""
         gate = self.root / ("gate-" + uuid.uuid4().hex)
