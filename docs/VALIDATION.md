@@ -5,7 +5,39 @@ This file preserves dated release checks. The current package version is in
 [changelog](../CHANGELOG.md) for later changes. Historical installed canaries
 do not establish the trust or active runtime of a current installation.
 
-## 0.19.13 concurrent hooks — 2026-10-18
+## 0.19.14 Publisher read isolation — 2026-10-18
+
+The existing publisher key signed sequence `1792301198`, runtime SHA-256
+`9291c87531083399a728303229bb0c5550f5c77f93b90767719d7db9de37e9b2`, and bootstrap contract
+`bf0b2367f10a08298fa4caa9c19ab64bd256d7e28a246b0ae703162fe57d84d7`. Public policy/key and native hook timeouts are unchanged.
+
+All 534 tests, Ruff, repository and official Plugin Creator validation passed.
+[Preparation CI run 39100638493](https://github.com/easyvibecoding/codex-run-budget/actions/runs/39100638493)
+passed the Python 3.10–3.13 matrix, index/history sensitive-data scans and eight
+repetitions of both 24-process tests (16 stress tests) at code commit
+`da931e08e42a41de6bb6ab7a4fb8a023039cc96e`. Subsequent release documentation does not change the packaged bytes.
+
+New regressions first failed for an existing pin behind an exclusive writer,
+legacy journal transition and a 0.75-second writer pause. They pass with
+Publisher WAL/FULL, preserved rows and bounded BUSY handling. I/O errors are
+not retried, failed initialization closes its connection, and permanent
+contention still fails within two seconds. The original saved reproduction
+passed 24/24 in three candidate bursts versus 18/24, 15/24 and 18/24 before the
+repair; sequential calls passed 24/24 in both cases. Original evidence hashes
+were unchanged.
+
+An official isolated install of 0.19.14 exercised its actual generated hooks:
+one tool was admitted/completed, a second was denied by the one-tool ceiling,
+and persisted counts were `(0, 1, 0, halted)`. No real ledger, active Desktop
+plugin or native trust grant changed. This is installed-command evidence, not
+a live model-turn canary or universal guarantee under host saturation.
+
+## 0.19.13 preview — 2026-10-18
+
+Preparation and main CI passed, but subsequent tag CI failed one of eight
+normal cold-start repetitions. The release was marked preview and removed
+from latest; its tag and signed assets were retained. Version 0.19.14 adds
+Publisher read isolation and bounded writer-pause protection.
 
 Signed with the existing publisher key, sequence `1792299814`, runtime SHA-256
 `dc701487d969141a480b9be75b79f49ea4c07145e735dc946d1faecc07faaa90`,

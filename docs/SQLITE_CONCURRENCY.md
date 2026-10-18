@@ -18,6 +18,12 @@ and `Ledger.sync_usage()` admission. Identical release metadata and unchanged
 health/counters were still rewritten, creating unnecessary durable commits.
 The additional repair removes these writes; policy and accounting remain atomic.
 
+Rollback-journal exclusive writer blocking was separately reproduced after
+normal Linux cold-start failures included `SELECT manifest`. Existing pin
+reads also failed behind an explicit exclusive writer despite taking no write
+transaction themselves. Publisher WAL resolves that reader/writer coupling;
+the original excessive transaction scope and redundant writes are still fixed.
+
 ## Changes
 
 - Existing Task pins use reads only. Each selection still verifies its signed
@@ -83,7 +89,7 @@ historical exception that the old hook did not record.
 The 0.19.13 preparation and main normal Linux runners passed eight repetitions of each cold-start and
 accounting test (16 stress tests), plus the full Python 3.10–3.13 matrix.
 
-An additional diagnostic restricted all 24 interpreters to one Linux CPU.
+An additional 0.19.13 diagnostic restricted all 24 interpreters to one Linux CPU.
 Even after removing redundant writes, 13 of 16 tests exhausted bounded busy
 waits at necessary fresh-pin/admission/migration transactions. That deliberately
 constrained experiment is not a passing result or a supported throughput
