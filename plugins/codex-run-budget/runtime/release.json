@@ -2,10 +2,10 @@
   "schema": 1,
   "plugin": "codex-run-budget",
   "channel": "stable",
-  "version": "0.19.13",
-  "sequence": 1792299814,
-  "bootstrap_sha256": "634be17002bb7ffe5380f0653f7ed9d96a4b06999f4e8a4f446b6aa949fe7278",
-  "runtime_sha256": "dc701487d969141a480b9be75b79f49ea4c07145e735dc946d1faecc07faaa90",
+  "version": "0.19.14",
+  "sequence": 1792301198,
+  "bootstrap_sha256": "bf0b2367f10a08298fa4caa9c19ab64bd256d7e28a246b0ae703162fe57d84d7",
+  "runtime_sha256": "9291c87531083399a728303229bb0c5550f5c77f93b90767719d7db9de37e9b2",
   "runtime_size": 985853,
-  "signature": "eoEfuicK0mdrCREcqD9QQBwfXDW0oM0fNQHxCzHXk/s/GYmO49WTwEnOgfluz3N0ez5emlTK/mFdFUwzx0KhWdK6fzo1MkbLsPXThMgkj9XQ0IbhLutyIo2LqCaxaGGcbSh/31Z8XD4eVu1/E3+zif962xhZJxFGxAFAltW0RGrdQJ0sjI9ex91wJcabbPYC21TEwhW5VbEejJzeUGTnxLypGgjElO7a8xHdZiMedu0Gw4Rr5fhPAb0pQRiLDzu6+STBvVHbo09fNgTIa03bKYSZYl1Tv1dqS0Ekrm7K7SYGljnpqJyhGygCvgfez4sYivLJh1+mgzCP7KL8+EVX8kUn6UxIqvmJtfjF3nIjW9VsEFBRst6nTr12KEdv3V+dy0yHZg6WWAHAkpTw+DxsqDEUzMQTk5YYPEv6fMVxiBp7bH4ybBsy4+OwXjJ8UtIvqaPtDNJ48YTqXljw+0r76Y00NKdOuwFjzjYvo/58b8lH7K3Pl2Zp94zZ9977BjtS"
+  "signature": "RaM0TH8G8FgJUMi9BG8Mp4jJs8ejGX1QcUt9m/dlaVxoUcus66QK3r6mR3i93NX9fVJ37XkDgOTbcGwUNfMt1OQ6Tiwgur+o9hbiercPybPk5lmpKWYrJB+75eK2ext46E/aisfsaf18TdeMkla7UqzAfgiBwfLrUQMLEqlP+aCCoLYCVHMgJuTF429kG5Xq8egbEMxtR4phdRCTPwWWjTyrJptnMMB4A51yhBtzpyKc4zZRX2/U5JJsQzp/0mQ2W8U7afLqjUcGz0x0vpMwyuscOkIbC+a3BMel45hDO2L9l0qPQx9qe2ukEwEOQLS841jDKRkTS0Q5a77rJmnytwJIItN4Qp3hX54wJqm0Sk0JmPoWEuH5NomNDATONntvp2MheEfG2qKoGqXFMHx7kkH6w+DzZhbR6g5Gw4ZETEkAL/OwAOSxtu+UoU4jk/5Th68dH80DhoYfDgsu7F/gbtY4/qkBz/e/HEMBUjqXcgBLvV+gwJgmdDyPkEYnhQ+t"
 }

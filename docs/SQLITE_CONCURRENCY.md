@@ -33,9 +33,14 @@ The additional repair removes these writes; policy and accounting remain atomic.
 - Identical ledger observations preserve counter/health rows without redundant
   writes. Their `updated_at` records the last value change; changed components,
   health failures/recovery and budget transitions are still persisted atomically.
-- Publisher writes retain a bounded 500 ms busy timeout. This protects short
-  writes; it is not the mechanism that makes pinned readers concurrent. The
-  publisher remains in its existing DELETE journal mode.
+- Publisher state uses WAL with FULL synchronization: a rollback-journal
+  exclusive writer was reproduced blocking even immutable pinned reads. WAL
+  keeps those reads independent of necessary cold/pin writes. Existing rows
+  survive the transition; only BUSY is retried within a 1.5-second deadline.
+- Necessary Publisher writes have a bounded 1.5-second busy timeout. A separate
+  test verifies a 0.75-second writer pause is tolerated and that a permanently
+  held writer still fails within two seconds. This guard does not replace the
+  read-only paths or short transaction boundaries.
 - Ledger startup first reads the journal mode. Only the initial WAL transition
   retries BUSY, with backoff bounded by a one-second deadline. Other failures
   propagate. Initialization failures close their connections.
@@ -75,7 +80,7 @@ Both implementations succeeded 24/24 sequentially. The original fixture's
 checksums were unchanged. This is controlled reproduction, not recovery of a
 historical exception that the old hook did not record.
 
-The final normal Linux runner passed eight repetitions of each cold-start and
+The 0.19.13 preparation and main normal Linux runners passed eight repetitions of each cold-start and
 accounting test (16 stress tests), plus the full Python 3.10–3.13 matrix.
 
 An additional diagnostic restricted all 24 interpreters to one Linux CPU.
@@ -85,10 +90,14 @@ constrained experiment is not a passing result or a supported throughput
 guarantee. It remains fail-closed; waits and hook timeouts are not expanded to
 hide host saturation. The required repeated replay uses the normal CI runner,
 matching the original multi-process concurrency scope without CPU affinity.
+A later 0.19.13 tag run nevertheless failed one normal cold-start repetition.
+The release was changed to preview and removed from latest. Version 0.19.14
+adds the Publisher journal/read-isolation repair and bounded writer guard;
+that failure is not erased or described as a successful run.
 
 ## Release and adoption
 
-Version 0.19.13 rebuilds the deterministic artifacts and signs the release with
+Version 0.19.14 rebuilds the deterministic artifacts and signs the release with
 its existing publisher key. No public policy or trust root is changed. The
 bootstrap contract changes, so compatible runtime auto-updates alone cannot
 install this repair. Ordinary releases with an unchanged bootstrap continue to

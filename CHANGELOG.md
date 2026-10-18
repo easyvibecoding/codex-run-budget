@@ -1,6 +1,13 @@
 # Changelog
 
-## 0.19.13 - 2026-10-18
+## 0.19.14 - 2026-10-18
+
+- Complete the concurrent-hook repairs from the earlier candidates with WAL-backed Publisher state so cold writes do not block immutable pinned reads during rollback-journal commits.
+- Preserve existing publisher rows and retry only bounded BUSY failures during the first journal transition; other failures propagate and close the connection.
+- Bound necessary Publisher writes at 1.5 seconds to tolerate brief writer descheduling while retaining fail-closed behavior after exhaustion.
+- Preserve FULL synchronization, signature checks, shared budget accounting and synchronous hook timeouts.
+
+## 0.19.13 - 2026-10-18 (preview)
 
 - Include the concurrent Publisher, bounded WAL startup and safe bootstrap upgrade repairs from the unpublished 0.19.12 candidate.
 - Avoid rewriting identical retained release manifests during cold-start races.

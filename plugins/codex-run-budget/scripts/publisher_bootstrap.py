@@ -157,8 +157,10 @@ class Publisher:
             safe(Path(str(path) + suffix))
         fd = os.open(path, os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
         os.close(fd)
-        self.db = sqlite3.connect(path, timeout=0.5)
+        self.db = sqlite3.connect(path, timeout=1.5)
         try:
+            self._enable_wal()
+            self.db.execute("PRAGMA synchronous=FULL")
             self.db.executescript(
                 "CREATE TABLE IF NOT EXISTS releases("
                 "digest TEXT PRIMARY KEY, manifest TEXT NOT NULL);"
@@ -169,6 +171,29 @@ class Publisher:
         except BaseException:
             self.db.close()
             raise
+
+    def _enable_wal(self):
+        # Rollback-journal commits can block even immutable pinned reads. WAL
+        # keeps those readers independent of cold retention and fresh-pin writes.
+        # The first journal transition itself can return BUSY without waiting.
+        deadline = time.monotonic() + 1.5
+        delay = 0.01
+        while True:
+            try:
+                if self.db.execute("PRAGMA journal_mode").fetchone()[0] == "wal":
+                    return
+                if self.db.execute("PRAGMA journal_mode=WAL").fetchone()[0] != "wal":
+                    raise ValueError("publisher requires WAL journal mode")
+                return
+            except sqlite3.OperationalError as error:
+                code = getattr(error, "sqlite_errorcode", None)
+                busy = (code & 0xFF == 5 if code is not None
+                        else str(error) == "database is locked")
+                remaining = deadline - time.monotonic()
+                if not busy or remaining <= 0:
+                    raise
+                time.sleep(min(delay, remaining))
+                delay = min(delay * 2, 0.08)
 
     def close(self):
         self.db.close()

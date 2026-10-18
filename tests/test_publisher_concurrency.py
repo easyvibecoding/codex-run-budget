@@ -124,6 +124,68 @@ class PublisherConcurrencyTest(PublisherFixture):
         with self.assertRaises(ValueError):
             self.publisher.retain(manifest, blob + b"corrupt")
 
+    def test_existing_pin_reads_during_exclusive_writer(self):
+        manifest, blob = self.release(1, "SAFE")
+        self.publisher.activate(manifest, blob)
+        self.publisher.select("synthetic-pinned")
+        writer = sqlite3.connect(self.root / "data/publisher-updates.sqlite3")
+        self.addCleanup(writer.close)
+        writer.execute("BEGIN EXCLUSIVE")
+        try:
+            self.assertEqual(self.publisher.select("synthetic-pinned"), (manifest, blob, False))
+            self.assertEqual(self.publisher.retain(manifest, blob), manifest["runtime_sha256"])
+        finally:
+            writer.rollback()
+
+    def test_publisher_wal_transition_retries_busy_and_preserves_existing_rows(self):
+        manifest, blob = self.release(1, "SAFE")
+        self.publisher.activate(manifest, blob)
+        self.publisher.select("synthetic-pinned")
+        self.publisher.db.execute("PRAGMA journal_mode=DELETE")
+        real_connect = BOOT.sqlite3.connect
+        transitions = []
+
+        class RacingConnection(sqlite3.Connection):
+            def execute(self, sql, *args):
+                if sql == "PRAGMA journal_mode=WAL":
+                    transitions.append(sql)
+                    if len(transitions) == 1:
+                        raise sqlite3.OperationalError("database is locked")
+                return super().execute(sql, *args)
+
+        def connect(*args, **kwargs):
+            return real_connect(*args, **kwargs, factory=RacingConnection)
+
+        with patch.object(BOOT.sqlite3, "connect", side_effect=connect):
+            peer = BOOT.Publisher(self.root / "data", self.policy, SOURCE)
+        self.addCleanup(peer.close)
+        self.assertEqual(len(transitions), 2)
+        self.assertEqual(peer.db.execute("PRAGMA journal_mode").fetchone()[0], "wal")
+        self.assertEqual(peer.select("synthetic-pinned"), (manifest, blob, False))
+
+    def test_publisher_journal_io_failure_is_not_retried_and_closes_connection(self):
+        real_connect = BOOT.sqlite3.connect
+        connections, failures = [], []
+
+        class BrokenConnection(sqlite3.Connection):
+            def execute(self, sql, *args):
+                if "journal_mode" in sql:
+                    failures.append(sql)
+                    raise sqlite3.OperationalError("disk I/O error")
+                return super().execute(sql, *args)
+
+        def connect(*args, **kwargs):
+            connection = real_connect(*args, **kwargs, factory=BrokenConnection)
+            connections.append(connection)
+            return connection
+
+        with patch.object(BOOT.sqlite3, "connect", side_effect=connect):
+            with self.assertRaisesRegex(sqlite3.OperationalError, "disk I/O"):
+                BOOT.Publisher(self.root / "data", self.policy, SOURCE)
+        self.assertEqual(len(failures), 1)
+        with self.assertRaises(sqlite3.ProgrammingError):
+            connections[0].execute("SELECT 1")
+
     def test_24_readers_do_not_serialize_runtime_verification(self):
         manifest, blob = self.release(1, "SAFE")
         self.publisher.activate(manifest, blob)
@@ -349,6 +411,23 @@ class PublisherConcurrencyTest(PublisherFixture):
         self.assertFalse(self.publisher.db.in_transaction)
         self.assertTrue(self.publisher.select("synthetic-retry")[2])
         self.assertFalse(self.publisher.select("synthetic-retry")[2])
+        self.assertEqual(self.publisher.db.execute("SELECT COUNT(*) FROM tasks").fetchone()[0], 1)
+
+    def test_fresh_pin_survives_a_short_descheduled_writer(self):
+        manifest, blob = self.release(1, "SAFE")
+        self.publisher.activate(manifest, blob)
+        writer = sqlite3.connect(self.root / "data/publisher-updates.sqlite3",
+                                 check_same_thread=False)
+        self.addCleanup(writer.close)
+        writer.execute("BEGIN IMMEDIATE")
+        release = threading.Timer(0.75, writer.rollback)
+        release.start()
+        try:
+            self.assertEqual(self.publisher.select("synthetic-delayed-writer"),
+                             (manifest, blob, True))
+        finally:
+            release.join()
+        self.assertFalse(self.publisher.select("synthetic-delayed-writer")[2])
         self.assertEqual(self.publisher.db.execute("SELECT COUNT(*) FROM tasks").fetchone()[0], 1)
 
     def test_seed_does_not_hide_database_errors(self):
