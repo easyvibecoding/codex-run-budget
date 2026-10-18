@@ -26,7 +26,7 @@ SPEC.loader.exec_module(BOOT)
 SOURCE = (PLUGIN / "scripts/publisher_bootstrap.py").read_bytes()
 
 
-class PublisherUpdatesTest(unittest.TestCase):
+class PublisherFixture(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.keys = tempfile.TemporaryDirectory()
@@ -50,12 +50,12 @@ class PublisherUpdatesTest(unittest.TestCase):
         self.publisher = BOOT.Publisher(self.root / "data", self.policy, SOURCE)
         self.addCleanup(self.publisher.close)
 
-    def release(self, sequence, marker, **overrides):
+    def release(self, sequence, marker, *, runtime=None, **overrides):
         stream = io.BytesIO()
         with zipfile.ZipFile(stream, "w") as archive:
             archive.writestr("__main__.py", "import json\nprint(json.dumps(" +
                              repr({"systemMessage": marker}) + "))\n")
-        blob = stream.getvalue()
+        blob = stream.getvalue() if runtime is None else runtime
         manifest = {"schema": 1, "plugin": PLUGIN.name, "channel": "stable",
                     "version": f"9.0.{sequence}", "sequence": sequence,
                     "bootstrap_sha256": BOOT.contract(SOURCE, self.policy),
@@ -86,6 +86,8 @@ class PublisherUpdatesTest(unittest.TestCase):
         self.assertEqual(result.stderr, "")
         return json.loads(result.stdout)
 
+
+class PublisherUpdatesTest(PublisherFixture):
     def test_fixed_native_command_executes_new_signed_release_and_pins_old_task(self):
         a, blob_a = self.release(1, "SYNTHETIC_A")
         b, blob_b = self.release(2, "SYNTHETIC_B")

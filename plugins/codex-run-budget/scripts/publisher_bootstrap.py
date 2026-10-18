@@ -157,13 +157,18 @@ class Publisher:
             safe(Path(str(path) + suffix))
         fd = os.open(path, os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
         os.close(fd)
-        self.db = sqlite3.connect(path, timeout=0.1)
-        self.db.executescript(
-            "CREATE TABLE IF NOT EXISTS releases(digest TEXT PRIMARY KEY, manifest TEXT NOT NULL);"
-            "CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);"
-            "CREATE TABLE IF NOT EXISTS tasks("
-            "task TEXT PRIMARY KEY, digest TEXT NOT NULL, at REAL);"
-        )
+        self.db = sqlite3.connect(path, timeout=0.5)
+        try:
+            self.db.executescript(
+                "CREATE TABLE IF NOT EXISTS releases("
+                "digest TEXT PRIMARY KEY, manifest TEXT NOT NULL);"
+                "CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);"
+                "CREATE TABLE IF NOT EXISTS tasks("
+                "task TEXT PRIMARY KEY, digest TEXT NOT NULL, at REAL);"
+            )
+        except BaseException:
+            self.db.close()
+            raise
 
     def close(self):
         self.db.close()
@@ -239,11 +244,20 @@ class Publisher:
             manifest = verified(parse(read(Path(plugin_root) / "runtime/release.json",
                                            MAX_MANIFEST)), self.policy, self.source)
             digest = manifest["runtime_sha256"]
+            # Every hook seeds the installed package. Once considered, it must not
+            # rewrite releases or contend with Task pins. select() still verifies
+            # the selected manifest and exact runtime bytes on every invocation.
+            if self.get("active") and manifest["sequence"] <= self.get("high_water", 0):
+                return
             try:
                 blob = self.load(digest)[1]
+            except sqlite3.Error:
+                raise
             except Exception:
                 blob = runtime_bytes(Path(plugin_root) / "runtime/publisher.pyz", manifest)
             self.activate(manifest, blob)
+        except sqlite3.Error:
+            raise
         except Exception:
             # Existing verified state survives plugin cache eviction/replacement.
             if not self.get("active"):
@@ -252,27 +266,44 @@ class Publisher:
     def select(self, task=None):
         task_hash = (hashlib.sha256((self.namespace + task).encode()).hexdigest()
                      if task else None)
-        with self.db:
-            self.db.execute("BEGIN IMMEDIATE")
+        # Pinned hooks only read. Do not hold any transaction while verifying a
+        # signature or reading/hashing the archive, including for a fresh Task.
+        for _ in range(4):
             row = (self.db.execute("SELECT digest FROM tasks WHERE task=?", (task_hash,)).fetchone()
                    if task_hash else None)
             if row:
                 return (*self.load(row[0]), False)
             active = self.get("active")
+            previous = None
             try:
                 selected = self.load(active)
+            except sqlite3.Error:
+                raise
             except Exception:
                 previous = self.get("previous")
                 selected = self.load(previous)
-                active = previous
-                self.put("active", previous)
-                self.put("last_result", {"status": "fallback_previous"})
-            if task_hash:
-                self.db.execute("INSERT INTO tasks VALUES (?,?,?)",
-                                (task_hash, active, time.time()))
-                self.db.execute("DELETE FROM tasks WHERE task NOT IN "
-                                "(SELECT task FROM tasks ORDER BY at DESC LIMIT 10000)")
+            if not task_hash and previous is None:
+                return (*selected, True)
+            with self.db:
+                self.db.execute("BEGIN IMMEDIATE")
+                # A peer may have pinned this Task or activated another release
+                # during verification. Retry outside the lock using that state.
+                if task_hash and self.db.execute(
+                        "SELECT 1 FROM tasks WHERE task=?", (task_hash,)).fetchone():
+                    continue
+                if (self.get("active") != active or
+                        (previous is not None and self.get("previous") != previous)):
+                    continue
+                if previous is not None:
+                    self.put("active", previous)
+                    self.put("last_result", {"status": "fallback_previous"})
+                if task_hash:
+                    self.db.execute("INSERT INTO tasks VALUES (?,?,?)",
+                                    (task_hash, selected[0]["runtime_sha256"], time.time()))
+                    self.db.execute("DELETE FROM tasks WHERE task NOT IN "
+                                    "(SELECT task FROM tasks ORDER BY at DESC LIMIT 10000)")
             return (*selected, True)
+        raise RuntimeError("runtime selection changed repeatedly; retry")
 
     def status(self):
         result = {"plugin": self.policy["plugin"], "enabled": self.get("enabled", True),
@@ -441,6 +472,7 @@ def failure_message(phase, error):
     phase = phase if phase in phases else "runtime"
     cause = error.__cause__ if isinstance(error, HookInputError) and error.__cause__ else error
     classes = (HookInputError, json.JSONDecodeError, UnicodeDecodeError, RecursionError,
+               sqlite3.OperationalError, sqlite3.DatabaseError,
                FileNotFoundError, PermissionError, MemoryError, ValueError, OSError, RuntimeError)
     name = next((cls.__name__ for cls in classes if isinstance(cause, cls)), "Exception")
     codes = {"HOOK_INPUT_INVALID_JSON", "HOOK_INPUT_INVALID_METADATA",

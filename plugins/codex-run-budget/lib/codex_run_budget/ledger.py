@@ -52,17 +52,42 @@ class Ledger:
         self.conn = sqlite3.connect(str(path), timeout=1.0, isolation_level=None)
         self.conn.row_factory = sqlite3.Row
         try:
-            self.conn.execute("PRAGMA journal_mode=WAL")
+            self._enable_wal()
             self.conn.execute("PRAGMA foreign_keys=ON")
             self.conn.execute("PRAGMA busy_timeout=1000")
             self.conn.execute("PRAGMA synchronous=FULL")
             self._migrate()
-        except Exception:
+        except BaseException:
             self.conn.close()
             raise
 
     def close(self) -> None:
         self.conn.close()
+
+    def _enable_wal(self) -> None:
+        # Changing journal mode can return BUSY immediately when simultaneous
+        # first-open connections try to upgrade their locks. busy_timeout alone
+        # does not resolve that race. Established WAL stores only need a read.
+        deadline = time.monotonic() + 1.0
+        delay = 0.01
+        while True:
+            try:
+                if self.conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal":
+                    return
+                if self.conn.execute("PRAGMA journal_mode=WAL").fetchone()[0] != "wal":
+                    raise ValueError("ledger requires WAL journal mode")
+                return
+            except sqlite3.OperationalError as exc:
+                code = getattr(exc, "sqlite_errorcode", None)
+                # Python 3.10 lacks sqlite_errorcode; match only SQLite's BUSY
+                # label there. I/O, corruption and other errors must propagate.
+                busy = (code & 0xFF == 5 if code is not None
+                        else str(exc) == "database is locked")
+                remaining = deadline - time.monotonic()
+                if not busy or remaining <= 0:
+                    raise
+                time.sleep(min(delay, remaining))
+                delay = min(delay * 2, 0.08)
 
     def _migrate(self) -> None:
         exists = self.conn.execute(
