@@ -1,6 +1,13 @@
 # Changelog
 
-## 0.19.12 - 2026-10-18
+## 0.19.13 - 2026-10-18
+
+- Include the concurrent Publisher, bounded WAL startup and safe bootstrap upgrade repairs from the unpublished 0.19.12 candidate.
+- Avoid rewriting identical retained release manifests during cold-start races.
+- Preserve atomic ledger health/counter checks while omitting durable writes for identical cumulative observations; changed components and health recovery are still recorded.
+- Add repeated 24-process Linux replay, including constrained-CPU scheduling, and safe test-only SQLite diagnostics.
+
+## 0.19.12 - 2026-10-18 (unpublished candidate)
 
 - Avoid publisher write locks for pinned Task reads and repeated package seeding; verify runtimes outside short pin transactions and recheck concurrent activation.
 - Recover bounded first-open WAL contention without suppressing ledger failures or changing budget accounting.

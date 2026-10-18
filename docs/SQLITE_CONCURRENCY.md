@@ -13,7 +13,10 @@ A separate first-open race was reproduced in `Ledger.__init__`: simultaneous
 connections changing a new database from DELETE to WAL sometimes received
 `SQLITE_BUSY` at `PRAGMA journal_mode=WAL` before schema migration. SQLite can
 return this immediately during a lock upgrade despite the configured timeout.
-No steady-state ledger transaction or accounting defect was demonstrated.
+Linux release CI also reproduced exhausted busy waits at cold retention writes
+and `Ledger.sync_usage()` admission. Identical release metadata and unchanged
+health/counters were still rewritten, creating unnecessary durable commits.
+The additional repair removes these writes; policy and accounting remain atomic.
 
 ## Changes
 
@@ -25,6 +28,11 @@ No steady-state ledger transaction or accounting defect was demonstrated.
   State churn is bounded to four attempts and then propagates an error.
 - Seeding an already considered package does not rewrite the release or attempt
   activation. Selected runtime integrity is still checked by `select()`.
+- Retaining identical verified release metadata is read-only. A conditional
+  upsert also prevents a competing cold initializer from rewriting the winner.
+- Identical ledger observations preserve counter/health rows without redundant
+  writes. Their `updated_at` records the last value change; changed components,
+  health failures/recovery and budget transitions are still persisted atomically.
 - Publisher writes retain a bounded 500 ms busy timeout. This protects short
   writes; it is not the mechanism that makes pinned readers concurrent. The
   publisher remains in its existing DELETE journal mode.
@@ -69,7 +77,7 @@ historical exception that the old hook did not record.
 
 ## Release and adoption
 
-Version 0.19.12 rebuilds the deterministic artifacts and signs the release with
+Version 0.19.13 rebuilds the deterministic artifacts and signs the release with
 its existing publisher key. No public policy or trust root is changed. The
 bootstrap contract changes, so compatible runtime auto-updates alone cannot
 install this repair. Ordinary releases with an unchanged bootstrap continue to

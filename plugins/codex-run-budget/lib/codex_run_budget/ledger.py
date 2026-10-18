@@ -314,20 +314,21 @@ class Ledger:
             "SELECT state,reason FROM source_health WHERE run_id=? AND epoch=? AND source_id=?",
             (run_id, epoch, source_id),
         ).fetchone()
+        if previous is not None and previous["state"] == state and previous["reason"] == reason:
+            return
         self.conn.execute(
             "INSERT INTO source_health VALUES(?,?,?,?,?,?) "
             "ON CONFLICT(run_id,epoch,source_id) DO UPDATE SET state=excluded.state,"
             "reason=excluded.reason,updated_at=excluded.updated_at",
             (run_id, epoch, source_id, state, reason, time.time()),
         )
-        if previous is None or previous["state"] != state or previous["reason"] != reason:
-            self._event(
-                run_id,
-                epoch,
-                "usage_health",
-                {"state": state, "reason": reason},
-                source_id=source_id,
-            )
+        self._event(
+            run_id,
+            epoch,
+            "usage_health",
+            {"state": state, "reason": reason},
+            source_id=source_id,
+        )
 
     def start_run(
         self,
@@ -478,7 +479,10 @@ class Ledger:
                     (run_id, epoch, recovered_source),
                 )
             delta = usage.delta(prior)
-            self._upsert_source(run_id, epoch, source_id, usage)
+            # Replayed cumulative observations still recheck health and limits
+            # atomically, but must not create a durable write on every hook.
+            if prior_row is None or usage != prior:
+                self._upsert_source(run_id, epoch, source_id, usage)
             if delta.total:
                 self.conn.execute(
                     "UPDATE runs SET spent_tokens=spent_tokens+?,updated_at=? WHERE run_id=?",

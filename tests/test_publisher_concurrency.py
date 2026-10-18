@@ -104,6 +104,21 @@ class PublisherConcurrencyTest(PublisherFixture):
         finally:
             writer.rollback()
 
+    def test_retaining_identical_release_is_read_only_during_another_writer(self):
+        manifest, blob = self.release(1, "SAFE")
+        self.publisher.activate(manifest, blob)
+        writer = sqlite3.connect(self.root / "data/publisher-updates.sqlite3")
+        self.addCleanup(writer.close)
+        writer.execute("BEGIN IMMEDIATE")
+        changes = self.publisher.db.total_changes
+        try:
+            self.assertEqual(self.publisher.retain(manifest, blob), manifest["runtime_sha256"])
+        finally:
+            writer.rollback()
+        self.assertEqual(self.publisher.db.total_changes, changes)
+        with self.assertRaises(ValueError):
+            self.publisher.retain(manifest, blob + b"corrupt")
+
     def test_24_readers_do_not_serialize_runtime_verification(self):
         manifest, blob = self.release(1, "SAFE")
         self.publisher.activate(manifest, blob)

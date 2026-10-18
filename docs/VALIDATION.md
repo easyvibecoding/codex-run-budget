@@ -5,7 +5,12 @@ This file preserves dated release checks. The current package version is in
 [changelog](../CHANGELOG.md) for later changes. Historical installed canaries
 do not establish the trust or active runtime of a current installation.
 
-## 0.19.12 concurrent hooks and bootstrap upgrades — 2026-10-18
+## 0.19.12 unpublished candidate — 2026-10-18
+
+This candidate passed the local checks below but was withheld after Linux CI
+reproduced intermittent busy waits. Version 0.19.13 additionally eliminates
+redundant retention and cumulative-observation writes. The original tag is
+retained rather than rewritten.
 
 The release is signed with the existing publisher key: sequence `1792298263`,
 runtime SHA-256

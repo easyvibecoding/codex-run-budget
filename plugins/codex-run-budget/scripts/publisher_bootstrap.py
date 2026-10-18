@@ -217,9 +217,16 @@ class Publisher:
             finally:
                 if os.path.exists(temporary):
                     os.unlink(temporary)
+        key, encoded = self.namespace + digest, canonical(manifest).decode()
+        row = self.db.execute("SELECT manifest FROM releases WHERE digest=?", (key,)).fetchone()
+        if row and row[0] == encoded:
+            return digest
         with self.db:
-            self.db.execute("INSERT OR REPLACE INTO releases VALUES (?,?)",
-                            (self.namespace + digest, canonical(manifest).decode()))
+            # Another cold-start hook may have retained these exact bytes since
+            # our read. Do not force a delete/insert and durable commit for it.
+            self.db.execute("INSERT INTO releases VALUES (?,?) ON CONFLICT(digest) "
+                            "DO UPDATE SET manifest=excluded.manifest "
+                            "WHERE releases.manifest != excluded.manifest", (key, encoded))
         return digest
 
     def activate(self, manifest, blob, *, require_enabled=False):
