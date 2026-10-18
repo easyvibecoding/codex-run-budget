@@ -31,7 +31,11 @@ class PublisherConcurrencyTest(PublisherFixture):
                "CODEX_HOME": str(self.root / "native")}
 
         def invoke(index):
+            diagnostics = ready[index].with_suffix(".sqlite-errors")
             prelude = (
+                (ROOT / "tests/sqlite_probe.py").read_text()
+                + f"\ninstall({str(diagnostics)!r})\n"
+                +
                 "import pathlib,time\n"
                 f"pathlib.Path({str(ready[index])!r}).touch()\n"
                 "deadline=time.monotonic()+15\n"
@@ -45,7 +49,12 @@ class PublisherConcurrencyTest(PublisherFixture):
                 capture_output=True, text=True, env=env, timeout=20,
             )
             self.assertEqual((result.returncode, result.stderr), (0, ""))
-            return json.loads(result.stdout)
+            output = json.loads(result.stdout)
+            if ("internal error" in result.stdout or "Signed Run Budget failure" in result.stdout
+                    ) and diagnostics.exists():
+                output["test_sqlite_errors"] = [json.loads(line)
+                                                for line in diagnostics.read_text().splitlines()]
+            return output
 
         with ThreadPoolExecutor(max_workers=len(payloads)) as pool:
             futures = [pool.submit(invoke, index) for index in range(len(payloads))]
