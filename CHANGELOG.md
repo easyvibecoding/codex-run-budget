@@ -1,6 +1,11 @@
 # Changelog
 
-## 0.20.0 - 2026-10-31
+## 0.20.1 - 2026-10-31
+
+- Ship the Codex sensing, accounting diagnostics and cross-Task workflow observation features from the 0.20.0 candidate.
+- Verify diagnostic rendering in the receipt's actual locale, fixing the English Linux CI failure without changing accounting behavior.
+
+## 0.20.0 - 2026-10-31 (unpublished candidate)
 
 - Expand workflow observation to 32 explicit roots/Tasks with eight-target native-status batches, preserving scope and healthy peers when one exact UUID disappears.
 - Read verified small appends incrementally, retain unconfirmed failures across source gaps, and add per-cursor bounded backoff, explicit probes and structured observation errors.

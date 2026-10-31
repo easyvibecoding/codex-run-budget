@@ -5,6 +5,18 @@ This file preserves dated release checks. The current package version is in
 [changelog](../CHANGELOG.md) for later changes. Historical installed canaries
 do not establish the trust or active runtime of a current installation.
 
+## 0.20.1 release verification — 2026-10-31
+
+Signed runtime SHA-256
+`428a3b556561686a6f5d745d79ec297c2b2011eef90fce8ba40d00ea26d3a393`,
+sequence `1793447297`, retains the reviewed bootstrap and hook definitions.
+This release includes the verified 0.20 feature set below and a test-only locale
+repair. The initial v0.20.0 Linux CI correctly exposed a Traditional-Chinese
+literal assertion running against an English receipt. The assertion now reads
+the expected diagnostic from the receipt's selected locale; the focused ten
+accounting recovery cases also passed with Python 3.12. The v0.20.0 tag is retained
+as an unpublished candidate instead of being moved to a different commit.
+
 ## 0.20.0 cross-Task workflow observation candidate — 2026-10-31
 
 Local, unpublished signed runtime SHA-256

@@ -16,6 +16,7 @@ import test_auto_report as fixtures
 from codex_run_budget.auto_report import _delta, handle, recent, snapshot
 from codex_run_budget.governor import Governor
 from codex_run_budget.reconcile import run, schedule
+from codex_run_budget.report_i18n import ReportText
 from codex_run_budget.util import stable_hash
 
 TASK = "11111111-2222-4333-8444-555555555555"
@@ -129,7 +130,8 @@ class MeteringRecoveryTest(unittest.TestCase):
         for ext,content in originals.items():
             self.assertEqual(self.artifact(extension=ext).read_bytes(), content)
         self.assertEqual(recent(self.data)[0]["report"], self.key + ".reconciled.md")
-        self.assertIn("歸屬", self.artifact(revised=True, extension="md").read_text())
+        self.assertIn(ReportText(revised["locale"])("note_identity_conflict"),
+                      self.artifact(revised=True, extension="md").read_text())
         self.assertFalse(schedule({**self.payload, "hook_event_name": "Stop"},
                                   self.data, home=self.home))
         self.assertEqual(run(self.payload, self.data, home=self.home, delays=(0,)),

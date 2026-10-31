@@ -2,10 +2,10 @@
   "schema": 1,
   "plugin": "codex-run-budget",
   "channel": "stable",
-  "version": "0.20.0",
-  "sequence": 1793446371,
+  "version": "0.20.1",
+  "sequence": 1793447297,
   "bootstrap_sha256": "bf0b2367f10a08298fa4caa9c19ab64bd256d7e28a246b0ae703162fe57d84d7",
-  "runtime_sha256": "18c25339a35f150813e9411f33fe05c21c3eba69c19df7a4517ce06aa57c0c0c",
+  "runtime_sha256": "428a3b556561686a6f5d745d79ec297c2b2011eef90fce8ba40d00ea26d3a393",
   "runtime_size": 1080409,
-  "signature": "LHzO46x9iCSPszjMCNHd3WCLoPrTKaTs4+dbFwV5Nk98JnHQurgA7pdKwYbZ4hgwqie/WyMho/QiaEttGAu9+BLWmoCyZKskc5SxZ4XheceB50qGVnrqflVG7kqtFGV4E3JfZ1HbV/Zgt1v8y04PTK1DQL7eu640QTzjZk9fKowCRsiGZo5srhnvYK7s5hJY9LP30xVnVLntHmW0b/rUjVZQju+2QqnjMcAn49mvzsvg3Ogsjrpmm6x4MOB54lKr+UGrDR+1JMmV5a74h0Hmkhzx2HYj4/eyrU7zncXqWGaXMOMYxicolbjNb2pXd4ovR8Aq4c05EQWbtqKY4+Q1r1PJ/4eg1Jm/6lPC30kbXssv8qb0GMOCxKWSFDijn+zhRdfErVGro5oNga5GHMzW5BiBEyYo8VCcNjI8VY7nPeXWyW6BvgeoYpJo94AlgGZ6lqxZzGWqzb6JndSaOier6gE4vrC7PvxTMfBqxdLPiuRV9KigaZPzXugD1oBZpGLr"
+  "signature": "mvHhkfv49RpI+58U3+Qar50Fq1qsBUiSMaawIrI8lSrpfr/TSQD3jyRknkyix4OILHdBVgPScqFHl+dmjVzlvU941vP7q255LsAkGCeHqqGhU1PDBl4r5tAAQiC5rNBpH66RxzbU1GB866UL8tGZNONcsy8uWy8pul2hg6ROkdSR7uwauyrbqVTMRlML6acon6cs9wvPc7Ei5MI3sOI17pgdzu0Uzj/SKg5a/5h/9/xM74ejkf6cZf4SRbPl0n0NgRJscvEAicLcWQ21rdBM/Q17k/tsGwnlybUWmnCwxwxH8OeYwhdESQCXRmWXrR9Lwfo6l4IOyNTKlMIfe/GQmkqbFO57CksOI9Vca7vxDvm3IOWxMZZADuzkg11++9IZscirRnoX4hR60wdo3uaJk1Zp2biBq/N9H7ZjILNC/P/eEIyqUwrEcrFro6OsT96Epu3pYJGoX/nGCYeWzyodImNBmYU67AhhyEjwKtbDzLj0+NKYAi1skACr6V5o6r6G"
 }
