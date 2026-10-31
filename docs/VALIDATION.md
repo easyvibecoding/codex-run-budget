@@ -5,6 +5,189 @@ This file preserves dated release checks. The current package version is in
 [changelog](../CHANGELOG.md) for later changes. Historical installed canaries
 do not establish the trust or active runtime of a current installation.
 
+## 0.20.0 cross-Task workflow observation candidate — 2026-10-31
+
+Local, unpublished signed runtime SHA-256
+`18c25339a35f150813e9411f33fe05c21c3eba69c19df7a4517ce06aa57c0c0c`,
+sequence `1793446371`, preserves the bootstrap and native hook definitions.
+Ruff, all 616 tests under Python 3.15.2, repository/artifact/signature validation,
+the official Plugin Creator validator and Skill Creator quick validator passed.
+The revised localization fixture supplies the real selector metadata required
+to match native batch names to their targets.
+
+Sixteen added workflow regressions cover small appends, partial records,
+cross-Task signatures, matching and unrelated success, disappeared exact roots,
+per-source backoff/probes, missing-source incident retention, native target
+batching, JSON cursor/catalog/store errors, MCP metadata, contradictory duplicate
+outcomes, observer-command exclusion, stale/undated success and out-of-order
+failures. Shared signatures remain hypotheses, not workflow failure judgments.
+
+A controlled eight-Task fixture with a small append used 1,673,416 source-read
+bytes in the reference runtime and 70,992 in this candidate (95.76% less).
+Both reported the same synthetic token delta of 1,600 across eight comparable
+Tasks. The candidate also detected the eight explicit native failure items and
+their shared signature. This measures this append/read pattern, not elapsed-time
+or token savings in arbitrary workflows.
+
+A bounded read-only cohort of five previously selected real native Tasks had
+five readable sources. The candidate folded 34 passed and two failed canonical
+tool items, with incomplete bounded-tail coverage explicitly retained for all
+five. An immediate repeat read 126,050 bytes in both runtimes; unchanged-file
+checks were already optimized. Neither capture called a model or queried live
+state. A separate native `wait_threads(timeoutMs=0)` call supplied the same five
+targets and successfully returned the first attention/turn observation. It
+returned one poll, not complete live state for every target; an interrupted
+native turn without a native error was not treated as workflow acceptance.
+
+Codex CLI 0.164.0 installed this exact candidate from the local marketplace into
+a disposable Codex home. Read-back matched the signed runtime digest above, and
+the installed runtime reproduced the controlled append and five-Task read-only
+cohort results. No new model Task, message, restart, schedule, native trust grant,
+active installation switch, real ledger write or workflow retry was performed.
+The private validation artifacts retain aggregate numbers and fixed statuses;
+native IDs, names, paths and source conversation content were not added here.
+
+## 0.20.0 unknown-metering diagnostics candidate — 2026-10-31
+
+This remains a local, unpublished candidate. Signed runtime SHA-256
+`ccd9e283fed352f1e45f6e1114258d2c10356f34fcbcbeb5cf5df40727993f2f`,
+sequence `1793444340`, preserves the existing bootstrap contract and native
+hook definitions. No active installation, native trust, existing Task pin or
+real accounting ledger was changed by these checks.
+
+Ruff, all 600 unit tests under Python 3.15.2, repository/artifact/signature
+validation and the official Plugin Creator validator described below passed.
+Twelve added regression cases cover root identity conflicts through
+`Governor.handle`, late conflicting records, one-snapshot termination and
+idempotency, immutable Stop artifacts, absent hook paths, exact catalog
+resolution, archive moves at preview/Stop/reconciliation, replacement files,
+missing file identity, rejected source substitution, missing-source diagnostics
+and suppression of workers for unverified sources. Existing real hook subprocess
+tests continue to verify late completion and the separation from budget decisions.
+
+Read-only retrospective replay selected five real unknown-usage turns and used
+disposable, sanitized report ledgers. The reference runtime expired after eight
+snapshots in every case (40 total); the final signed candidate produced
+`identity_conflict` after one snapshot per case (5 total). Every candidate
+diagnostic revision kept unknown usage, `completion_observed=false`, the original
+Stop scope and unchanged original artifacts. Four replay cutoffs use recorded
+scan-byte boundaries; one tail-limited turn uses an approximate timestamp cutoff.
+One source had moved to the catalog's archive path with the same device/inode.
+This is real historical-source replay, not a new model Task or a live rollout.
+
+Another bounded read-only sample replayed the latest 24 eligible known Stop
+receipts with exact scan-byte cutoffs and the original source inode. All 24 token
+dictionaries matched their saved receipts. That sample excludes tail-limited
+Stop snapshots and does not establish complete coverage of every historical turn.
+The five identity conflicts and records without original source proof remain
+unknown. Neither native root-field semantics nor billing accuracy, measured token
+savings, universal coverage or stronger enforcement is claimed.
+
+The private replay artifacts remain outside the repository. Committable evidence
+contains fixed enums, synthetic fixtures and this aggregate validation record;
+no native identifiers, names, source paths or conversation content were added.
+
+## 0.20.0 sensing and observer-loop hardening candidate — 2026-10-31
+
+This remains a local, unpublished candidate. Runtime SHA-256
+`6efe07309d784e90c5c15819c7fdac972f68416613a0247311d60846534cf269`,
+sequence `1793439893`, preserves bootstrap contract
+`bf0b2367f10a08298fa4caa9c19ab64bd256d7e28a246b0ae703162fe57d84d7`
+and all native hook definitions.
+
+Ruff, all 588 unit tests under Python 3.15.2, repository/artifact/signature
+checks and the same official Plugin Creator validator described below passed.
+Focused tests cover structured and conflicting result metadata, pending results,
+missing fields, late starts/results, exact lifecycle replay, identity drift,
+EOF without newline, oversized unterminated tails, incomplete later turns,
+unknown invocation usage after stream gaps, observer-command exclusion,
+alternating failures, and rejection of help/collection output as passed checks.
+
+Additional tests exercise a three-failure circuit, leased single-probe recovery,
+late-result ordering, backward clocks, process reentry, internal probe isolation,
+health-store corruption, mid-turn disabling and preservation of earlier settled
+samples. Foreground-watch tests verify bounded backoff, one unchanged snapshot
+and exit 1 after three unavailable reads. Synthetic version-1 stores verify
+quick-checked backups, row preservation, read-only legacy coverage, missing
+migration resource rollback, six concurrent upgrade openers and schema read-back.
+
+Codex CLI 0.164.0 installed this exact signed candidate through its local
+marketplace into a new disposable home. A real ephemeral model test through
+the installed launcher produced eight completed, intentionally failing native
+command events. The observer recorded eight known outcomes and one advisory,
+with healthy sensor state, zero dropped observations and process exit 0.
+Its requested alternating errors completed in `A B A B B A B A` order, so the
+live warning was `repeated_failure`; exact cycle classification is separately
+covered by deterministic ordered fixtures. An out-of-turn prelude remained
+`missing_start` coverage rather than being silently treated as a complete turn.
+A second real invocation required sequential execution and produced eight
+completed failures with one `failure_cycle` advisory, healthy sensor state and
+zero dropped or unknown command outcomes. Its prelude remained explicitly
+limited as well; no successful later event erased that coverage evidence.
+
+Actual installed hook-command fault injection first snapshotted a synthetic
+observation store, then deliberately damaged only that store. Three subsequent
+observation attempts failed, two were suppressed, and read-back showed circuit
+`open`, fixed code `sqlite_error`, with no private exception text. The independent
+budget still admitted/completed its first tool and denied the second at the
+one-tool ceiling, retaining `(0,1,0,halted)`. Recovery and clock advance are tested
+deterministically; this installed replay does not claim a live 30-second recovery.
+
+As below, native model validation used the explicit trust-bypass flag only for
+the isolated, vetted invocation. No active installation, persisted trust, runtime
+pin or real ledger was changed. The evidence does not establish universal hook
+coverage, process liveness, zero overshoot or measured token savings.
+
+## 0.20.0 local candidate — 2026-10-31
+
+This candidate is not published. Signed runtime SHA-256
+`b5daaf9971605ef7c3232bdbac6a789706baa105410ecbca65203db597c63a26`,
+sequence `1793436949`, preserves bootstrap contract
+`bf0b2367f10a08298fa4caa9c19ab64bd256d7e28a246b0ae703162fe57d84d7`
+and all existing native hook definitions.
+
+Ruff, all 558 unit tests under Python 3.15.2, repository/artifact validation and
+the official Plugin Creator validator passed. The latter used the validator and
+identifier helper at OpenAI Codex commit
+`84aa75204ad604bcf498df180d128181c89b2f0b`, with existing Python 3.12/PyYAML;
+no runtime dependency was added. Tests cover replay, concurrent duplicate
+completion, copied parent source paths, independent observation channels,
+unknown outcomes, stream gaps, baseline exclusions, bounded retention, privacy,
+unchanged stdout/exit status and fail-closed budget precedence.
+
+Codex CLI 0.164.0 installed the candidate through its official local-marketplace
+installer into a disposable Codex home. The final installed hooks were not
+modified. A real, ephemeral, read-only model test ran through the installed
+`exec-activity run` launcher with eight intentionally failing synthetic shell
+commands. Completed native command events supplied eight explicit nonzero exit
+codes. Read-back showed eight stream observations, one advisory on stderr,
+zero unknown stream outcomes, no limited stream turn, and process exit 0.
+The native hook channel separately had eight unknown outcomes and no advisory;
+this verifies the need to keep code-mode/unstructured hook results unknown.
+The two channels were not added together. Synthetic command/output markers
+were absent from the observation and activity databases.
+
+The native model test used the CLI's explicit hook-trust bypass only for this
+isolated, vetted candidate invocation; it granted no persisted hook trust and
+changed no active Desktop plugin, installed runtime pin or production ledger.
+This is native delivery and observation evidence, not a universal coverage,
+same-turn stopping or token-savings guarantee.
+
+Actual installed hook-command replay in a separate synthetic store admitted
+one tool, completed it, then denied a second at the one-tool ceiling. Read-back
+retained `(spent_tokens=0, tool_calls=1, in_flight=0, status=halted)`.
+An initial manual replay omitted the native `PLUGIN_ROOT` environment and could
+not select the installed package; it was not counted as an admission pass.
+The corrected replay supplied the installed root without changing policy.
+
+An explicit local input probe in a clean Codex home measured 56,211 canonical
+UTF-8 input bytes normally and 45,660 with collaboration/goals/image capabilities
+temporarily overridden. Exposed tool schemas measured 21,832 and 15,788 bytes.
+The differences are 10,551 and 6,044 bytes respectively; the schema bytes are
+already included in the full input. No project setting was edited and no model
+was called by the probe. Token savings, prompt-cache effects and charges remain
+unknown; this single configuration is not a task-quality benchmark.
+
 ## 0.19.14 Publisher read isolation — 2026-10-18
 
 The existing publisher key signed sequence `1792301198`, runtime SHA-256

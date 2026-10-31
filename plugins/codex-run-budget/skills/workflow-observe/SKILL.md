@@ -1,6 +1,6 @@
 ---
 name: workflow-observe
-description: Inspect project codex exec activity and launcher attribution. Find related Codex Tasks from a plain-language description of work, observe their workflow and agents, and investigate efficiency problems. Use when the user describes a process to inspect or improve without Task IDs. On-demand by default; changes and recurring observation follow the user's explicit scope.
+description: Find and observe Codex workflows across selected Tasks, projects and agent trees. Detect shared tool failures, observation gaps and recovery; use cursor-based changes and bounded response plans to investigate inefficient work. Supports plain-language discovery and exact Task selections. On-demand by default.
 ---
 
 # Workflow observer
@@ -22,10 +22,20 @@ python3 "$PLUGIN_ROOT/scripts/run_budget.py" workflow observe --thread SELECTOR
 ```
 
 Only add `--include-agents` when the requested workflow includes descendants.
-Default cap: 8 Tasks. Preserve the exact root set, descendant option and cap;
+Default cap: 8 Tasks; explicit cohorts support up to 32 roots/total Tasks with
+`--limit 32`, including several projects when the user described that scope.
+Do not broaden to all Tasks or assume same-project Tasks share ownership.
+Preserve the exact root set, descendant option and cap;
 pass the previous returned `--after CURSOR` on a later observation of that scope.
 Expired/mismatched cursors require an explicitly disclosed fresh baseline,
 never silently broaden scope. A bounded tree may omit new children at its cap.
+
+The observer reads verified small appends incrementally. Three consecutive source
+failures cause per-cursor backoff, without pausing healthy Tasks. Follow
+`response_plan` and `observation_health.next_probe_at`; an explicitly requested
+diagnostic can use `--probe` once. A missing source never clears earlier failures.
+For failures, shared signatures or uncertainty, read
+[Failure detection and response](references/failure-response.md).
 
 Return only changes, new/cleared signals, coverage and the private report link.
 Do not read the full report/JSON or all transcripts by default. No change means
@@ -38,7 +48,10 @@ Local lifecycle evidence is not live process state. `task_complete` is a turn
 ending, not workflow acceptance. Old/missing records are not proof of a stall.
 For live status, `workflow targets` with the same scope emits exact local native
 targets, excluding this calling Task. Use those with `wait_threads` (at most 8)
-and `timeoutMs: 0` for an on-demand snapshot. Preserve the returned native cursor
+and `timeoutMs: 0` for an on-demand snapshot. Cohorts above 8 use `workflow targets
+--batch 0`, then each returned `batch_index` up to `batch_count - 1`, preserving
+the same scope. Each batch excludes the calling Task and has its own native cursor.
+Preserve the returned native cursor
 as `afterCursor` for subsequent native waits; it differs from the CLI cursor.
 For a continued wait in the active turn, use native event waits rather than
 repeated `read_thread`. Read one bounded turn without outputs only if needed to

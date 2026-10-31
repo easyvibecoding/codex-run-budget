@@ -22,6 +22,8 @@ from .auto_report import (
     _delta,
     _directory,
     _documents,
+    _snapshot_for_task,
+    _usage_diagnostics,
     observed_total,
     settings,
     snapshot,
@@ -94,8 +96,11 @@ def _selectors(payload):
             else payload.get("transcript_path")
         ),
     }
-    if any(not isinstance(value, str) or not 0 < len(value) <= 4096
-           for value in selected.values()):
+    if (any(not isinstance(selected[key], str) or not 0 < len(selected[key]) <= 4096
+            for key in ("session_id", "turn_id"))
+            or selected["transcript_path"] is not None and (
+                not isinstance(selected["transcript_path"], str)
+                or len(selected["transcript_path"]) > 4096)):
         raise ValueError("missing reconciliation selector")
     if child:
         root_hash = payload.get("root_hash")
@@ -133,6 +138,13 @@ def schedule(payload: dict, root: Path, *, home=None) -> bool:
         connection.execute("BEGIN IMMEDIATE")
         row = connection.execute("SELECT * FROM turns WHERE key=?", (key,)).fetchone()
         if row is None or row["state"] != "reported":
+            return False
+        original = json.loads(_read(_directory(root) / f"{key}.json"))
+        if (original.get("source_identity_verified") is not True
+                or original.get("task_hash") != row["session_hash"]
+                or original.get("turn_hash") != row["turn_hash"]):
+            # A missing path is allowed only when the report already obtained
+            # exact native identity proof; an unbound receipt cannot recover it.
             return False
         inserted = connection.execute(
             "INSERT OR IGNORE INTO reconciliations VALUES (?,'queued',0,?)", (key, time.time())
@@ -239,12 +251,15 @@ def run(payload: dict, root: Path, *, home=None, delays=DELAYS) -> dict:
                 break
             time.sleep(delay)
             attempts += 1
-            current = snapshot(
-                selected["transcript_path"], turn, completed_only=True,
+            current = _snapshot_for_task(
+                selected["transcript_path"], turn, session, baseline=baseline, home=home,
+                snapshot_fn=snapshot, completed_only=True,
                 allow_subagent=selected.get("allow_subagent", False),
                 root_hash=selected.get("root_hash"),
             )
-            if not current.get("completion_observed"):
+            usage, status = _delta(baseline, current)
+            identity_conflict = status == "counter_identity_conflict"
+            if not current.get("completion_observed") and not identity_conflict:
                 continue
             if current.get("task_hash") != row["session_hash"]:
                 raise ValueError("completion identity mismatch")
@@ -253,33 +268,52 @@ def run(payload: dict, root: Path, *, home=None, delays=DELAYS) -> dict:
                 or (original.get("task") or {}).get("parent_hash") != baseline.get("parent_hash")
             ):
                 raise ValueError("subagent lineage mismatch")
-            usage, status = _delta(baseline, current)
-            text = ReportText(original.get("locale", "zh-Hant"))
-            children = collect(root, session, row["started"], until, home=home,
-                               unnamed_label=text("unnamed"))
-            _, complete = observed_total(usage, children)
-            complete = (complete and not current.get("invalid_records")
-                        and not current.get("tail_limited")
-                        and not current.get("contexts_limited"))
-            state = "complete" if complete else "partial"
-            revised = {
-                **original,
-                "scope": ("subagent_turn_completion_boundary" if selected.get("allow_subagent")
-                          else "user_turn_completion_boundary"),
-                "revision": 2,
-                "reconciliation_status": state,
-                "reconciled_at": datetime.now(timezone.utc).isoformat(),
-                "completion_observed": True, "completed_at": current.get("completed_at"),
-                "usage": usage, "usage_status": status, "task_usage": current.get("usage"),
-                "counter_source": current.get("counter_source"),
-                "stop_contexts": current.get("contexts", []),
-                "contexts_limited": current.get("contexts_limited", False),
-                "subagents": children,
-                "subagents_included": children.get("agents_with_usage", 0) > 0,
-                "subagent_window_end": original["stopped_at"],
-                "final_usage_may_not_yet_be_persisted": not complete,
-                "snapshot_scan_bytes": baseline.get("scan_bytes", 0) + current.get("scan_bytes", 0),
-            }
+            if identity_conflict:
+                # A witnessed conflict is not a delayed final counter. Keep
+                # Stop scope and unknown usage; do not invent completion proof
+                # or collect more descendants on a rejected native identity.
+                state = "identity_conflict"
+                revised = {
+                    **original,
+                    "revision": 2, "reconciliation_status": state,
+                    "reconciled_at": datetime.now(timezone.utc).isoformat(),
+                    "completion_observed": False,
+                    "completion_status": current.get("completion_status", "unavailable"),
+                    "usage": None, "usage_status": status, "task_usage": None,
+                    "reconciliation_retryable": False,
+                    "final_usage_may_not_yet_be_persisted": True,
+                    **_usage_diagnostics(baseline, current),
+                }
+            else:
+                text = ReportText(original.get("locale", "zh-Hant"))
+                children = collect(root, session, row["started"], until, home=home,
+                                   unnamed_label=text("unnamed"))
+                _, complete = observed_total(usage, children)
+                complete = (complete and not current.get("invalid_records")
+                            and not current.get("tail_limited")
+                            and not current.get("contexts_limited"))
+                state = "complete" if complete else "partial"
+                revised = {
+                    **original,
+                    "scope": ("subagent_turn_completion_boundary"
+                              if selected.get("allow_subagent")
+                              else "user_turn_completion_boundary"),
+                    "revision": 2,
+                    "reconciliation_status": state,
+                    "reconciled_at": datetime.now(timezone.utc).isoformat(),
+                    "completion_observed": True, "completed_at": current.get("completed_at"),
+                    "usage": usage, "usage_status": status, "task_usage": current.get("usage"),
+                    "counter_source": current.get("counter_source"),
+                    "stop_contexts": current.get("contexts", []),
+                    "contexts_limited": current.get("contexts_limited", False),
+                    "subagents": children,
+                    "subagents_included": children.get("agents_with_usage", 0) > 0,
+                    "subagent_window_end": original["stopped_at"],
+                    "final_usage_may_not_yet_be_persisted": not complete,
+                    "snapshot_scan_bytes": baseline.get("scan_bytes", 0)
+                    + current.get("scan_bytes", 0),
+                    **_usage_diagnostics(baseline, current),
+                }
             if not settings(root)["enabled"]:
                 state = "disabled"
                 break

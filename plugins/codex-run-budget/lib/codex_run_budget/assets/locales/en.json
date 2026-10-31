@@ -115,5 +115,7 @@
   "reconcile_partial": "Completion observed; partial evidence",
   "note_completion": "Parent usage ends at the selected turn’s explicit completion event. Subagent usage retains the original start-to-Stop window; subsequent turns are excluded. This is not proof the entire Task is finished.",
   "child_note_completion": "This subagent's usage ends at an explicit completion event for its turn. Descendants keep the original start-to-Stop window; this does not prove the whole Task is complete.",
-  "note_reconcile": "A bounded background check can publish a completion revision after Stop, without a model call. Missing completion evidence leaves the Stop snapshot provisional. Inline cards keep their original snapshot; reopening the Task does not guarantee a refresh."
+  "note_reconcile": "A bounded background check can publish a completion revision after Stop, without a model call. Missing completion evidence leaves the Stop snapshot provisional. Inline cards keep their original snapshot; reopening the Task does not guarantee a refresh.",
+  "reconcile_identity_conflict": "Stopped: counter identity conflict",
+  "note_identity_conflict": "Native counters failed the Task/turn identity check. Usage remains unknown; another Task’s counters are never substituted."
 }

@@ -5,6 +5,7 @@ import argparse
 import json
 import math
 import os
+import sqlite3
 import subprocess
 import sys
 import time
@@ -102,6 +103,30 @@ def launch(args, root):
     attribution = "launcher_argument" if args.parent_task else "launcher_environment"
     key = stable_hash(str(uuid.uuid4()))
     task, usage, telemetry_failed, completions = None, None, False, 0
+    stream_turn = 0
+    stream_active, identity_conflict, unbound_gap, stream_limited = False, False, False, False
+    terminal_hash = None
+
+    def observe(event):
+        nonlocal usage, stream_limited
+        if event.get("type") == "stream.incomplete":
+            stream_limited, usage = True, None
+        if task is None:
+            return
+        try:
+            from .governor import Governor
+
+            result = Governor.dispatch({
+                "hook_event_name": "ExecObservation", "session_id": task,
+                "turn_id": stable_hash([key, stream_turn]), "cwd": str(project),
+                "stream_event": event,
+            }, root)
+            advice = (result or {}).get("hookSpecificOutput", {}).get("additionalContext")
+            if advice:
+                _emit({"optimizer": "advisory", "message": advice})
+        except Exception:
+            # Stream observation cannot change execution, stdout or the child's exit status.
+            pass
 
     def save(state, code=None):
         nonlocal telemetry_failed
@@ -112,6 +137,71 @@ def launch(args, root):
             if not telemetry_failed:
                 _emit({"exec_activity": "recording_unavailable", "key": key})
             telemetry_failed = True
+
+    def consume(event):
+        nonlocal task, usage, completions, stream_turn, stream_active
+        nonlocal identity_conflict, unbound_gap, terminal_hash
+        gap = {"type": "stream.incomplete"}
+        if not isinstance(event, dict) or not isinstance(event.get("type"), str):
+            if task is None:
+                unbound_gap = True
+            observe(gap)
+            return
+        kind = event["type"]
+        if kind == "thread.started":
+            try:
+                identifier = str(uuid.UUID(event["thread_id"]))
+            except (ValueError, KeyError, TypeError, AttributeError):
+                unbound_gap = True
+                observe(gap)
+                return
+            if task is None:
+                task = identifier
+                save("started")
+            elif task != identifier:
+                identity_conflict, usage = True, None
+                observe(gap)
+            return
+        if task is None:
+            unbound_gap = True
+            return
+        if identity_conflict:
+            return
+        if kind == "turn.started":
+            if stream_active:
+                observe(gap)
+                return
+            stream_turn += 1
+            stream_active = True
+            terminal_hash = None
+            observe(event)
+            if unbound_gap:
+                observe(gap)
+                unbound_gap = False
+        elif kind in {"turn.completed", "turn.failed"}:
+            fingerprint = stable_hash(event)
+            if not stream_active:
+                if terminal_hash == fingerprint:
+                    return
+                usage = None
+                observe(gap)
+                return
+            stream_active, terminal_hash = False, fingerprint
+            if kind == "turn.completed":
+                completions += 1
+                usage = (tokens(event.get("usage"))
+                         if completions == 1 and not stream_limited else None)
+            else:
+                usage = None
+            observe(event)
+        elif kind == "item.completed":
+            observe(event)
+
+    def consume_line(raw):
+        try:
+            consume(json.loads(raw))
+        except (ValueError, TypeError, RecursionError):
+            consume(None)
 
     save("started")
     env = dict(os.environ)
@@ -145,20 +235,20 @@ def launch(args, root):
                 if not part.endswith(b"\n"):
                     continue
                 if not overflow:
-                    try:
-                        event = json.loads(pending)
-                        if event.get("type") == "thread.started":
-                            task = str(uuid.UUID(event["thread_id"]))
-                            save("started")
-                        elif event.get("type") == "turn.completed":
-                            completions += 1
-                            usage = tokens(event.get("usage")) if completions == 1 else None
-                    except (ValueError, KeyError, AttributeError, TypeError):
-                        pass
+                    consume_line(pending)
+                else:
+                    consume(None)
                 pending.clear()
                 overflow = False
         code = process.wait()
+        if overflow:
+            consume(None)
+        elif pending:
+            consume_line(pending)
+        if stream_active or completions == 0:
+            observe({"type": "stream.incomplete"})
     except (KeyboardInterrupt, BrokenPipeError):
+        observe({"type": "turn.failed"})
         process.terminate()
         try:
             process.wait(timeout=5)
@@ -187,7 +277,7 @@ def run(args, root):
         ):
             raise ValueError("invalid watch timing")
         since = time.time() - args.hours * 3600
-        start, previous = time.monotonic(), None
+        start, previous, unavailable = time.monotonic(), None, 0
         while True:
             report = scan(args.project, root=root, home=getattr(args, "codex_home", None),
                           since=since, limit=args.limit)
@@ -197,14 +287,21 @@ def run(args, root):
                 previous = fingerprint
             if args.activity_action != "watch":
                 return 0 if report["status"] != "unavailable" else 1
+            unavailable = unavailable + 1 if report["status"] == "unavailable" else 0
+            if unavailable >= 3:
+                _emit({"exec_activity": "watch_stopped", "reason": "repeated_unavailable",
+                       "attempts": unavailable})
+                return 1
             if args.duration and time.monotonic() - start >= args.duration:
-                return 0
+                return 1 if unavailable else 0
+            interval = (min(60, args.interval * 2 ** min(unavailable, 4))
+                        if unavailable else args.interval)
             remaining = (args.duration - (time.monotonic() - start)
-                         if args.duration else args.interval)
-            time.sleep(max(0, min(args.interval, remaining)))
+                         if args.duration else interval)
+            time.sleep(max(0, min(interval, remaining)))
     except KeyboardInterrupt:
         return 130
-    except (OSError, ValueError, TypeError):
+    except (OSError, ValueError, TypeError, sqlite3.Error, RecursionError):
         _emit({"status": "unavailable",
                "reason": "Check project, activity options and local state."})
         return 1

@@ -115,5 +115,7 @@
   "reconcile_partial": "Finalización observada; evidencia parcial",
   "note_completion": "El uso del agente principal termina en el evento explícito de finalización del turno seleccionado. El uso de los subagentes conserva la ventana original desde el inicio hasta Stop; los turnos posteriores quedan excluidos. Esto no demuestra que todo el Task haya terminado.",
   "child_note_completion": "El uso de este subagente termina en un evento explícito de finalización de su turno. Los descendientes mantienen la ventana original desde el inicio hasta Stop; esto no demuestra que todo el Task haya terminado.",
-  "note_reconcile": "Una comprobación acotada en segundo plano puede publicar una revisión tras Stop al confirmar la finalización del turno, sin llamar a ningún modelo. Si falta evidencia de finalización, la instantánea de Stop sigue siendo provisional. Las tarjetas integradas conservan su instantánea original; volver a abrir el Task no garantiza que se actualicen."
+  "note_reconcile": "Una comprobación acotada en segundo plano puede publicar una revisión tras Stop al confirmar la finalización del turno, sin llamar a ningún modelo. Si falta evidencia de finalización, la instantánea de Stop sigue siendo provisional. Las tarjetas integradas conservan su instantánea original; volver a abrir el Task no garantiza que se actualicen.",
+  "reconcile_identity_conflict": "Comprobación detenida: conflicto de identidad",
+  "note_identity_conflict": "Los contadores nativos no superaron la comprobación de identidad del Task y del turno. El uso sigue siendo desconocido; no se sustituye por contadores de otro Task."
 }

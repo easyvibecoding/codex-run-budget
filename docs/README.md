@@ -24,6 +24,7 @@ observation does not automatically start or change a budget.
 | Read a bounded recent local Task cohort | [Recent-task survey](SURVEY.md) |
 | Interpret turn endings and interruptions | [Lifecycle evidence](LIFECYCLE.md) |
 | Inspect one project's additional `codex exec` sessions | [Project exec activity](EXEC_ACTIVITY.md) |
+| Inspect recurring failures, project check baselines and capability review candidates | [Codex optimization](OPTIMIZATION.md) |
 | Audit exact local transcript files | [Exact transcript audit](AUDIT.md) and [dated validation](AUDIT_VALIDATION.md) |
 
 ## Install, update, and maintain

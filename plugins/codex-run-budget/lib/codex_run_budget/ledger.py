@@ -13,7 +13,7 @@ from pkgutil import get_data
 from typing import Any
 
 from .transcript import Usage
-from .util import safe_json
+from .util import safe_json, stable_hash
 
 SCHEMA_VERSION = 2
 LEASE_SECONDS = 20 * 60
@@ -43,6 +43,411 @@ class Decision:
     reason: str | None = None
     additional_context: str | None = None
     run: dict[str, Any] | None = None
+
+
+class ObservationHealth:
+    """Cross-process observer circuit; failures here never enter budget policy.
+
+    One row contains fixed error categories and counters, never event content.
+    Each hook gets at most one attempt. After three failures a single leased
+    recovery probe is allowed following the bounded cooldown.
+    """
+
+    def __init__(self, path: Path):
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if path.is_symlink() or (path.exists() and not path.is_file()):
+            raise ValueError("observer health requires a regular file")
+        self.conn = sqlite3.connect(str(path), timeout=0.05, isolation_level=None)
+        self.conn.row_factory = sqlite3.Row
+        try:
+            version = self.conn.execute("PRAGMA user_version").fetchone()[0]
+            if version not in (0, 1):
+                raise ValueError("unsupported observer health schema")
+            if version == 0:
+                self.conn.executescript("""
+                    BEGIN IMMEDIATE;
+                    CREATE TABLE IF NOT EXISTS health (
+                        id INTEGER PRIMARY KEY CHECK(id=1), state TEXT NOT NULL DEFAULT 'healthy',
+                        attempts INTEGER NOT NULL DEFAULT 0, finished INTEGER NOT NULL DEFAULT 0,
+                        failures INTEGER NOT NULL DEFAULT 0, dropped INTEGER NOT NULL DEFAULT 0,
+                        suppressed INTEGER NOT NULL DEFAULT 0, epoch INTEGER NOT NULL DEFAULT 0,
+                        retry_at REAL NOT NULL DEFAULT 0, last_attempt REAL,
+                        last_success REAL, error_code TEXT,
+                        gap_since REAL, gap_until REAL
+                    );
+                    INSERT OR IGNORE INTO health(id) VALUES(1);
+                    PRAGMA user_version=1;
+                    COMMIT;
+                """)
+            os.chmod(path, 0o600)
+        except BaseException:
+            self.conn.close()
+            raise
+
+    def close(self) -> None:
+        self.conn.close()
+
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        self.conn.execute("BEGIN IMMEDIATE")
+        try:
+            yield
+            self.conn.execute("COMMIT")
+        except BaseException:
+            if self.conn.in_transaction:
+                self.conn.execute("ROLLBACK")
+            raise
+
+    def reserve(self) -> dict[str, Any] | None:
+        now = time.time()
+        with self.transaction():
+            row = dict(self.conn.execute("SELECT * FROM health WHERE id=1").fetchone())
+            if row["last_attempt"] is not None and now < row["last_attempt"]:
+                self.conn.execute(
+                    "UPDATE health SET state='open',error_code='clock_discontinuity',"
+                    "retry_at=last_attempt,epoch=epoch+1,suppressed=suppressed+1,"
+                    "gap_since=COALESCE(gap_since,last_attempt),gap_until=last_attempt WHERE id=1")
+                return None
+            if row["state"] != "healthy" and (
+                    now < row["retry_at"] or now < (row["last_attempt"] or now)):
+                self.conn.execute(
+                    "UPDATE health SET suppressed=suppressed+1,epoch=epoch+1,"
+                    "gap_until=MAX(COALESCE(gap_until,?),?) WHERE id=1", (now, now))
+                return None
+            probe = row["state"] != "healthy"
+            self.conn.execute(
+                "UPDATE health SET attempts=attempts+1,last_attempt=?,state=?,retry_at=? "
+                "WHERE id=1",
+                (now, "probing" if probe else "healthy", now + 2 if probe else 0))
+            return {"ticket": row["attempts"] + 1, "epoch": row["epoch"], "at": now,
+                    "gap_since": row["gap_since"], "gap_until": row["gap_until"]}
+
+    def finish(self, ticket: dict[str, Any], *, error: Exception | None = None) -> None:
+        now = time.time()
+        with self.transaction():
+            row = dict(self.conn.execute("SELECT * FROM health WHERE id=1").fetchone())
+            latest = (ticket["ticket"] >= row["finished"]
+                      and (row["state"] != "probing" or ticket["ticket"] == row["attempts"]))
+            if error is None:
+                if latest:
+                    self.conn.execute(
+                        "UPDATE health SET state='healthy',failures=0,retry_at=0,finished=?,"
+                        "last_success=? WHERE id=1", (ticket["ticket"], now))
+                return
+            code = ("sqlite_busy" if isinstance(error, sqlite3.OperationalError)
+                    and (getattr(error, "sqlite_errorcode", 0) & 0xFF in (5, 6)
+                         or str(error) in {"database is locked", "database table is locked"})
+                    else "sqlite_error" if isinstance(error, sqlite3.Error)
+                    else "storage_error" if isinstance(error, OSError)
+                    else "observer_error")
+            failures = row["failures"] + 1 if latest else row["failures"]
+            delay = min(300, 30 * 2 ** min(max(0, failures - 3), 4)) if failures >= 3 else 0
+            gap_since = (min(ticket["at"], row["gap_since"] or ticket["at"])
+                         if row["failures"] else ticket["at"])
+            self.conn.execute(
+                "UPDATE health SET dropped=dropped+1,epoch=epoch+1,error_code=?,gap_since=?,"
+                "gap_until=MAX(COALESCE(gap_until,?),?) WHERE id=1",
+                (code, gap_since, now, now))
+            if latest:
+                self.conn.execute(
+                    "UPDATE health SET failures=?,state=?,retry_at=?,finished=? WHERE id=1",
+                    (failures, "open" if delay else "healthy", now + delay,
+                     ticket["ticket"]))
+
+    @staticmethod
+    def snapshot(path: Path) -> dict[str, Any]:
+        if not path.exists() and not path.is_symlink():
+            return {"state": "no_observations", "epoch": 0, "dropped": None,
+                    "suppressed": None, "last_success": None}
+        if path.is_symlink() or not path.is_file():
+            return {"state": "unavailable", "epoch": None}
+        conn = None
+        try:
+            conn = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=0.05)
+            conn.row_factory = sqlite3.Row
+            if conn.execute("PRAGMA user_version").fetchone()[0] != 1:
+                raise ValueError("unsupported observer health schema")
+            row = dict(conn.execute("SELECT * FROM health WHERE id=1").fetchone())
+            row.pop("id")
+            return row
+        except (OSError, ValueError, TypeError, sqlite3.Error):
+            return {"state": "unavailable", "epoch": None}
+        finally:
+            if conn is not None:
+                conn.close()
+
+
+class OptimizationLedger:
+    """Bounded advisory observations, isolated from every version of the budget ledger.
+
+    Only hashes, finite categories, counters and times cross this interface. No
+    optimization decision can admit a tool, change a budget, or stop a Task.
+    """
+
+    def __init__(self, path: Path):
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if path.is_symlink() or (path.exists() and not path.is_file()):
+            raise ValueError("optimizer requires a regular local database")
+        self.conn = sqlite3.connect(str(path), timeout=0.25, isolation_level=None)
+        self.conn.row_factory = sqlite3.Row
+        try:
+            self.conn.execute("PRAGMA busy_timeout=250")
+            self.conn.execute("PRAGMA foreign_keys=ON")
+            self.conn.execute("PRAGMA synchronous=FULL")
+            version = self.conn.execute("PRAGMA user_version").fetchone()[0]
+            if version not in (0, 1, 2):
+                raise ValueError("unsupported optimizer schema")
+            if version == 0:
+                self.conn.executescript("""
+                    BEGIN IMMEDIATE;
+                    CREATE TABLE IF NOT EXISTS settings (enabled INTEGER NOT NULL);
+                    CREATE TABLE IF NOT EXISTS turns (
+                        turn_hash TEXT PRIMARY KEY, project_hash TEXT NOT NULL,
+                        task_hash TEXT NOT NULL, role TEXT NOT NULL,
+                        created REAL NOT NULL, updated REAL NOT NULL,
+                        ended TEXT NOT NULL DEFAULT 'active',
+                        started INTEGER NOT NULL DEFAULT 0,
+                        limited INTEGER NOT NULL DEFAULT 0,
+                        warnings INTEGER NOT NULL DEFAULT 0,
+                        last_warning INTEGER NOT NULL DEFAULT 0,
+                        completed_calls INTEGER NOT NULL DEFAULT 0,
+                        check_sample INTEGER NOT NULL DEFAULT 0,
+                        health_epoch INTEGER NOT NULL DEFAULT 0, issue_code TEXT
+                    );
+                    CREATE INDEX IF NOT EXISTS optimizer_project ON turns(project_hash, role);
+                    CREATE TABLE IF NOT EXISTS calls (
+                        turn_hash TEXT NOT NULL, call_hash TEXT NOT NULL,
+                        input_hash TEXT NOT NULL, response_hash TEXT,
+                        kind TEXT NOT NULL, capability TEXT, is_check INTEGER NOT NULL,
+                        outcome TEXT NOT NULL DEFAULT 'pending',
+                        failure_hash TEXT, error_class TEXT, completed_order INTEGER,
+                        PRIMARY KEY(turn_hash, call_hash),
+                        FOREIGN KEY(turn_hash) REFERENCES turns(turn_hash) ON DELETE CASCADE
+                    );
+                    CREATE TABLE IF NOT EXISTS observation_meta (
+                        id INTEGER PRIMARY KEY CHECK(id=1), health_epoch INTEGER NOT NULL
+                    );
+                    INSERT OR IGNORE INTO observation_meta VALUES(1,0);
+                    PRAGMA user_version=2;
+                    COMMIT;
+                """)
+            elif version == 1:
+                self._upgrade(path)
+            os.chmod(path, 0o600)
+        except BaseException:
+            self.conn.close()
+            raise
+
+    def close(self) -> None:
+        self.conn.close()
+
+    def _upgrade(self, path: Path) -> None:
+        backup_root = path.parent / "backups"
+        if backup_root.is_symlink():
+            raise ValueError("optimizer backup requires a local directory")
+        backup_root.mkdir(exist_ok=True, mode=0o700)
+        fd, name = tempfile.mkstemp(prefix="optimizer-v1-", suffix=".sqlite3", dir=backup_root)
+        os.close(fd)
+        target = sqlite3.connect(name)
+        deadline = time.monotonic() + 0.5
+
+        def progress(_status, _remaining, _total):
+            if time.monotonic() > deadline:
+                raise TimeoutError("optimizer backup timeout")
+
+        try:
+            self.conn.backup(target, pages=128, progress=progress, sleep=0.01)
+            if target.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+                raise ValueError("optimizer backup validation failed")
+        finally:
+            target.close()
+        migration = get_data("codex_run_budget", "migrations/003_optimizer_sensing.sql")
+        if migration is None:
+            raise ValueError("optimizer migration unavailable")
+        with self.transaction():
+            # Concurrent hooks may have already applied the backed-up migration.
+            if self.conn.execute("PRAGMA user_version").fetchone()[0] == 1:
+                for statement in migration.decode().split(";"):
+                    if statement.strip():
+                        self.conn.execute(statement)
+
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        self.conn.execute("BEGIN IMMEDIATE")
+        try:
+            yield
+            self.conn.execute("COMMIT")
+        except BaseException:
+            self.conn.execute("ROLLBACK")
+            raise
+
+    def configure(self, enabled: bool) -> None:
+        with self.transaction():
+            self.conn.execute("DELETE FROM settings")
+            self.conn.execute("INSERT INTO settings VALUES(?)", (int(enabled),))
+            if not enabled:
+                self.conn.execute(
+                    "UPDATE turns SET limited=1,check_sample=0,"
+                    "issue_code=COALESCE(issue_code,'observer_disabled') WHERE ended='active'")
+
+    @staticmethod
+    def snapshot(path: Path, project: str) -> dict[str, Any]:
+        """Read back one exact project without creating or migrating any database."""
+        if path.is_symlink() or not path.is_file():
+            if not path.is_symlink() and not path.exists():
+                return {"enabled": True, "turns": [], "calls": [], "status": "no_observations"}
+            raise ValueError("optimizer requires a regular local database")
+        conn = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=0.25,
+                               isolation_level=None)
+        conn.row_factory = sqlite3.Row
+        try:
+            conn.execute("BEGIN")
+            if conn.execute("PRAGMA user_version").fetchone()[0] not in (1, 2):
+                raise ValueError("unsupported optimizer schema")
+            setting = conn.execute("SELECT enabled FROM settings LIMIT 1").fetchone()
+            turns = [dict(row) for row in conn.execute(
+                "SELECT * FROM turns WHERE project_hash=? ORDER BY created,turn_hash", (project,))]
+            calls = [dict(row) for row in conn.execute(
+                "SELECT calls.* FROM calls JOIN turns USING(turn_hash) WHERE project_hash=?",
+                (project,))]
+            for turn in turns:
+                if "health_epoch" not in turn:
+                    turn.update(health_epoch=0, issue_code="legacy_coverage", limited=1,
+                                check_sample=0)
+            return {"enabled": bool(setting[0]) if setting else True,
+                    "status": "observed" if turns else "no_observations",
+                    "turns": turns, "calls": calls}
+        finally:
+            conn.close()
+
+    def _calls(self, turn: str) -> list[dict[str, Any]]:
+        return [dict(row) for row in self.conn.execute(
+            "SELECT * FROM calls WHERE turn_hash=? AND completed_order IS NOT NULL "
+            "ORDER BY completed_order", (turn,)
+        )]
+
+    def _limited(self, turn: str, code: str) -> None:
+        self.conn.execute(
+            "UPDATE turns SET limited=1,check_sample=0,issue_code=COALESCE(issue_code,?) "
+            "WHERE turn_hash=?", (code, turn))
+
+    def observe(self, value: dict[str, Any]) -> str | None:
+        from .optimization import MAX_CALLS, MAX_TURNS, baseline, check_sample, loop_warning
+
+        with self.transaction():
+            setting = self.conn.execute("SELECT enabled FROM settings LIMIT 1").fetchone()
+            if setting is not None and not setting[0]:
+                return None
+            epoch = value.get("health_epoch", 0)
+            current = self.conn.execute(
+                "SELECT health_epoch FROM observation_meta WHERE id=1").fetchone()[0]
+            if epoch > current:
+                self.conn.execute(
+                    "UPDATE turns SET limited=1,check_sample=0,"
+                    "issue_code=COALESCE(issue_code,'observer_gap') WHERE ended='active' "
+                    "OR (created<=? AND updated>=?)",
+                    (value.get("gap_until") or 0, value.get("gap_since") or float("inf")))
+                self.conn.execute("UPDATE observation_meta SET health_epoch=? WHERE id=1", (epoch,))
+            turn, project, task, role = (value[key] for key in (
+                "turn_hash", "project_hash", "task_hash", "role"))
+            row = self.conn.execute("SELECT * FROM turns WHERE turn_hash=?", (turn,)).fetchone()
+            if row and (row["project_hash"], row["task_hash"], row["role"]) != (
+                    project, task, role):
+                self._limited(turn, "scope_conflict")
+                return None
+            if row is None:
+                self.conn.execute(
+                    "INSERT INTO turns(turn_hash,project_hash,task_hash,role,created,updated,"
+                    "health_epoch) VALUES(?,?,?,?,?,?,?)",
+                    (turn, project, task, role, time.time(), time.time(), epoch))
+                self.conn.execute(
+                    "DELETE FROM turns WHERE turn_hash IN (SELECT turn_hash FROM turns "
+                    "ORDER BY created DESC,turn_hash LIMIT -1 OFFSET ?)", (MAX_TURNS,))
+            event = value["event"]
+            if row is None and event != "UserPromptSubmit":
+                self._limited(turn, "missing_start")
+            if epoch < current:
+                self._limited(turn, "observer_gap")
+            if event == "UserPromptSubmit":
+                if row is not None and row["ended"] != "active":
+                    if not row["started"]:
+                        self._limited(turn, "late_start")
+                    return None
+                if row is not None and not row["started"]:
+                    self._limited(turn, "late_start")
+                self.conn.execute("UPDATE turns SET started=1 WHERE turn_hash=?", (turn,))
+            elif event == "Incomplete":
+                self._limited(turn, value.get("issue_code", "stream_gap"))
+            elif event in {"Stop", "Interrupt"}:
+                ended = "stopped" if event == "Stop" else "aborted"
+                self.conn.execute(
+                    "UPDATE turns SET ended=CASE WHEN ended='aborted' THEN ended ELSE ? END "
+                    "WHERE turn_hash=?", (ended, turn))
+            elif event in {"PreToolUse", "PostToolUse", "CompletedExecution"}:
+                call = self.conn.execute(
+                    "SELECT * FROM calls WHERE turn_hash=? AND call_hash=?",
+                    (turn, value["call_hash"])).fetchone()
+                if call is None:
+                    size = self.conn.execute("SELECT COUNT(*) FROM calls WHERE turn_hash=?",
+                                             (turn,)).fetchone()[0]
+                    if size >= MAX_CALLS:
+                        self._limited(turn, "call_limit")
+                        return None
+                    self.conn.execute(
+                        "INSERT INTO calls(turn_hash,call_hash,input_hash,kind,capability,is_check)"
+                        "VALUES(?,?,?,?,?,?)", (turn, value["call_hash"], value["input_hash"],
+                                               value["kind"], value["capability"],
+                                               int(value["is_check"])))
+                    if event == "PostToolUse":
+                        self._limited(turn, "missing_pre")
+                else:
+                    mismatch = (value["has_input"] and value["has_name"] and (
+                        call["input_hash"] != value["input_hash"] or (
+                                    call["kind"], call["capability"], bool(call["is_check"])) != (
+                                        value["kind"], value["capability"], value["is_check"])))
+                    if mismatch or (event in {"PostToolUse", "CompletedExecution"}
+                                    and call["response_hash"] is not None):
+                        if mismatch or call["response_hash"] != value.get("response_hash"):
+                            self._limited(turn, "conflicting_event")
+                        return None
+                if row is not None and row["ended"] != "active":
+                    self._limited(turn, "late_call")
+                if event in {"PostToolUse", "CompletedExecution"}:
+                    failure_hash = value["failure_hash"]
+                    if value["failure_basis"] == "input" and call is not None:
+                        failure_hash = stable_hash(["failure-v1", value["error_class"],
+                                                    call["input_hash"]])
+                    order = self.conn.execute(
+                        "SELECT COALESCE(MAX(completed_order),0)+1 FROM calls WHERE turn_hash=?",
+                        (turn,)).fetchone()[0]
+                    self.conn.execute(
+                        "UPDATE calls SET response_hash=?,outcome=?,failure_hash=?,error_class=?,"
+                        "completed_order=? WHERE turn_hash=? AND call_hash=?",
+                        (value["response_hash"], value["outcome"], failure_hash,
+                         value["error_class"], order, turn, value["call_hash"]))
+            calls = self._calls(turn)
+            state = self.conn.execute("SELECT * FROM turns WHERE turn_hash=?", (turn,)).fetchone()
+            pending = self.conn.execute(
+                "SELECT 1 FROM calls WHERE turn_hash=? AND outcome='pending' LIMIT 1", (turn,)
+            ).fetchone()
+            sample = check_sample(calls, ended=state["ended"], limited=bool(
+                state["limited"] or pending or not state["started"]))
+            self.conn.execute(
+                "UPDATE turns SET completed_calls=?,check_sample=?,updated=? WHERE turn_hash=?",
+                (len(calls), int(sample), time.time(), turn))
+            if (event not in {"PostToolUse", "CompletedExecution"}
+                    or state["ended"] != "active" or state["limited"]):
+                return None
+            history = [dict(row) for row in self.conn.execute(
+                "SELECT completed_calls,check_sample FROM turns WHERE project_hash=? "
+                "AND role=? AND turn_hash<>?", (project, role, turn))]
+            message = loop_warning(calls, baseline(history), state["warnings"],
+                                   state["last_warning"])
+            if message:
+                self.conn.execute(
+                    "UPDATE turns SET warnings=warnings+1,last_warning=? WHERE turn_hash=?",
+                    (sum(call["kind"] != "observer" for call in calls), turn))
+            return message
 
 
 class Ledger:

@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT / "plugins/codex-run-budget/lib"))
 
 from codex_run_budget.cli import _status_summary, main  # noqa: E402
 from codex_run_budget.report_i18n import LOCALES, ReportText  # noqa: E402
+from codex_run_budget.util import stable_hash  # noqa: E402
 from codex_run_budget.workflow import render  # noqa: E402
 from codex_run_budget.workflow import run as workflow_run  # noqa: E402
 
@@ -226,7 +227,9 @@ class CliI18nTest(unittest.TestCase):
             with (
                 patch(
                     "codex_run_budget.workflow.WorkflowObserver.select",
-                    return_value=("s" * 64, [{"display_name": "Native"}], {"child": "path"}, False),
+                    return_value=("s" * 64, [{"display_name": "Native",
+                                             "thread_hash": stable_hash("child")}],
+                                  {"child": "path"}, False),
                 ),
                 patch(
                     "codex_run_budget.workflow.human_text",

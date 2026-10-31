@@ -477,6 +477,33 @@ class AutoPreviewTest(unittest.TestCase):
         self.assertEqual(target.read_text(), content)
         self.assertEqual(recent(self.data)[0]["state"], "reported")
 
+    def test_archive_move_reuses_verified_start_inode_for_preview(self):
+        archived = self.root / "archived_sessions" / self.transcript.name
+        archived.parent.mkdir()
+        self.transcript.rename(archived)
+        self.db.execute("UPDATE threads SET rollout_path=? WHERE id=?", (str(archived), TASK))
+        self.db.commit()
+        with patch("codex_run_budget.auto_preview.render_card", wraps=render_card) as renderer:
+            self.assertEqual(self.preview()["status"], "preview")
+        receipt = renderer.call_args.args[0]
+        self.assertEqual(receipt["usage"]["total"], 500)
+        self.assertTrue(receipt["source_observations"]["relocated"])
+
+    def test_root_conflict_preview_explains_unknown_without_fallback(self):
+        broken = native_counter(TASK, "turn-1", 2000, request=500, turn_total=1000)
+        broken["payload"]["root_turn_id"] = "example-other-root-turn"
+        with self.transcript.open("a") as output:
+            output.write(json.dumps(broken) + "\n" + json.dumps(counter(2000)) + "\n")
+        with patch("codex_run_budget.auto_preview.render_card", wraps=render_card) as renderer:
+            self.assertEqual(self.preview()["status"], "preview")
+        receipt = renderer.call_args.args[0]
+        self.assertIsNone(receipt["usage"])
+        self.assertEqual(receipt["usage_status"], "counter_identity_conflict")
+        self.assertEqual(receipt["counter_issues"], ["root_turn_identity_conflict"])
+        card = next(self.output.glob("*.html")).read_text()
+        self.assertIn(ReportText("zh-Hant")("note_identity_conflict"), card)
+        self.assertNotIn("example-other-root-turn", card)
+
     def test_disable_and_threshold_avoid_preview_side_effects(self):
         configure(self.data, enabled=False)
         self.assertEqual(self.preview()["status"], "disabled")

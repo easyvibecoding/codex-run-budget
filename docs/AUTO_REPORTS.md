@@ -189,6 +189,44 @@ automatic in-place refresh. Hashed job state contains only its key, status,
 attempt count and update time. Native selectors travel through the child's stdin
 and are not persisted in job state or command-line arguments.
 
+### Unknown usage diagnostics and source recovery (0.20)
+
+Native counter identity conflicts return `counter_identity_conflict`, with
+allowlisted `counter_issues` such as `root_turn_identity_conflict`. Cards explain
+why usage stays unknown. These are distinct from a numeric counter reset;
+`counter_reset_or_inconsistent` still covers numerical regressions or invalid
+counters. A cross-Task trace root is not accepted as proof of native child lineage
+or permission to use another Task's counters. Legacy counters never replace a
+rejected native counter.
+
+A completion check stops on its first witnessed identity conflict. Its job state
+is `identity_conflict`; a diagnostic revision has `completion_observed=false`,
+unknown usage, `reconciliation_retryable=false`, and the original Stop/SubagentStop
+scope. It does not assert completion or collect a new descendant window. This is
+the exception to the completion-evidence requirement above: the revision explains
+unavailable accounting, rather than settling it. Original artifacts remain
+immutable and a repeated Stop cannot enqueue another worker. Delayed completion
+without a witnessed identity conflict retains the existing bounded retry policy.
+
+If a hook source path is absent or missing, one exact Task UUID lookup may supply
+the native catalog's source hint. The reader still validates the native header and
+the original role and lineage. An existing foreign, malformed or symlink source
+cannot trigger substitution. There is no directory search or app-server call.
+At Stop, preview and reconciliation, an archive move additionally requires the
+same Task, device, positive inode and a source no shorter than the Start boundary.
+Catalog confirmation
+links the new path hash to the original; the Start baseline remains unchanged.
+A copied replacement file or unavailable file identity cannot authorize this
+exception. Raw paths and selectors stay in memory.
+An unverified Stop source does not launch a reconciliation worker.
+
+`source_observations` records only fixed Start/Stop source statuses and booleans
+for exact catalog resolution and verified relocation. A missing Start source is
+not repaired from later counters; it stays `source_identity_unavailable`. Missing
+paths, unobserved final counters and incomplete child coverage never become zero.
+This changes report diagnostics and bounded disk work, not the shared budget
+ledger, admission rules or Task state.
+
 ## Evidence and cost
 
 ### Report language

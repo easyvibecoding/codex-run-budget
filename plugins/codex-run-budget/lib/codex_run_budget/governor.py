@@ -107,6 +107,29 @@ class Governor:
 
     def handle(self, payload: dict[str, Any]) -> dict[str, Any] | None:
         result = self._handle_budget(payload)
+        denied = result and (
+            result.get("decision") == "block" or result.get("continue") is False
+            or (result.get("hookSpecificOutput") or {}).get("permissionDecision") == "deny"
+        )
+        if not denied:
+            try:
+                from .optimization import handle as observe_optimization
+
+                advice = observe_optimization(payload, self.root)
+            except Exception:
+                # Advisory evidence is optional; never weaken or replace a budget decision.
+                advice = None
+            if isinstance(advice, str) and advice:
+                result = dict(result or {})
+                specific = dict(result.get("hookSpecificOutput") or {})
+                specific.setdefault("hookEventName", payload["hook_event_name"])
+                specific["additionalContext"] = "\n".join(
+                    value for value in (specific.get("additionalContext"), advice) if value
+                )
+                result["hookSpecificOutput"] = specific
+                result["systemMessage"] = "\n".join(
+                    value for value in (result.get("systemMessage"), advice) if value
+                )
         if payload.get("hook_event_name") in (
             "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop", "Interrupt", "SessionEnd",
             "SubagentStart", "SubagentStop"

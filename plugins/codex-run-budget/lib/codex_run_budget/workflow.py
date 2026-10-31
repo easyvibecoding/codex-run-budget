@@ -9,6 +9,7 @@ import re
 import sqlite3
 import stat
 import time
+from copy import deepcopy
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
@@ -16,15 +17,24 @@ from pathlib import Path
 from .report import write_report
 from .report_i18n import ReportText, human_text
 from .report_render import _md_table
-from .task_catalog import TaskCatalog, _uuid
+from .task_catalog import CatalogUnavailable, TaskCatalog, _uuid
 from .transcript import _usage_from_line
 from .util import stable_hash
+from .workflow_signals import detect, fold
 
 TAIL_BYTES = 256 * 1024
 HEADER_BYTES = 128 * 1024
 MAX_TASKS = 32
 MAX_SNAPSHOTS = 500
 KINDS = {"task_started", "task_complete", "turn_aborted"}
+
+
+class WorkflowError(ValueError):
+    """Content-free diagnostics for callers; errors never authorize a new scope."""
+
+    def __init__(self, code, *, retryable=False):
+        self.code, self.retryable = code, retryable
+        super().__init__(code)
 # Event/status values stay machine-readable in snapshots.  The catalog key is
 # only consulted by the human Markdown/stdout route.
 LABEL_KEYS = {
@@ -36,6 +46,10 @@ LABEL_KEYS = {
     "abort_observed_check_native": "workflow_abort_observed_check_native",
     "old_evidence_not_proof_of_stall": "workflow_old_evidence_not_proof_of_stall",
     "usage_delta_unavailable": "workflow_usage_delta_unavailable",
+    **{key: "workflow_" + key for key in (
+        "tool_failure_observed", "repeated_tool_failure", "cross_task_failure",
+        "observation_backoff", "observation_coverage_gap", "tool_evidence_incomplete",
+    )},
 }
 
 # Kept as a compatibility view for callers that imported LABELS.  It contains
@@ -129,8 +143,15 @@ def _read(path, identifier, previous=None):
             continuity = same_source and _anchor(stream, prior["size"]) == prior.get("anchor")
             overhead = len(header) + (min(prior.get("size", 0), 4096) if same_source else 0)
             if continuity and size == prior["size"] and info.st_mtime_ns == prior.get("mtime_ns"):
-                return {**prior, "scan_bytes": overhead, "append_status": "unchanged"}
+                return {**prior, "scan_bytes": overhead, "append_status": "unchanged",
+                        "read_mode": "unchanged"}
             offset = max(len(header), size - TAIL_BYTES)
+            parsed_end = prior.get("parsed_end")
+            incremental = (continuity and type(parsed_end) is int
+                           and len(header) <= parsed_end <= prior["size"]
+                           and size - parsed_end <= TAIL_BYTES)
+            if incremental:
+                offset = parsed_end
             partial_first = False
             if offset > len(header):
                 stream.seek(offset - 1)
@@ -156,19 +177,30 @@ def _read(path, identifier, previous=None):
             and (offset + (raw.find(b"\n") + 1 if partial_first else 0) <= prior["size"])
             and not (partial_first and b"\n" not in raw)
             else "unproven",
-            "last_record_at": None,
             "invalid_records": 0,
             "counter_discontinuity": False,
-            "tail_tool_calls": 0,
-            "tail_wait_calls": 0,
+            "tail_tool_calls": prior.get("tail_tool_calls", 0) if incremental else 0,
+            "tail_wait_calls": prior.get("tail_wait_calls", 0) if incremental else 0,
+            "lifecycle": prior.get("lifecycle") if incremental else None,
+            "usage": prior.get("usage") if incremental else None,
+            "last_record_at": prior.get("last_record_at") if incremental else None,
+            "tool_evidence": deepcopy(prior.get("tool_evidence", {})) if incremental else {},
+            "read_mode": "append" if incremental else "tail",
+            "has_baseline": bool(previous),
+            "parsed_end": offset,
         }
+        result["tool_evidence"]["resolved"] = []
+        if not incremental and (offset > len(header) or previous):
+            result["tool_evidence"]["limited"] = True
         lines = raw.splitlines(keepends=True)
         if partial_first:
+            result["parsed_end"] += len(lines[0]) if lines else 0
             lines = lines[1:]  # A potentially partial first record is not evidence.
-        previous_counter = None
+        previous_counter = result["usage"]
         for line in lines:
             if not line.endswith(b"\n"):
                 continue  # Never advance semantic evidence with a partial trailing line.
+            result["parsed_end"] += len(line)
             try:
                 record = json.loads(line)
             except (ValueError, RecursionError):
@@ -177,7 +209,11 @@ def _read(path, identifier, previous=None):
             if not isinstance(record, dict) or not isinstance(record.get("payload"), dict):
                 continue
             payload = record["payload"]
+            if payload.get("thread_id", identifier) != identifier:
+                result["tool_evidence"]["limited"] = True
+                continue
             timestamp = _stamp(record.get("timestamp"))
+            fold(record, identifier, result["tool_evidence"], at=timestamp)
             if timestamp is not None:
                 result["last_record_at"] = timestamp
             if record.get("type") == "event_msg":
@@ -212,6 +248,8 @@ def _read(path, identifier, previous=None):
                     "sleep",
                 ):
                     result["tail_wait_calls"] += 1
+        result["tool_evidence"]["resolved"] = sorted(
+            set(result["tool_evidence"].get("resolved", [])))[:16]
         return result
     except (OSError, ValueError, TypeError, AttributeError, RecursionError):
         return unknown
@@ -275,22 +313,38 @@ class WorkflowObserver:
         if not path.is_file():
             raise ValueError("invalid observation store")
         connection = sqlite3.connect(path, timeout=0.5)
-        connection.execute(
-            "CREATE TABLE IF NOT EXISTS snapshots (cursor TEXT PRIMARY KEY, "
-            "scope TEXT NOT NULL, captured REAL NOT NULL, payload TEXT NOT NULL)"
-        )
+        try:
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS snapshots (cursor TEXT PRIMARY KEY, "
+                "scope TEXT NOT NULL, captured REAL NOT NULL, payload TEXT NOT NULL)"
+            )
+        except Exception:
+            connection.close()
+            raise
         return connection
 
     def select(self, selectors, include_agents=False, limit=8):
-        if not 1 <= len(selectors) <= 8 or type(limit) is not int or not 1 <= limit <= MAX_TASKS:
-            raise ValueError("select 1..8 roots and 1..32 Tasks")
+        if (not 1 <= len(selectors) <= MAX_TASKS or type(limit) is not int
+                or not 1 <= limit <= MAX_TASKS):
+            raise ValueError("select 1..32 roots and 1..32 Tasks")
         with TaskCatalog(self.home) as catalog:
-            roots = [catalog.get(value) for value in selectors]
+            roots = []
+            for value in selectors:
+                try:
+                    roots.append(catalog.get(value))
+                except ValueError:
+                    identity = _uuid(value)
+                    if identity is None:
+                        raise
+                    roots.append({"id": identity, "thread_hash": stable_hash(identity),
+                                  "catalog_missing": True})
             if len({row["id"] for row in roots}) != len(roots) or len(roots) > limit:
                 raise ValueError("duplicate roots or insufficient Task limit")
             selected = {row["id"]: row for row in roots}
             if include_agents:
                 for root in roots:
+                    if root.get("catalog_missing"):
+                        continue
                     # Keep every explicit root even when descendants hit the cap.
                     family = catalog.family(root, limit)
                     for row in family:
@@ -298,11 +352,16 @@ class WorkflowObserver:
                             catalog.limited = True
                         else:
                             selected[row["id"]] = row
-            metadata = [catalog.describe(row) for row in selected.values()]
+            metadata = [catalog.describe(row) if not row.get("catalog_missing") else {
+                "thread_hash": row["thread_hash"],
+                "selector": row["thread_hash"][:12],
+                "display_name": "Unavailable @" + row["thread_hash"][:12],
+                "parent_hash": None, "parent_name": None, "root_hash": None,
+                "root_name": None, "role": "unknown", "catalog_status": "unavailable",
+                "lineage_status": "catalog_unavailable",
+            } for row in selected.values()]
             paths = {
-                identifier: catalog.connection.execute(
-                    "SELECT rollout_path FROM threads WHERE id=?", (identifier,)
-                ).fetchone()[0]
+                identifier: catalog.source_path(identifier)
                 for identifier in selected
             }
             scope = stable_hash(
@@ -316,34 +375,63 @@ class WorkflowObserver:
             )
             return scope, metadata, paths, catalog.limited
 
-    def capture(self, selectors, *, include_agents=False, limit=8, after=None, now=None):
+    def capture(self, selectors, *, include_agents=False, limit=8, after=None, now=None,
+                probe=False):
         captured = time.time() if now is None else now
+        if type(probe) is not bool:
+            raise ValueError("invalid probe option")
         if type(captured) not in (int, float) or not math.isfinite(captured):
             raise ValueError("invalid observation time")
         if after is not None and not re.fullmatch(r"[0-9a-f]{64}", after):
-            raise ValueError("invalid cursor")
-        scope, metadata, paths, limited = self.select(selectors, include_agents, limit)
-        connection = self._connect()
+            raise WorkflowError("invalid_cursor")
+        try:
+            scope, metadata, paths, limited = self.select(selectors, include_agents, limit)
+        except (CatalogUnavailable, OSError, sqlite3.Error) as exc:
+            raise WorkflowError("native_catalog_unavailable", retryable=True) from exc
+        try:
+            connection = self._connect()
+        except (OSError, sqlite3.Error) as exc:
+            raise WorkflowError("observation_store_unavailable", retryable=True) from exc
         try:
             baseline = None
             if after:
                 found = connection.execute(
                     "SELECT scope,payload FROM snapshots WHERE cursor=?", (after,)
                 ).fetchone()
-                if not found or found[0] != scope:
-                    raise ValueError("cursor expired or belongs to a different scope")
+                if not found:
+                    raise WorkflowError("cursor_expired")
+                if found[0] != scope:
+                    raise WorkflowError("cursor_scope_mismatch")
                 baseline = json.loads(found[1])
                 if baseline["captured_at"] > captured:
-                    raise ValueError("observation clock went backwards")
+                    raise WorkflowError("observation_clock_backwards")
             prior = {r["thread_hash"]: r for r in baseline["tasks"]} if baseline else {}
             tasks, changes, signals, tokens, comparable = [], [], [], 0, 0
             for identity, path in paths.items():
                 key = stable_hash(identity)
                 old = prior.get(key)
-                telemetry = _read(path, identity, (old or {}).get("observation"))
+                previous = (old or {}).get("observation", {})
+                health = (old or {}).get("observation_health", {})
+                hint = stable_hash(path)
+                suppressed = (not probe and hint == previous.get("source_hint_hash")
+                              and (health.get("next_probe_at") or 0) > captured)
+                if suppressed:
+                    telemetry = {**previous, "scan_bytes": 0, "read_mode": "backoff",
+                                 "append_status": "unproven"}
+                    health = {**health, "state": "backoff"}
+                else:
+                    telemetry = _read(path, identity, previous)
+                    failures = (min(12, health.get("failures", 0) + 1)
+                                if telemetry["source_status"] != "observed" else 0)
+                    delay = min(300, 30 * 2 ** (failures - 3)) if failures >= 3 else 0
+                    health = {"state": "backoff" if delay else
+                              "unavailable" if failures else "healthy", "failures": failures,
+                              "next_probe_at": captured + delay if delay else None}
+                telemetry["source_hint_hash"] = hint
                 row = {
                     **next(m for m in metadata if m["thread_hash"] == key),
                     "observation": telemetry,
+                    "observation_health": health,
                 }
                 tasks.append(row)
                 changed = not old or _fingerprint(telemetry) != _fingerprint(old["observation"])
@@ -382,11 +470,44 @@ class WorkflowObserver:
                         }
                     )
             removed = sorted(set(prior) - {r["thread_hash"] for r in tasks})
+            failure_signals, responses = detect(tasks)
+            signals.extend(failure_signals)
             old_signals = baseline.get("signals", []) if baseline else []
+            unconfirmed, cleared_signals = [], []
+            by_key = {row["thread_hash"]: row for row in tasks}
+            for signal in old_signals:
+                if signal in signals:
+                    continue
+                current = by_key.get(signal["task"])
+                evidence = current["observation"] if current else {}
+                readable = evidence.get("source_status") == "observed"
+                tools = evidence.get("tool_evidence", {})
+                tool_signal = signal["kind"] in {
+                    "tool_failure_observed", "repeated_tool_failure", "cross_task_failure"}
+                resolved = (signal.get("failure_hash") in tools.get("resolved", [])
+                            or signal["kind"] == "cross_task_failure" and all(
+                                r["observation"].get("source_status") == "observed"
+                                and not r["observation"].get("tool_evidence", {}).get("limited")
+                                for r in tasks))
+                if readable and (not tool_signal or resolved):
+                    cleared_signals.append(signal)
+                else:
+                    unconfirmed.append(signal)
+                    signals.append(signal)
+            bounded, counts = [], {}
+            signals_limited = bool(baseline and baseline.get("signals_limited"))
+            for signal in signals:
+                count = counts.get(signal["task"], 0)
+                if count < 64:
+                    bounded.append(signal)
+                    counts[signal["task"]] = count + 1
+                else:
+                    signals_limited = True
+            signals = bounded
+            unconfirmed = [s for s in unconfirmed if s in signals]
             new_signals = [s for s in signals if s not in old_signals]
-            cleared_signals = [s for s in old_signals if s not in signals]
             result = {
-                "schema_version": 1,
+                "schema_version": 2,
                 "scope": scope,
                 "captured_at": captured,
                 "baseline_at": baseline["captured_at"] if baseline else None,
@@ -397,16 +518,21 @@ class WorkflowObserver:
                 "signals": signals,
                 "new_signals": new_signals,
                 "cleared_signals": cleared_signals,
+                "unconfirmed_signals": unconfirmed,
+                "response_plan": responses,
+                "new_response_plan": [r for r in responses
+                                      if r not in (baseline or {}).get("response_plan", [])],
+                "signals_limited": signals_limited,
+                "observation_failures": sum(
+                    r["observation_health"]["state"] != "healthy" for r in tasks),
                 "changed": bool(
                     changes
                     or removed
                     or new_signals
                     or cleared_signals
+                    or (baseline and baseline.get("unconfirmed_signals", []) != unconfirmed)
                     or (baseline and baseline["selection_limited"] != limited)
                 ),
-                "consecutive_unchanged": 0
-                if changes or removed
-                else (baseline.get("consecutive_unchanged", 0) + 1 if baseline else 0),
                 "observed_token_delta": tokens if comparable else None,
                 "comparable_tasks": comparable,
                 "selected_tasks": len(tasks),
@@ -415,6 +541,8 @@ class WorkflowObserver:
                 "live_status": "not_queried",
                 "workflow_acceptance": "not_evaluated",
             }
+            result["consecutive_unchanged"] = (0 if result["changed"] else
+                                               baseline.get("consecutive_unchanged", 0) + 1)
             cursor = stable_hash(json.dumps(result, sort_keys=True) + str(time.time_ns()))
             result["cursor"] = cursor
             connection.execute(
@@ -498,12 +626,24 @@ def render(result, locale="zh-Hant", *, text=None):
                 [text("workflow_signal_task"), text("workflow_signal")],
                 [
                     [
-                        names.get(s["task"], text("workflow_selected_task")),
-                        _label(text, s["kind"], "workflow_unknown_signal"),
+                        names.get(s["task"], "@" + s["task"][:12]),
+                        _label(text, s["kind"], "workflow_unknown_signal")
+                        + (" (?)" if s in result.get("unconfirmed_signals", []) else ""),
                     ]
                     for s in result["signals"]
                 ],
                 text,
+            ),
+            "",
+            text("workflow_unconfirmed_note") if result.get("unconfirmed_signals") else "",
+            "## " + text("workflow_response_heading"),
+            "",
+            _md_table(
+                [text("workflow_signal_task"), text("workflow_response_heading")],
+                [[", ".join(names.get(key, text("workflow_selected_task")) for key in
+                            response.get("tasks", [response.get("task")])),
+                  text("workflow_action_" + response["action"])]
+                 for response in result.get("response_plan", [])], text,
             ),
             "",
             text("workflow_note_local"),
@@ -532,32 +672,47 @@ def run(args, *, text=None):
     selectors = args.thread or [os.environ.get("CODEX_THREAD_ID")]
     if not all(selectors):
         raise ValueError("select a Task first")
+    if args.action != "targets" and getattr(args, "batch", 0):
+        raise ValueError("batch is only available for native targets")
     observer = WorkflowObserver(args.data_dir, args.codex_home)
     if args.action == "targets":
-        _, metadata, paths, limited = observer.select(selectors, args.include_agents, args.limit)
-        if len(paths) > 8:
-            raise ValueError("native wait supports at most 8 targets per call")
+        scope, metadata, paths, limited = observer.select(
+            selectors, args.include_agents, args.limit)
         current = os.environ.get("CODEX_THREAD_ID")
-        targets = [
+        available = {r["thread_hash"] for r in metadata
+                     if r.get("catalog_status") != "unavailable"}
+        all_targets = [
             {"threadId": identifier, "hostId": "local"}
             for identifier in paths
-            if identifier != current
+            if identifier != current and stable_hash(identifier) in available
         ]
+        batch = getattr(args, "batch", 0)
+        batches = max(1, (len(all_targets) + 7) // 8)
+        if not 0 <= batch < batches:
+            raise ValueError("invalid native target batch")
+        targets = all_targets[batch * 8:(batch + 1) * 8]
+        target_hashes = {stable_hash(t["threadId"]) for t in targets}
         print(
             json.dumps(
                 {
                     "targets": targets,
+                    "scope": scope,
                     "timeoutMs": 0,
                     "limited": limited,
                     "calling_task_excluded": current in paths,
-                    "names": [r["display_name"] for r in metadata],
+                    "names": [r["display_name"] for r in metadata
+                              if r["thread_hash"] in target_hashes],
+                    "batch_index": batch, "batch_count": batches,
+                    "unavailable_selectors": [r["selector"] for r in metadata
+                                              if r.get("catalog_status") == "unavailable"],
                 },
                 ensure_ascii=False,
             )
         )
         return
     result = observer.capture(
-        selectors, include_agents=args.include_agents, limit=args.limit, after=args.after
+        selectors, include_agents=args.include_agents, limit=args.limit, after=args.after,
+        probe=getattr(args, "probe", False),
     )
     if result["changed"] or not args.json:
         text = text or human_text("cli", home=getattr(args, "codex_home", None))
@@ -588,6 +743,9 @@ def run(args, *, text=None):
             print(text("workflow_cleared", count=text.number(len(result["cleared_signals"]))))
         if result["selection_limited"]:
             print(text("workflow_selection_limited"))
+        if result["changed"]:
+            for response in result.get("new_response_plan", [])[:3]:
+                print("- " + text("workflow_action_" + response["action"]))
         token_delta = (
             text("workflow_unknown")
             if result["observed_token_delta"] is None

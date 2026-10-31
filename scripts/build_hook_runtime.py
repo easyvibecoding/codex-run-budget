@@ -33,7 +33,7 @@ MODULES = (
     "__init__.py", "governor.py", "ledger.py", "transcript.py", "util.py", "hook_adapter.py",
     "auto_report.py", "auto_preview.py", "reconcile.py", "task_catalog.py", "child_usage.py",
     "report_i18n.py", "turn_quota.py", "quota_view.py", "meter_source.py", "meter_plan.py",
-    "exec_activity.py",
+    "exec_activity.py", "optimization.py",
 )
 
 
@@ -42,7 +42,8 @@ def artifacts(plugin: Path = PLUGIN) -> dict[Path, bytes]:
         "__main__.py": b"from codex_run_budget.hook_adapter import main\nraise SystemExit(main())\n"
     }
     package = plugin / "lib/codex_run_budget"
-    for name in (*MODULES, "migrations/002_hardening.sql", "assets/turn-card.html"):
+    for name in (*MODULES, "migrations/002_hardening.sql", "migrations/003_optimizer_sensing.sql",
+                 "assets/turn-card.html"):
         content["codex_run_budget/" + name] = (package / name).read_bytes()
     # CLI/manual-report domains are deliberately excluded from per-hook payloads.
     for path in sorted((package / "assets/locales").glob("*.json")):

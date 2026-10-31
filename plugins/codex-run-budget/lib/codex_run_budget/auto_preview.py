@@ -22,6 +22,8 @@ from urllib.parse import quote
 from .auto_report import (
     _baseline_identity_matches,
     _delta,
+    _snapshot_for_task,
+    _usage_diagnostics,
     child_coverage,
     observed_total,
     settings,
@@ -147,6 +149,8 @@ def render_card(receipt: dict) -> str:
             ("context_heading", "child_context_heading"),
             ("child_subtotal", "child_descendant_subtotal"), ("card_note", "child_card_note"),
         )})
+    if receipt.get("usage_status") == "counter_identity_conflict":
+        values["label_card_note"] += " " + text("note_identity_conflict")
     escaped = {k: escape(str(v)) for k, v in values.items()}
     # Native display names are data. Only this fixed markup is inserted unescaped.
     if len(context_pairs) > 1:
@@ -237,9 +241,7 @@ def preview(root: Path, session: str, turn: str, *, output_dir: Path, home=None)
             parent_hash=description["parent_hash"] if child else None,
         ):
             return {"status": "source_unavailable"}
-        native = catalog.connection.execute(
-            "SELECT rollout_path FROM threads WHERE id=?", (session,)
-        ).fetchone()
+        native_path = catalog.source_path(session)
         # Optional column on older catalogs; absence cannot authorize another root.
         columns = {r[1] for r in catalog.connection.execute("PRAGMA table_info(threads)")}
         workspace = catalog.connection.execute(
@@ -251,8 +253,8 @@ def preview(root: Path, session: str, turn: str, *, output_dir: Path, home=None)
             output_dir, session, native_home, workspace[0] if workspace else None,
             root_session=root_task["id"],
         )
-        current = snapshot(
-            native[0] if native else None, turn,
+        current = _snapshot_for_task(
+            native_path, turn, session, baseline=baseline, home=home, snapshot_fn=snapshot,
             allow_subagent=child,
             root_hash=description["root_hash"] if child else None,
         )
@@ -277,6 +279,7 @@ def preview(root: Path, session: str, turn: str, *, output_dir: Path, home=None)
         ),
         "scope": "subagent" if child else "parent",
         "usage": usage, "usage_status": status,
+        **_usage_diagnostics(baseline, current),
         "contexts": current["contexts"], "contexts_limited": current.get("contexts_limited", False),
         "task_usage": current.get("usage"), "elapsed_seconds": seconds,
         "counter_source": current.get("counter_source"),

@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.20.0 - 2026-10-31
+
+- Expand workflow observation to 32 explicit roots/Tasks with eight-target native-status batches, preserving scope and healthy peers when one exact UUID disappears.
+- Read verified small appends incrementally, retain unconfirmed failures across source gaps, and add per-cursor bounded backoff, explicit probes and structured observation errors.
+- Detect native tool failures, repeats and shared diagnostic signatures across Tasks; emit read-only response plans, matching-success recovery and observer-command isolation without workflow control effects.
+- Distinguish native counter identity conflicts from counter resets in turn cards and receipts; retain fixed diagnostic codes and unknown usage without accepting cross-Task trace roots.
+- Stop completion reconciliation after the first witnessed identity conflict, publish a diagnostic revision in the original Stop scope, and preserve immutable Stop artifacts.
+- Resolve absent hook paths through one exact native catalog hint; recognize archive relocation only for the original Task, device and positive inode, without replacing the Start baseline or accepting replacement files.
+- Strengthen sensing with explicit structured-result metadata, pending states, coverage reasons and installation-wide observer health; malformed or lost evidence never silently regains completeness.
+- Add a bounded observer circuit, single recovery probe, reentry/internal-probe isolation, clock-discontinuity handling and generation-based gap recovery without changing budget decisions.
+- Harden exec stream identity, duplicate lifecycle, EOF and oversized-tail handling; uncertain lifecycle coverage makes invocation usage unknown. Back off and stop foreground watches after three unavailable reads.
+- Back up and transactionally migrate observation schema 1 to 2, preserving history while excluding unverified legacy baselines.
+- Add Codex-specific progress advisories for recurring failure fingerprints across changed calls or edits, with successful-check resets, per-turn cooldowns and a two-advisory limit.
+- Learn bounded project-local check baselines separately for parent and agent turns; stopped turns without a successful local check do not train them.
+- Report observed capability attempts, coverage gaps and fixed environment advice without storing command or transcript content, calling a model, changing settings or starting a budget.
+- Add an explicit local Codex input probe with temporary capability overrides. Report input/schema bytes when exposed; token savings and charges stay unknown.
+- Isolate bounded optimization observations from the shared budget ledger and preserve existing hook definitions and fail-closed budget decisions.
+
 ## 0.19.14 - 2026-10-18
 
 - Complete the concurrent-hook repairs from the earlier candidates with WAL-backed Publisher state so cold writes do not block immutable pinned reads during rollback-journal commits.

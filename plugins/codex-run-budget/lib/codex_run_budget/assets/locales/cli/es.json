@@ -109,5 +109,17 @@
   "cli_current_not_configured": "Run Budget no está configurado para esta sesión.",
   "cli_current_prefix": "Sesión actual: ",
   "cli_global_latest_prefix": "Último run entre todas las Tasks: ",
-  "cli_global_scope_error": "run-budget: esta selección abarca todas las Tasks; añada --all-tasks o use show current/un ID de run exacto"
+  "cli_global_scope_error": "run-budget: esta selección abarca todas las Tasks; añada --all-tasks o use show current/un ID de run exacto",
+  "workflow_tool_failure_observed": "Fallo nativo sin resolver observado",
+  "workflow_repeated_tool_failure": "Fallo repetido de herramienta nativa",
+  "workflow_cross_task_failure": "Firmas de fallo coincidentes entre Tasks",
+  "workflow_observation_backoff": "Observación de la fuente en espera",
+  "workflow_observation_coverage_gap": "Laguna en las pruebas añadidas",
+  "workflow_tool_evidence_incomplete": "Pruebas de herramientas incompletas",
+  "workflow_unconfirmed_note": "No se ha confirmado la resolución de señales anteriores; la falta de pruebas no implica recuperación.",
+  "workflow_response_heading": "Respuestas propuestas",
+  "workflow_action_retry_observation_after": "Reintentar la observación después de next_probe_at; no reiniciar el flujo",
+  "workflow_action_verify_exact_native_source": "Verificar el Task exacto y su fuente nativa",
+  "workflow_action_inspect_native_tool_failure": "Examinar el error nativo acotado y el resultado esperado",
+  "workflow_action_inspect_shared_dependency": "Examinar una dependencia compartida; firmas iguales no prueban una causa común"
 }

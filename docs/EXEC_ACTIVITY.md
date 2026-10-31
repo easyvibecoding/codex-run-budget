@@ -50,6 +50,17 @@ survives `--ephemeral`, which does not save native rollout files. Pass exec opti
 after `--`; the launcher sets `--json` and `--cd` from `--project`. It inherits stdin
 and normal Codex authentication. No prompt, command, stdout or stderr is saved in
 the activity database. Oversized output lines are forwarded but not parsed.
+Malformed, oversized or missing lifecycle records make invocation usage unknown;
+a later terminal summary does not fill that gap. Exact terminal replays are
+deduplicated and do not double-count or erase an otherwise known invocation.
+A final complete JSON record may omit its trailing newline.
+
+The optional [Codex optimizer](OPTIMIZATION.md) folds completed typed command
+and file-change events from this same stream without persisting their content.
+It can emit a bounded advisory on stderr while preserving stdout and process
+exit status. Inspect these invocation observations with `optimizer report
+--project "$PWD" --channel exec`; they are separate from native hook observations
+and are never budget admissions or descendant-usage credit.
 
 An explicit `--parent-task "$TASK_ID"` records `launcher_argument` attribution;
 otherwise an available `CODEX_THREAD_ID` records `launcher_environment`. Both are
@@ -88,3 +99,6 @@ Keep real reports and state local. All published fixtures are synthetic.
 Exec activity is observational. Launcher receipts do not register a native child,
 charge the shared budget ledger, or provide enforcement over independent exec
 processes. Existing Governor decisions and fail-closed behavior are preserved.
+Foreground watches back off when all observations are unavailable and return
+status 1 after three consecutive unavailable reads. This stops only the observer;
+it does not stop any observed Codex process.

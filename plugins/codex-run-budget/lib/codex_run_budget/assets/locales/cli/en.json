@@ -109,5 +109,17 @@
   "cli_current_not_configured": "Run Budget is not configured for this session.",
   "cli_current_prefix": "Current session: ",
   "cli_global_latest_prefix": "Latest across all Tasks: ",
-  "cli_global_scope_error": "run-budget: this selection spans all Tasks; add --all-tasks or use show current/an exact run ID"
+  "cli_global_scope_error": "run-budget: this selection spans all Tasks; add --all-tasks or use show current/an exact run ID",
+  "workflow_tool_failure_observed": "Unresolved native tool failure observed",
+  "workflow_repeated_tool_failure": "Repeated native tool failure",
+  "workflow_cross_task_failure": "Matching failure signatures across Tasks",
+  "workflow_observation_backoff": "Source observation is backing off",
+  "workflow_observation_coverage_gap": "Append evidence coverage gap",
+  "workflow_tool_evidence_incomplete": "Tool evidence is incomplete",
+  "workflow_unconfirmed_note": "Some earlier signals cannot be confirmed as resolved; missing evidence is not recovery.",
+  "workflow_response_heading": "Response advice",
+  "workflow_action_retry_observation_after": "Retry this observation after its next_probe_at; no automatic workflow retry",
+  "workflow_action_verify_exact_native_source": "Verify this exact Task and its native source",
+  "workflow_action_inspect_native_tool_failure": "Inspect the bounded native tool error and confirm its intended outcome",
+  "workflow_action_inspect_shared_dependency": "Check a shared dependency; matching signatures do not prove a common cause"
 }

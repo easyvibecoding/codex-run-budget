@@ -47,6 +47,14 @@ change with a fresh baseline, not a silent continuation of old totals. A capped
 tree is incomplete and can miss active descendants; do not use it to declare
 the workflow stopped, fully observed or accepted.
 
+An explicitly described cross-project process may bind several independent roots.
+The deterministic cap is 32 roots/Tasks; use `--limit` deliberately rather than
+splitting into incompatible scopes to hide omitted coverage. Native status checks
+use separate eight-target batches. Source disappearance does not remove an
+explicit UUID from scope; preserve unavailable evidence and earlier unresolved
+failures. See [failure response](failure-response.md) when discovery, native host
+access or cross-Task observations fail.
+
 ## Follow the requested intent
 
 - **Observe / analyze / suggest improvements:** Inspect and explain. A proposed

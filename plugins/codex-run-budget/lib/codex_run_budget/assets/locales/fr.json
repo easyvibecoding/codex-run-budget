@@ -115,5 +115,7 @@
   "reconcile_partial": "Fin observée ; preuves partielles",
   "note_completion": "L’utilisation de l’agent principal s’arrête à l’événement explicite de fin du tour sélectionné. L’utilisation des sous-agents conserve la fenêtre initiale du début à Stop ; les tours suivants sont exclus. Cela ne prouve pas que l’ensemble du Task est terminé.",
   "child_note_completion": "L’usage de ce sous-agent s’arrête à un événement de fin explicite pour son tour. Les descendants conservent la fenêtre initiale du début jusqu’à Stop ; cela ne prouve pas que tout le Task est terminé.",
-  "note_reconcile": "Une vérification limitée en arrière-plan peut publier une version révisée après Stop, une fois la fin du tour confirmée, sans appeler de modèle. En l’absence de preuve de fin, l’instantané Stop reste provisoire. Les cartes intégrées conservent leur instantané initial ; rouvrir le Task ne garantit pas leur actualisation."
+  "note_reconcile": "Une vérification limitée en arrière-plan peut publier une version révisée après Stop, une fois la fin du tour confirmée, sans appeler de modèle. En l’absence de preuve de fin, l’instantané Stop reste provisoire. Les cartes intégrées conservent leur instantané initial ; rouvrir le Task ne garantit pas leur actualisation.",
+  "reconcile_identity_conflict": "Vérification arrêtée : identité des compteurs incohérente",
+  "note_identity_conflict": "Les compteurs natifs ne passent pas la vérification du Task et du tour. L’utilisation reste inconnue ; les compteurs d’un autre Task ne sont pas utilisés à leur place."
 }

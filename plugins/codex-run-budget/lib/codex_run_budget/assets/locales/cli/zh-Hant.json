@@ -109,5 +109,17 @@
   "cli_current_not_configured": "這個 session 沒有設定 Run Budget。",
   "cli_current_prefix": "目前 session：",
   "cli_global_latest_prefix": "所有 Task 中最新一筆：",
-  "cli_global_scope_error": "run-budget：這項查詢會跨所有 Task；請加 --all-tasks，或使用 show current／精確 run ID"
+  "cli_global_scope_error": "run-budget：這項查詢會跨所有 Task；請加 --all-tasks，或使用 show current／精確 run ID",
+  "workflow_tool_failure_observed": "觀測到尚未確認解決的原生工具錯誤",
+  "workflow_repeated_tool_failure": "原生工具重複失敗",
+  "workflow_cross_task_failure": "跨 Task 出現相同失敗特徵",
+  "workflow_observation_backoff": "來源觀測已進入退避",
+  "workflow_observation_coverage_gap": "追加紀錄有證據缺口",
+  "workflow_tool_evidence_incomplete": "工具證據不完整",
+  "workflow_unconfirmed_note": "部分先前訊號尚無法確認已解除；缺少證據不代表恢復。",
+  "workflow_response_heading": "應對建議",
+  "workflow_action_retry_observation_after": "到 next_probe_at 後重試觀測；不自動重跑工作",
+  "workflow_action_verify_exact_native_source": "核對此指定 Task 與原生來源",
+  "workflow_action_inspect_native_tool_failure": "讀取有界原生工具錯誤並確認操作預期",
+  "workflow_action_inspect_shared_dependency": "檢查共用依賴；相同失敗特徵不證明共同原因"
 }

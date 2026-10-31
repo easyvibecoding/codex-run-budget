@@ -109,5 +109,17 @@
   "cli_current_not_configured": "Für diese Session ist kein Run Budget konfiguriert.",
   "cli_current_prefix": "Aktuelle Session: ",
   "cli_global_latest_prefix": "Neuester Run aller Tasks: ",
-  "cli_global_scope_error": "run-budget: diese Auswahl umfasst alle Tasks; --all-tasks angeben oder show current/eine genaue Run-ID verwenden"
+  "cli_global_scope_error": "run-budget: diese Auswahl umfasst alle Tasks; --all-tasks angeben oder show current/eine genaue Run-ID verwenden",
+  "workflow_tool_failure_observed": "Ungeklärter nativer Werkzeugfehler beobachtet",
+  "workflow_repeated_tool_failure": "Wiederholter nativer Werkzeugfehler",
+  "workflow_cross_task_failure": "Übereinstimmende Fehler in mehreren Tasks",
+  "workflow_observation_backoff": "Quellenbeobachtung wartet auf Wiederholung",
+  "workflow_observation_coverage_gap": "Lücke in angehängten Nachweisen",
+  "workflow_tool_evidence_incomplete": "Werkzeugnachweise unvollständig",
+  "workflow_unconfirmed_note": "Frühere Signale sind nicht nachweislich behoben; fehlende Nachweise sind keine Erholung.",
+  "workflow_response_heading": "Handlungsvorschläge",
+  "workflow_action_retry_observation_after": "Beobachtung nach next_probe_at wiederholen; Workflow nicht automatisch neu starten",
+  "workflow_action_verify_exact_native_source": "Genauen Task und native Quelle prüfen",
+  "workflow_action_inspect_native_tool_failure": "Begrenzten nativen Werkzeugfehler und erwartetes Ergebnis prüfen",
+  "workflow_action_inspect_shared_dependency": "Gemeinsame Abhängigkeit prüfen; gleiche Signaturen beweisen keine gemeinsame Ursache"
 }

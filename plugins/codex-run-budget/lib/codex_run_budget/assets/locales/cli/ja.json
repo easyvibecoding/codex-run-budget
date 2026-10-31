@@ -109,5 +109,17 @@
   "cli_current_not_configured": "この session に Run Budget は設定されていません。",
   "cli_current_prefix": "現在の session: ",
   "cli_global_latest_prefix": "全 Task の中で最新: ",
-  "cli_global_scope_error": "run-budget: この選択は全 Task が対象です。--all-tasks を付けるか show current／正確な run ID を使ってください"
+  "cli_global_scope_error": "run-budget: この選択は全 Task が対象です。--all-tasks を付けるか show current／正確な run ID を使ってください",
+  "workflow_tool_failure_observed": "未解決のネイティブツールエラーを観測",
+  "workflow_repeated_tool_failure": "ネイティブツールの繰り返し失敗",
+  "workflow_cross_task_failure": "複数 Task で一致する失敗",
+  "workflow_observation_backoff": "ソースの観測をバックオフ中",
+  "workflow_observation_coverage_gap": "追記された証拠に欠落",
+  "workflow_tool_evidence_incomplete": "ツールの証拠が不完全",
+  "workflow_unconfirmed_note": "以前のシグナルの解消は未確認です。証拠の欠落は復旧を意味しません。",
+  "workflow_response_heading": "対応案",
+  "workflow_action_retry_observation_after": "next_probe_at 後に観測を再試行。ワークフローは再実行しません",
+  "workflow_action_verify_exact_native_source": "指定 Task とネイティブソースを確認",
+  "workflow_action_inspect_native_tool_failure": "範囲を限定してネイティブツールのエラーと意図した結果を確認",
+  "workflow_action_inspect_shared_dependency": "共有依存を調査。一致する失敗は共通原因の証明ではありません"
 }

@@ -126,6 +126,8 @@ def build_parser(
     add_parser(sub, native_home_option=True)
     from .update_cli import add_parser as add_update_parser
     add_update_parser(sub, native_home_option=True)
+    from .optimization_cli import add_parser as add_optimizer_parser
+    add_optimizer_parser(sub)
 
     audit = sub.add_parser("audit", help=text("cli_audit_help"))
     audit.add_argument("transcript", type=Path, nargs="+")
@@ -204,6 +206,10 @@ def build_parser(
     workflow.add_argument("--include-agents", action="store_true")
     workflow.add_argument("--limit", type=int, default=8)
     workflow.add_argument("--after", help=text("cli_workflow_after_help"))
+    workflow.add_argument("--batch", type=int, default=0,
+                          help="Select an eight-target native status batch (targets only)")
+    workflow.add_argument("--probe", action="store_true",
+                          help="Perform one observation despite source backoff")
     workflow.add_argument("--codex-home", type=Path)
     workflow.add_argument(
         "--json", action="store_true", help=text("cli_workflow_json_help")
@@ -251,6 +257,9 @@ def main(argv: list[str] | None = None) -> int:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     parser_text = human_text("cli") if _help_requested(raw_argv) else None
     args = build_parser(parser_text, include_help=parser_text is not None).parse_args(raw_argv)
+    if args.command == "optimizer":
+        from .optimization_cli import run
+        return run(args, args.data_dir or data_path())
     if args.command == "updates":
         from .update_cli import run
         return run(args, args.data_dir or data_path())
@@ -278,7 +287,13 @@ def main(argv: list[str] | None = None) -> int:
             args.data_dir = args.data_dir or data_path()
             run(args, text=human)
             return 0
-        except (OSError, ValueError, TypeError, KeyError, sqlite3.Error, RecursionError):
+        except (OSError, ValueError, TypeError, KeyError, sqlite3.Error, RecursionError) as exc:
+            if args.json:
+                print(json.dumps({"status": "observation_failed",
+                                  "code": getattr(exc, "code", "observation_unavailable"),
+                                  "retryable": getattr(exc, "retryable", False),
+                                  "scope_preserved": True, "model_requests": 0}))
+                return 2
             print(
                 (human or _cli_text())("cli_workflow_error"),
                 file=sys.stderr,

@@ -115,5 +115,7 @@
   "reconcile_partial": "Abschluss beobachtet; Nachweise unvollständig",
   "note_completion": "Die Nutzung des Hauptagenten endet am ausdrücklichen Abschlussereignis des ausgewählten Turns. Für Subagenten bleibt das ursprüngliche Zeitfenster vom Start bis Stop erhalten; nachfolgende Turns sind ausgeschlossen. Dies belegt nicht, dass der gesamte Task abgeschlossen ist.",
   "child_note_completion": "Die Nutzung dieses Subagenten endet am ausdrücklich beobachteten Abschlussereignis seines Turns. Nachkommen behalten das ursprüngliche Zeitfenster vom Start bis Stop; der gesamte Task muss damit nicht abgeschlossen sein.",
-  "note_reconcile": "Eine begrenzte Hintergrundprüfung kann nach Stop eine Berichtsversion mit bestätigtem Turn-Abschluss veröffentlichen, ohne ein Modell aufzurufen. Fehlt der Abschlussnachweis, bleibt der Stop-Snapshot vorläufig. Inline-Karten behalten ihren ursprünglichen Snapshot; das erneute Öffnen des Tasks garantiert keine Aktualisierung."
+  "note_reconcile": "Eine begrenzte Hintergrundprüfung kann nach Stop eine Berichtsversion mit bestätigtem Turn-Abschluss veröffentlichen, ohne ein Modell aufzurufen. Fehlt der Abschlussnachweis, bleibt der Stop-Snapshot vorläufig. Inline-Karten behalten ihren ursprünglichen Snapshot; das erneute Öffnen des Tasks garantiert keine Aktualisierung.",
+  "reconcile_identity_conflict": "Prüfung beendet: Zähleridentität widersprüchlich",
+  "note_identity_conflict": "Native Zähler haben die Task-/Runden-Identitätsprüfung nicht bestanden. Die Nutzung bleibt unbekannt; Zähler eines anderen Tasks werden nicht als Ersatz verwendet."
 }

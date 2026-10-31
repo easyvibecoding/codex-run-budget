@@ -22,6 +22,10 @@ MAX_TASKS = 100
 MAX_DEPTH = 12
 
 
+class CatalogUnavailable(ValueError):
+    """Native metadata cannot be opened; distinct from an unresolved selector."""
+
+
 def _uuid(value):
     try:
         parsed = str(uuid.UUID(value))
@@ -50,7 +54,7 @@ class TaskCatalog:
         # Exact current schema file only: never select a similarly named backup.
         path = home / "state_5.sqlite"
         if home.is_symlink() or path.is_symlink() or not path.is_file():
-            raise ValueError("native Task catalog unavailable")
+            raise CatalogUnavailable("native Task catalog unavailable")
         self.connection = sqlite3.connect(
             "file:" + quote(str(path.absolute())) + "?mode=ro", uri=True, timeout=0.1
         )
@@ -138,6 +142,20 @@ class TaskCatalog:
         rows = self._rows("1", (), f"ORDER BY updated_at DESC, id LIMIT {limit + 1}")
         self.limited = len(rows) > limit
         return rows[:limit]
+
+    def source_path(self, identifier):
+        """One exact native source hint, kept in memory and verified by its reader."""
+        if _uuid(identifier) is None:
+            return None
+        try:
+            rows = self.connection.execute(
+                "SELECT substr(rollout_path,1,4097) FROM threads WHERE id=? LIMIT 2",
+                (identifier,),
+            ).fetchall()
+        except sqlite3.Error:
+            return None
+        value = rows[0][0] if len(rows) == 1 else None
+        return value if isinstance(value, str) and 0 < len(value) <= 4096 else None
 
     def family(self, root, limit=50):
         if not 1 <= limit <= MAX_TASKS:

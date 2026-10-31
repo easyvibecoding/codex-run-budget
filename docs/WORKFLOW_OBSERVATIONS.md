@@ -26,7 +26,7 @@ approvals remain explicit. Continuous observation still requires separate intent
 
 Bare `workflow` is a no-I/O menu. `workflow observe` uses the current Task unless
 explicit `--thread` UUIDs or listed hash selectors are supplied. Missing identity
-fails, never falls back to all Tasks. Up to 8 explicit roots and 32 total Tasks
+fails, never falls back to all Tasks. Up to 32 explicit roots and 32 total Tasks
 are supported, with a default cap of 8. Descendants require `--include-agents`.
 Overlapping roots/descendants deduplicate. Every explicitly selected root is
 retained; breadth-first descendant selection is bounded and can omit newer or
@@ -37,7 +37,10 @@ rollout paths. The reader validates each transcript's header identity. It reads
 at most a 128 KiB header, a 256 KiB tail and small continuity anchors, rejecting
 symlink/nonregular sources. There is no recursive transcript discovery or full
 history audit. Unchanged files reuse the previous sanitized observation after
-identity, size, mtime and boundary-anchor checks.
+identity, size, mtime and boundary-anchor checks. Small verified appends read from
+the previous complete-record position, including an unfinished trailing record
+only after its newline arrives. An append outside the bound returns to the
+bounded tail with an explicit gap; it cannot manufacture comparable usage.
 
 Raw paths and IDs stay in memory. Only allowlisted native display metadata,
 hashed identities, lifecycle kinds, counters and coverage enter the private
@@ -66,6 +69,45 @@ Unobserved tasks are not zero. Comparable-task counts accompany totals; never
 sum a partial cohort as complete workflow usage or allocate account quota.
 These are observed boundary counter differences, not final billing.
 
+## Cross-Task failure detection and response
+
+Canonical native completed command and MCP items require explicit Task, turn and
+call identity. Outcomes use structured exit/error metadata; opaque code-mode text,
+unsupported items and absent flags remain unknown. Inputs, outputs and error lines
+are hashed/folded in memory; only fixed classes, hashes and counts are retained.
+A 64-item replay cache and 16 unresolved-operation entries per Task bound evidence.
+Contradictory duplicates, undated/older success, gaps and unrelated passing checks
+cannot silently resolve failures. A later matching successful operation may
+resolve its still-bound failure evidence. Explicit observer commands are excluded
+so an observer's failed read cannot create a business-workflow failure loop.
+
+`tool_failure_observed` is evidence of an unresolved tool outcome, not proof the
+workflow failed: nonzero exits may be intentional. Three matching failures yield
+`repeated_tool_failure`. Matching unresolved diagnostic signatures in at least
+two selected Tasks yield `cross_task_failure`, without inferring common causality,
+shared ownership or duplicate work. `response_plan` provides fixed read-only
+diagnostic steps; compact output emits only newly changed advice. Responses never
+execute tools, retry business work, message Tasks or change their settings.
+
+A disappearing explicit UUID stays in the same scope as unavailable; other roots
+continue. Unresolved prior signals become `unconfirmed_signals` when peers or
+source evidence disappear, rather than being falsely cleared. Per-Task signal
+history is capped at 64 with sticky `signals_limited` coverage when exceeded.
+A missing hash selector cannot bind a replacement Task.
+
+After three failed source reads, per-cursor `observation_health` backs off for
+30 seconds, doubling to a 300-second cap. Calls before `next_probe_at` skip that
+source while healthy peers continue. One explicit `--probe` can bypass the wait;
+an exact changed catalog hint permits an immediate check. This is per-consumer
+state, not a global lease, daemon or automatic wake. Repair restores observability,
+not missing historical counters or workflow acceptance.
+
+JSON errors return exit 2 with `status=observation_failed`, a fixed `code`,
+`retryable`, and `scope_preserved`. Catalog/store failures remain distinct from
+invalid/expired/mismatched cursors and backward clocks. Raw errors and private
+arguments are never echoed. Recovery must preserve the selected scope; a fresh
+baseline is an explicit, disclosed action.
+
 ## Live state and acceptance are different evidence
 
 The last `task_started`, `task_complete` or `turn_aborted` record is an observed
@@ -75,9 +117,14 @@ automatic stall verdict. Explicitly unknown state is expected.
 
 `workflow targets` returns parameters for native `wait_threads` without reading
 transcripts. It excludes the calling Task (native waits reject self-waits) and
-restricts each batch to 8 local targets. Use native `timeoutMs: 0` for a requested
+restricts each batch to 8 local targets. Larger cohorts use `--batch 0`, `--batch 1`
+and so on, following `batch_count`. Self-exclusion happens before partitioning;
+batch names match the returned targets. Missing local catalog identities are
+listed as unavailable selectors and never remapped to a local host. Use native
+`timeoutMs: 0` for a requested
 snapshot; use native event waits with `afterCursor` for continued waits in an
-active turn. A native wait cursor is not a workflow observation cursor.
+active turn. Keep one native cursor per batch; a native wait cursor is not a
+workflow observation cursor.
 `notLoaded` is not a failure; the latest native turn may separately be completed.
 Read one bounded turn only when an actionable change needs explanation.
 

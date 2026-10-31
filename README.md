@@ -44,6 +44,10 @@ run-budget:off
 
 Automatic usage cards are enabled by default even when no budget is active. An eligible subagent can show its own card on its page; the parent card keeps a separate observed descendant subtotal. A matching hashed `@selector` identifies the child in both views. The child's card names its direct parent and distinguishes its own usage from descendants; conflicting lineage stays unverified. [Turn receipts](docs/AUTO_REPORTS.md).
 
+Version 0.20 distinguishes counter identity conflicts from resets, stops repeated checks of witnessed conflicts, and verifies exact catalog sources after archive moves. Unresolved usage stays unknown. [Unknown usage recovery](docs/AUTO_REPORTS.md#unknown-usage-diagnostics-and-source-recovery-020).
+
+Workflow observation supports up to 32 selected Tasks across projects, incremental append reads, source backoff and matching failure signatures across Tasks. Its response plans guide diagnostics while preserving unknown outcomes and workflow ownership. [Workflow observation](docs/WORKFLOW_OBSERVATIONS.md).
+
 An inherited parent visualization directory is automatically relocated to the subagent's own directory. If the sandbox denies that write, the same snapshot can use the child's workspace at `work/codex-usage-cards`. Existing cards stay unchanged; start a new Task to load the updated runtime.
 
 ## Capabilities
@@ -55,6 +59,7 @@ An inherited parent visualization directory is automatically relocated to the su
 | Scoped Task reports | Selects one Task, its agent tree, or explicit time windows; shows observed tokens, historical settings, cache-read share, and setting-change signals. | A cross-Task window requires explicit scope; reports do not start a budget. |
 | Native meter | Reads account quota and saved snapshots, local Task configuration history, dated rates, and Standard/Fast credit scenarios. | Account percentages and estimated credits are not Task charges or actual billing. |
 | Diagnostics | Audits exact local transcripts, surveys a bounded recent cohort, and captures explicit workflow observations with cursors. | Observation does not imply a live process, completed work, or recurring monitoring. |
+| Codex optimization | Warns about recurring failures across changed calls, learns project-local check baselines, and reports capability observations and fixed environment advice. An explicit local probe compares rendered input and available tool schemas. | Advisory only; opaque wrappers and missing outcomes remain unknown. No model judge or automatic configuration edits. |
 | Project exec activity | Lists or watches extra `codex exec` sessions for one working directory; an optional launcher records ephemeral invocation receipts. | Exec invocation usage is separate from native child lineage and the shared budget ledger. |
 | Experimental paired project reviews | Users register named pairs of exact Codex project roots. A trusted `Stop` hook can open one review Task in the other project and bind the two Tasks for later summary relay. One project may belong to several pairs. | Global and per-pair switches control the feature. No timed polling; remote-only changes need a later paired Task or manual scan. |
 | Signed runtime updates | Activates compatible publisher-signed runtime and CLI changes for new Tasks while existing Tasks keep their pinned version. | New hook, entry, key, or plugin structure still needs normal installation and trust review. |
@@ -117,6 +122,24 @@ python3 plugins/codex-run-budget/scripts/run_budget.py meter estimate --days 1
 
 ### Investigate activity
 
+Codex optimization observes supported local hooks without starting a budget:
+
+```sh
+python3 plugins/codex-run-budget/scripts/run_budget.py optimizer report --project "$PWD"
+python3 plugins/codex-run-budget/scripts/run_budget.py optimizer report --project "$PWD" --channel exec
+python3 plugins/codex-run-budget/scripts/run_budget.py optimizer measure --project "$PWD" --capability collaboration
+python3 plugins/codex-run-budget/scripts/run_budget.py optimizer disable
+```
+
+Progress advisories have a per-turn cooldown and do not stop Tasks. Capability
+reviews show observed attempts, not proof that an absent capability was unused.
+The explicit probe uses temporary command-line overrides for two local Codex
+input renders; it does not edit project settings or call a model. Bytes are not
+tokens or billed savings. [Optimization scope, controls and privacy](docs/OPTIMIZATION.md).
+The explicit `exec-activity run` launcher also observes real Codex command events
+inside code-mode runs and emits advisories to stderr; its stream and native hook
+observations are kept separate.
+
 ```sh
 python3 plugins/codex-run-budget/scripts/run_budget.py survey
 python3 plugins/codex-run-budget/scripts/run_budget.py audit /path/to/synthetic-rollout.jsonl
@@ -161,5 +184,11 @@ State defaults to `~/.codex/run-budget/`; set `CODEX_RUN_BUDGET_HOME` to use ano
 ## Documentation
 
 The [documentation index](docs/README.md) groups usage guides, measurement semantics, update and trust controls, architecture, and dated validation. [Contributing](CONTRIBUTING.md) covers checks and synthetic fixtures. [Changelog](CHANGELOG.md) records versions.
+
+Manifest changes also require OpenAI's Plugin Creator `validate_plugin.py` and
+its sibling `identifier_validation.py`, from
+[`codex-rs/skills/src/assets/samples/plugin-creator/scripts`](https://github.com/openai/codex/tree/84aa75204ad604bcf498df180d128181c89b2f0b/codex-rs/skills/src/assets/samples/plugin-creator/scripts).
+Keep both in an external validation directory, use an existing Python with
+PyYAML, and run `python3 /path/to/validator/validate_plugin.py plugins/codex-run-budget`.
 
 MIT © EasyVibeCoding contributors. [Prior art and attribution](NOTICE.md) · [Third-party notices](THIRD_PARTY_NOTICES.md).

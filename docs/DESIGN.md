@@ -86,6 +86,13 @@ pre-model hook for every request.
 
 No model participates in policy decisions.
 
+After budget evaluation, an independent Codex optimizer may append an advisory
+to an admitted event. Denials and HALT are never replaced. Its transactions and
+sanitized evidence live in `OptimizationLedger`, in a separate `optimizer.sqlite3`
+schema; it cannot create a budget or modify counters in the run ledger. It calls
+no model, and failures in this optional observation layer leave budget decisions
+unchanged. [Observation interface and limitations](OPTIMIZATION.md).
+
 ## Consistency
 
 SQLite uses WAL, a busy timeout, foreign keys, and `BEGIN IMMEDIATE` for every

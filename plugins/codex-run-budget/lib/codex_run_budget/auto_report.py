@@ -26,6 +26,17 @@ SCAN_BYTES = 8 * 1024 * 1024
 MAX_ROWS = 10_000
 START_EVENTS = {"UserPromptSubmit", "PreToolUse", "PostToolUse", "SubagentStart"}
 EVENTS = START_EVENTS | {"Stop", "Interrupt", "SessionEnd", "SubagentStop"}
+IDENTITY_ISSUES = frozenset({
+    "thread_identity_conflict", "turn_identity_conflict", "session_identity_conflict",
+    "root_turn_identity_conflict",
+})
+COUNTER_ISSUES = IDENTITY_ISSUES | {
+    "response_identity_unavailable", "counter_values_invalid", "counter_scopes_inconsistent",
+}
+SOURCE_STATUSES = frozenset({
+    "observed", "unavailable", "source_unavailable", "path_unavailable", "file_missing",
+    "subagent", "task_identity_conflict", "catalog_source_changed",
+})
 
 
 def _pending(key: str, locale="zh-Hant") -> str:
@@ -188,29 +199,37 @@ def _request_thread_counter(
     A request record can precede the post-tool token_count event. Its own
     usage is not a thread total; require explicit, consistent native scopes.
     """
-    if payload.get("thread_id") != task or payload.get("turn_id") != turn:
-        return None
+    return _request_counter(payload, task, turn, root_hash=root_hash)[0]
+
+
+def _request_counter(payload: dict, task: str, turn: str, *, root_hash=None) -> tuple:
+    """One scope check for both counters and content-free failure diagnostics."""
+    if payload.get("thread_id") != task:
+        return None, "thread_identity_conflict"
+    if payload.get("turn_id") != turn:
+        return None, "turn_identity_conflict"
     if root_hash is None:
-        if (payload.get("session_id", task) != task
-                or payload.get("root_turn_id", turn) != turn):
-            return None
+        if payload.get("session_id", task) != task:
+            return None, "session_identity_conflict"
+        if payload.get("root_turn_id", turn) != turn:
+            return None, "root_turn_identity_conflict"
     elif (not isinstance(payload.get("session_id"), str)
           or stable_hash(payload["session_id"]) != root_hash
           or not isinstance(payload.get("root_turn_id"), str)
           or not 0 < len(payload["root_turn_id"]) <= 256):
-        return None
+        return None, "session_identity_conflict"
     response = payload.get("response_id")
     if not isinstance(response, str) or not 0 < len(response) <= 512:
-        return None
+        return None, "response_identity_unavailable"
     values = [request_usage(payload.get(key)) for key in
               ("usage", "turn_token_usage", "thread_token_usage")]
     if any(value is None or any(n > 2**63 - 1 for n in value.values()) for value in values):
-        return None
+        return None, "counter_values_invalid"
     if any(any(left[key] > right[key] for key in left)
            for left, right in zip(values, values[1:])):
-        return None
+        return None, "counter_scopes_inconsistent"
     return {key: values[-1][key + "_tokens"] for key in
-            ("total", "input", "cached_input", "output", "reasoning_output")}
+            ("total", "input", "cached_input", "output", "reasoning_output")}, None
 
 
 def _setting_values(payload: dict) -> dict:
@@ -450,7 +469,10 @@ def _completion_prefix(lines: list[tuple[bytes, int]], task: str, turn: str,
                 or (root_hash is not None and "session_id" in payload
                     and (not isinstance(payload["session_id"], str)
                          or stable_hash(payload["session_id"]) != root_hash))):
-            return unavailable("completion_identity_ambiguous")
+            issue = ("thread_identity_conflict" if payload.get("thread_id", task) != task
+                     else "session_identity_conflict")
+            return unavailable("completion_identity_ambiguous", **(
+                {"counter_issues": [issue]} if active == turn else {}))
         is_context = kind == "turn_context" or kind == "event_msg" and event == "turn_context"
         is_start = kind == "event_msg" and event == "task_started"
         if is_context or is_start:
@@ -470,7 +492,8 @@ def _completion_prefix(lines: list[tuple[bytes, int]], task: str, turn: str,
                 if not target_seen or active != turn:
                     return unavailable("completion_start_unobserved")
                 if root_hash is None and payload.get("root_turn_id", turn) != turn:
-                    return unavailable("completion_identity_ambiguous")
+                    return unavailable("completion_identity_ambiguous",
+                                       counter_issues=["root_turn_identity_conflict"])
                 evidence = {"completion_observed": True, "completion_status": "observed",
                             "completion_end": line_end}
                 stamp = record.get("timestamp")
@@ -490,7 +513,9 @@ def _completion_prefix(lines: list[tuple[bytes, int]], task: str, turn: str,
         if active == turn and (payload.get("turn_id", turn) != turn
                                or root_hash is None
                                and payload.get("root_turn_id", turn) != turn):
-            return unavailable("completion_identity_ambiguous")
+            issue = ("turn_identity_conflict" if payload.get("turn_id", turn) != turn
+                     else "root_turn_identity_conflict")
+            return unavailable("completion_identity_ambiguous", counter_issues=[issue])
     return unavailable("completion_not_observed")
 
 
@@ -498,7 +523,10 @@ def snapshot(path_value: Any, turn_id: str, *, at_turn_start: bool = False,
              completed_only: bool = False, allow_subagent: bool = False,
              root_hash: str | None = None) -> dict[str, Any]:
     """Only header identity and a bounded tail are read; no text is persisted."""
-    unavailable: dict[str, Any] = {"status": "unavailable", "usage": None, "contexts": []}
+    unavailable: dict[str, Any] = {
+        "status": "unavailable", "usage": None, "contexts": [],
+        "source_status": "source_unavailable",
+    }
     if allow_subagent and (
         not isinstance(root_hash, str)
         or re.fullmatch(r"[0-9a-f]{64}", root_hash) is None
@@ -509,7 +537,9 @@ def snapshot(path_value: Any, turn_id: str, *, at_turn_start: bool = False,
         if at_turn_start:
             return {**unavailable, "completion_status": "conflicting_snapshot_modes"}
     result = dict(unavailable)
-    if not isinstance(path_value, str) or not path_value:
+    if path_value is None or path_value == "":
+        return {**result, "source_status": "path_unavailable"}
+    if not isinstance(path_value, str):
         return result
     path = Path(path_value)
     try:
@@ -549,6 +579,7 @@ def snapshot(path_value: Any, turn_id: str, *, at_turn_start: bool = False,
                 return result
         result.update(
             status="observed",
+            source_status="observed",
             task_hash=stable_hash(identity),
             source_hash=stable_hash(str(path.absolute())),
             device=info.st_dev,
@@ -601,6 +632,7 @@ def snapshot(path_value: Any, turn_id: str, *, at_turn_start: bool = False,
         turn_usage_seen = False
         later_turn_usage = None
         turn_counter_invalid = False
+        counter_issues = set()
         records = []
         seeking_start = at_turn_start
         for line, line_end in reversed(lines):
@@ -648,10 +680,12 @@ def snapshot(path_value: Any, turn_id: str, *, at_turn_start: bool = False,
                 source = "token_count"
             if (record.get("type") == "token_usage_record" and payload.get("turn_id") == turn_id
                     and "thread_token_usage" in payload):
-                cumulative = _request_thread_counter(
+                cumulative, issue = _request_counter(
                     payload, identity, turn_id,
                     root_hash=root_hash if allow_subagent else None,
                 )
+                if issue:
+                    counter_issues.add(issue)
                 counter = cumulative
                 source = "native_request"
                 if not turn_usage_seen:
@@ -686,6 +720,8 @@ def snapshot(path_value: Any, turn_id: str, *, at_turn_start: bool = False,
                 result["counter_reset_end"] = lane["counter_reset_end"]
         if turn_counter_invalid:
             result["turn_counter_invalid"] = True
+        if counter_issues:
+            result["counter_issues"] = sorted(counter_issues)
         if turn_counter_invalid or result.get("invalid_records"):
             result.pop("turn_usage", None)
         result["contexts"], result["contexts_limited"] = _turn_contexts(
@@ -702,20 +738,106 @@ def snapshot(path_value: Any, turn_id: str, *, at_turn_start: bool = False,
             )
         result.update(first_turn_only=first, fresh_turn_start=fresh)
         return result
+    except FileNotFoundError:
+        return {**unavailable, "source_status": "file_missing"}
     except (OSError, ValueError, TypeError, AttributeError, RecursionError,
             KeyError, OverflowError):
         return unavailable
 
 
+def _snapshot_for_task(path, turn, task, *, baseline=None, home=None,
+                       snapshot_fn=None, **options) -> dict:
+    """Recover an exact catalog source; a move must retain the Start file identity.
+
+    An existing foreign, malformed or unsafe source is never replaced. There is
+    no directory search, app-server call, copied baseline or persisted raw path.
+    """
+    observe = snapshot_fn or snapshot
+    observed = observe(path, turn, **options)
+    missing = observed.get("source_status") in {"path_unavailable", "file_missing"}
+    moved = (baseline is not None and observed.get("source_hash") is not None
+             and baseline.get("source_hash") != observed["source_hash"])
+    if not missing and not moved:
+        return observed
+    if _uuid(task) is None:
+        return observed
+    if observed.get("task_hash") not in (None, stable_hash(task)):
+        return observed
+    try:
+        with TaskCatalog(home) as catalog:
+            candidate = catalog.source_path(task)
+        if not candidate:
+            return observed
+        candidate_path = Path(candidate)
+        if not candidate_path.is_absolute() or any(
+            parent.is_symlink() for parent in (candidate_path, *candidate_path.parents)
+        ):
+            return observed
+        if missing:
+            if candidate == path:
+                return observed
+            recovered = observe(candidate, turn, **options)
+        elif stable_hash(str(candidate_path.absolute())) == observed.get("source_hash"):
+            recovered = observed
+        else:
+            return observed
+        if recovered.get("task_hash") != stable_hash(task):
+            return observed
+        if baseline is not None:
+            if (type(baseline.get("inode")) is not int or baseline["inode"] <= 0
+                    or any(baseline.get(k) != recovered.get(k)
+                    for k in ("task_hash", "device", "inode"))
+                    or recovered.get("size", -1) < baseline.get("size", 0)):
+                return {**observed, "source_status": "catalog_source_changed"}
+            previous = baseline.get("source_hash")
+            if (isinstance(previous, str) and re.fullmatch(r"[0-9a-f]{64}", previous)
+                    and previous != recovered.get("source_hash")):
+                recovered["source_relocated_from_hash"] = previous
+        recovered["source_resolution"] = "exact_catalog"
+        return recovered
+    except (OSError, sqlite3.Error, TypeError, ValueError):
+        return observed
+
+
+def _counter_issues(observed: dict) -> list[str]:
+    values = observed.get("counter_issues")
+    if not isinstance(values, list):
+        return []
+    return sorted({v for v in values if isinstance(v, str) and v in COUNTER_ISSUES})
+
+
+def _source_status(value: dict) -> str:
+    status = value.get("source_status", value.get("status"))
+    return status if isinstance(status, str) and status in SOURCE_STATUSES else "unavailable"
+
+
+def _usage_diagnostics(before: dict, after: dict) -> dict:
+    return {"counter_issues": _counter_issues(after), "source_observations": {
+        "start": _source_status(before), "stop": _source_status(after),
+        "exact_catalog": after.get("source_resolution") == "exact_catalog",
+        "relocated": bool(before.get("source_hash"))
+        and after.get("source_relocated_from_hash") == before["source_hash"],
+    }}
+
+
 def _delta(before: dict[str, Any], after: dict[str, Any]) -> tuple[dict[str, int] | None, str]:
-    if before.get("status") != "observed" or after.get("status") != "observed":
+    issues = _counter_issues(after)
+    if (before.get("status") != "observed"
+            or after.get("status") != "observed" and not set(issues) & IDENTITY_ISSUES):
         return None, "snapshot_unavailable"
-    if any(before.get(k) != after.get(k) for k in ("task_hash", "source_hash", "device", "inode")):
+    relocated = (isinstance(before.get("source_hash"), str)
+                 and re.fullmatch(r"[0-9a-f]{64}", before["source_hash"]) is not None
+                 and type(before.get("inode")) is int and before["inode"] > 0
+                 and after.get("source_relocated_from_hash") == before["source_hash"])
+    if (any(before.get(k) != after.get(k) for k in ("task_hash", "device", "inode"))
+            or before.get("source_hash") != after.get("source_hash") and not relocated):
         return None, "source_changed"
     if after["size"] < before["size"]:
         return None, "source_truncated"
     if after.get("invalid_records"):
         return None, "snapshot_incomplete"
+    if set(issues) & IDENTITY_ISSUES:
+        return None, "counter_identity_conflict"
     if after.get("counter_reset_end", 0) > before["size"]:
         return None, "counter_reset_or_inconsistent"
     if after.get("turn_counter_invalid"):
@@ -843,6 +965,8 @@ def _documents(receipt: dict[str, Any]) -> tuple[str, str]:
     if child_scope:
         notes[1] = text("child_note_usage")
     notes.append(text("note_reconcile"))
+    if receipt.get("usage_status") == "counter_identity_conflict":
+        notes.append(text("note_identity_conflict"))
     contexts = receipt["stop_contexts"]
     context_lines = []
     for context in contexts:
@@ -1077,8 +1201,8 @@ def handle(
                     if connection.execute("SELECT 1 FROM turns WHERE key=?", (key,)).fetchone():
                         return None
                 recovery = event not in ("UserPromptSubmit", "SubagentStart")
-                observed = snapshot(
-                    source_path, turn, at_turn_start=recovery,
+                observed = _snapshot_for_task(
+                    source_path, turn, session, home=home, at_turn_start=recovery,
                     allow_subagent=bool(child),
                     root_hash=child["root_hash"] if child else None,
                 )
@@ -1099,7 +1223,11 @@ def handle(
                 if observed.get("task_hash") != stable_hash(session):
                     # The hook selects the Task. A foreign transcript cannot
                     # seed counters, contexts, or identity in its private state.
-                    observed = {"status": "source_unavailable", "usage": None, "contexts": []}
+                    observed = {
+                        "status": "source_unavailable", "usage": None, "contexts": [],
+                        "source_status": ("task_identity_conflict" if observed.get("task_hash")
+                                          else _source_status(observed)),
+                    }
                 observed["start_event"] = event
                 if child:
                     # Bind this baseline to the original shared root. The direct
@@ -1174,8 +1302,9 @@ def handle(
                 root_hash=child["root_hash"] if child else None,
                 parent_hash=child["parent_hash"] if child else None,
             )
-            stopped = (snapshot(
-                source_path, turn, allow_subagent=bool(child),
+            stopped = (_snapshot_for_task(
+                source_path, turn, session, baseline=started, home=home,
+                allow_subagent=bool(child),
                 root_hash=child["root_hash"] if child else None,
             ) if baseline_verified else
                 {"status": "source_unavailable", "usage": None, "contexts": []})
@@ -1217,6 +1346,7 @@ def handle(
                 "task_usage": stopped.get("usage") if source_verified else None,
                 "counter_source": stopped.get("counter_source") if source_verified else None,
                 "usage_status": status,
+                **_usage_diagnostics(started, stopped),
                 "start_model": started.get("hook_model") if source_verified else None,
                 "stop_model": _model(payload.get("model")) if source_verified else None,
                 "stop_contexts": stopped["contexts"] if source_verified else [],

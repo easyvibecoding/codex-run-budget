@@ -115,5 +115,7 @@
   "reconcile_partial": "Conclusão observada; evidências parciais",
   "note_completion": "O uso do agente principal termina no evento explícito de conclusão do turno selecionado. O uso dos subagentes mantém a janela original do início até Stop; os turnos seguintes são excluídos. Isso não comprova que todo o Task foi concluído.",
   "child_note_completion": "O uso deste subagente termina em um evento explícito de conclusão do seu turno. Os descendentes mantêm a janela original do início até Stop; isso não comprova a conclusão de todo o Task.",
-  "note_reconcile": "Uma verificação limitada em segundo plano pode publicar uma revisão após Stop ao confirmar a conclusão do turno, sem chamar nenhum modelo. Sem evidência de conclusão, o snapshot de Stop permanece provisório. Os cartões integrados mantêm seu snapshot original; reabrir o Task não garante sua atualização."
+  "note_reconcile": "Uma verificação limitada em segundo plano pode publicar uma revisão após Stop ao confirmar a conclusão do turno, sem chamar nenhum modelo. Sem evidência de conclusão, o snapshot de Stop permanece provisório. Os cartões integrados mantêm seu snapshot original; reabrir o Task não garante sua atualização.",
+  "reconcile_identity_conflict": "Verificação interrompida: conflito de identidade",
+  "note_identity_conflict": "Os contadores nativos não passaram na verificação de identidade do Task e do turno. O uso permanece desconhecido; não é substituído por contadores de outro Task."
 }

@@ -109,5 +109,17 @@
   "cli_current_not_configured": "Aucun Run Budget n’est configuré pour cette session.",
   "cli_current_prefix": "Session actuelle : ",
   "cli_global_latest_prefix": "Dernier run parmi toutes les Tasks : ",
-  "cli_global_scope_error": "run-budget : cette sélection couvre toutes les Tasks ; ajoutez --all-tasks ou utilisez show current/un ID de run exact"
+  "cli_global_scope_error": "run-budget : cette sélection couvre toutes les Tasks ; ajoutez --all-tasks ou utilisez show current/un ID de run exact",
+  "workflow_tool_failure_observed": "Erreur native non résolue observée",
+  "workflow_repeated_tool_failure": "Échec répété d’un outil natif",
+  "workflow_cross_task_failure": "Signatures d’échec communes à plusieurs Tasks",
+  "workflow_observation_backoff": "Observation de la source en attente",
+  "workflow_observation_coverage_gap": "Lacune dans les preuves ajoutées",
+  "workflow_tool_evidence_incomplete": "Preuves des outils incomplètes",
+  "workflow_unconfirmed_note": "La résolution de certains signaux reste inconnue ; l’absence de preuves ne signifie pas une reprise.",
+  "workflow_response_heading": "Réponses proposées",
+  "workflow_action_retry_observation_after": "Réessayer l’observation après next_probe_at ; ne pas relancer le workflow",
+  "workflow_action_verify_exact_native_source": "Vérifier le Task exact et sa source native",
+  "workflow_action_inspect_native_tool_failure": "Examiner l’erreur native bornée et le résultat attendu",
+  "workflow_action_inspect_shared_dependency": "Examiner une dépendance commune ; des signatures identiques ne prouvent pas une cause commune"
 }

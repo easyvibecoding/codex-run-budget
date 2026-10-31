@@ -115,5 +115,7 @@
   "reconcile_partial": "已觀測回合完成；資料仍不完整",
   "note_completion": "主代理用量截止於指定回合的明確完成事件；子代理保留原本開始至 Stop 的時間範圍，排除後續回合。這不代表整個 Task 已完成。",
   "child_note_completion": "此子代理用量截止於指定回合的明確完成事件；後代保留原本開始至 Stop 的時間範圍。這不代表整個 Task 已完成。",
-  "note_reconcile": "Stop 後會以有界背景核對產生結算版，不呼叫模型。缺少完成證據時保留暫定快照。內嵌卡片保留原始快照，重進 Task 不保證刷新。"
+  "note_reconcile": "Stop 後會以有界背景核對產生結算版，不呼叫模型。缺少完成證據時保留暫定快照。內嵌卡片保留原始快照，重進 Task 不保證刷新。",
+  "reconcile_identity_conflict": "核對停止：計量歸屬衝突",
+  "note_identity_conflict": "原生計量未通過 Task／回合歸屬檢查。用量保留未知，不以其他 Task 的計數替代。"
 }

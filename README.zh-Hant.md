@@ -10,6 +10,8 @@ Codex Run Budget 是在本機運作的 Codex 外掛，讓**一個父 Task 與其
 
 本專案是獨立社群作品，受到 [Microsoft TokenOps](https://commandline.microsoft.com/tokenops-real-time-run-scoped-cost-control-ai-agents/) 執行範圍治理概念啟發。它不是 OpenAI 或 Microsoft 產品，也不是計費儀表或零超額保證。執行時只需 Python 3.10+ 與標準函式庫。
 
+Codex 專用優化觀察會偵測跨指令的重複失敗、依專案累積成功檢查的基準，並提供能力使用與固定模板的環境建議。執行 `optimizer report --project "$PWD"` 檢視；`optimizer measure --project "$PWD" --capability collaboration` 可量測本機輸入預覽的 bytes 差異。感測健康、缺漏原因、故障退避、重入及自我觀測隔離會防止錯誤訊號反覆放大；缺漏不會因稍後讀取成功而自動補成完整。提醒不會停止 Task，也不會自動修改工具設定；不透明包裝與缺少的結果維持未知。[範圍、控制與隱私](docs/OPTIMIZATION.md)。
+
 [快速開始](#快速開始) · [功能](#功能) · [依任務選擇指令](#依任務選擇指令) · [執行與限制](#執行與限制) · [文件](#文件)
 
 ## 快速開始
@@ -43,6 +45,10 @@ run-budget:off
 `resume tokens=` 設定新的絕對上限，且必須高於已觀測用量。訊息後段引用的控制行不會啟動指令。[控制語法、政策順序與狀態](docs/DESIGN.md) · [檢查預算執行紀錄](#檢查預算執行紀錄)。
 
 即使沒有啟動預算，自動用量卡預設仍會顯示。符合條件的子代理可在自己的頁面顯示用量卡；父 Task 的卡片則另列已觀測的後代用量小計。兩處以相同的雜湊 `@selector` 對應該子代理。子代理卡片會標出直接親代，分別標示自身與後代用量；親代關係衝突時保留未確認狀態。[回合紀錄](docs/AUTO_REPORTS.md)。
+
+0.20 版會區分計量歸屬衝突與計數倒退，停止對已確認衝突反覆補查，並以精確 catalog 與原檔身分驗證歸檔搬移。無法歸屬的用量仍保留未知。[未知計量處理](docs/AUTO_REPORTS.md#unknown-usage-diagnostics-and-source-recovery-020)。
+
+工作流程觀測可涵蓋跨專案的最多 32 個指定 Task，增量讀取追加紀錄，對失效來源退避，並偵測跨 Task 的相同失敗特徵。應對建議保留未知結果與原工作歸屬。[工作流程觀測](docs/WORKFLOW_OBSERVATIONS.md)。
 
 子代理沿用父 Task 的預覽目錄時，程式會自動改存子代理自己的目錄。若沙盒拒絕該次寫入，同一張快照可改存子代理工作目錄下的 `work/codex-usage-cards`。既有卡片保持原樣；新版 runtime 由新 Task 載入。
 

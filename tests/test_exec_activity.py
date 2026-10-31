@@ -9,7 +9,10 @@ import sys
 import tempfile
 import time
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -228,6 +231,7 @@ class ExecActivityTest(unittest.TestCase):
         fake.write_text("#!" + sys.executable + "\nimport json,sys\n"
                         "assert sys.argv[1:3] == ['exec','--json']\n"
                         "print(json.dumps({'type':'thread.started','thread_id':'" + OTHER + "'}))\n"
+                        "print(json.dumps({'type':'turn.started'}))\n"
                         "print(json.dumps({'type':'turn.completed','usage':"
                         "{'input_tokens':30,'cached_input_tokens':10,'output_tokens':5}}))\n"
                         "sys.exit(7)\n")
@@ -252,6 +256,118 @@ class ExecActivityTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(b"example output", result.stdout)
         self.assertIn(b"recording_unavailable", result.stderr)
+
+    def test_launcher_observes_executed_failures_without_changing_stdout_or_exit(self):
+        from codex_run_budget.optimization_cli import report
+
+        rows = [{"type": "thread.started", "thread_id": OTHER}, {"type": "turn.started"}]
+        rows += [{"type": "item.completed", "item": {
+            "id": f"synthetic-item-{index}", "type": "command_execution", "exit_code": 1,
+            "command": f"python3 -m unittest synthetic_case{index}",
+            "aggregated_output": "AssertionError: synthetic failure"}} for index in range(8)]
+        rows += [{"type": "turn.completed", "usage": {
+            "input_tokens": 30, "cached_input_tokens": 10, "output_tokens": 5}}]
+        expected = "".join(json.dumps(row) + "\n" for row in rows)
+        fake = self.root / "synthetic-codex"
+        fake.write_text("#!" + sys.executable + "\nimport sys\nsys.stdout.write(" +
+                        repr(expected) + ")\nsys.exit(7)\n")
+        fake.chmod(0o700)
+        result = self.invoke("run", "--codex-binary", str(fake), "--", "synthetic work")
+        self.assertEqual(result.returncode, 7)
+        self.assertEqual(result.stdout.decode(), expected)
+        self.assertIn(b'"optimizer": "advisory"', result.stderr)
+        self.assertEqual(report(self.data, self.project, "exec")["advisories"], 1)
+        self.assertEqual(report(self.data, self.project)["observed_completed_calls"], 0)
+        self.assertNotIn(b"synthetic_case", (self.data / "optimizer.sqlite3").read_bytes())
+
+    def stream(self, rows, *, suffix=b"", final_newline=True):
+        raw = b"\n".join(json.dumps(row).encode() for row in rows)
+        if final_newline:
+            raw += b"\n"
+        raw += suffix
+        fake = self.root / "synthetic-stream"
+        fake.write_text("#!" + sys.executable + "\nimport sys\nsys.stdout.buffer.write(" +
+                        repr(raw) + ")\nsys.exit(7)\n")
+        fake.chmod(0o700)
+        result = self.invoke("run", "--codex-binary", str(fake), "--", "synthetic work")
+        self.assertEqual(result.returncode, 7)
+        self.assertEqual(result.stdout, raw)
+        from codex_run_budget.optimization_cli import report
+
+        return report(self.data, self.project, "exec")
+
+    def good_stream(self):
+        return [{"type": "thread.started", "thread_id": OTHER}, {"type": "turn.started"},
+                {"type": "item.completed", "item": {"id": "synthetic-check",
+                 "type": "command_execution", "exit_code": 0,
+                 "command": "python3 -m unittest", "aggregated_output": "OK"}},
+                {"type": "turn.completed", "usage": {
+                    "input_tokens": 30, "cached_input_tokens": 10, "output_tokens": 5}}]
+
+    def test_final_complete_json_without_newline_is_not_a_gap(self):
+        value = self.stream(self.good_stream(), final_newline=False)
+        self.assertEqual(value["baselines"]["exec"]["samples"], 1)
+        self.assertEqual(value["limited_turns"], 0)
+        row = next(x for x in self.scan()["activities"] if x["task_hash"] == stable_hash(OTHER))
+        self.assertEqual(row["usage"]["total"], 35)
+
+    def test_oversized_unterminated_tail_invalidates_preceding_completion_sample(self):
+        value = self.stream(self.good_stream(), suffix=b"x" * (300 * 1024))
+        self.assertEqual(value["baselines"]["exec"]["samples"], 0)
+        self.assertEqual(value["coverage_issues"], {"stream_gap": 1})
+        row = next(x for x in self.scan()["activities"] if x["evidence"] == "launcher_receipt")
+        self.assertIsNone(row["usage"])
+
+    def test_duplicate_start_does_not_restart_observation_turn(self):
+        rows = self.good_stream()
+        rows.insert(2, {"type": "turn.started"})
+        value = self.stream(rows)
+        self.assertEqual((value["retained_turns"], value["limited_turns"]), (1, 1))
+        self.assertEqual(value["baselines"]["exec"]["samples"], 0)
+
+    def test_conflicting_thread_identity_does_not_rebind_launcher_or_observer(self):
+        rows = self.good_stream()
+        rows.insert(2, {"type": "thread.started", "thread_id": PARENT})
+        value = self.stream(rows)
+        self.assertEqual((value["retained_turns"], value["limited_turns"]), (1, 1))
+        row = next(x for x in self.scan()["activities"] if x["evidence"] == "launcher_receipt")
+        self.assertEqual(row["task_hash"], stable_hash(OTHER))
+        self.assertIsNone(row["usage"])
+
+    def test_duplicate_terminal_record_does_not_double_count_or_erase_usage(self):
+        rows = self.good_stream()
+        rows.append(rows[-1])
+        value = self.stream(rows)
+        self.assertEqual(value["observed_completed_calls"], 1)
+        self.assertEqual(value["baselines"]["exec"]["samples"], 1)
+        row = next(x for x in self.scan()["activities"] if x["evidence"] == "launcher_receipt")
+        self.assertEqual(row["usage"]["total"], 35)
+
+    def test_later_unfinished_turn_is_not_hidden_by_an_earlier_completion(self):
+        rows = self.good_stream()
+        rows += [{"type": "turn.started"}, {"type": "item.completed", "item": {
+            "id": "synthetic-later", "type": "command_execution", "exit_code": 0,
+            "command": "python3 -m unittest", "aggregated_output": "OK"}}]
+        value = self.stream(rows)
+        self.assertEqual((value["retained_turns"], value["limited_turns"]), (2, 1))
+        self.assertEqual(value["baselines"]["exec"]["samples"], 1)
+
+    def test_watch_repeated_unavailability_stops_with_bounded_backoff_and_one_snapshot(self):
+        from codex_run_budget.exec_activity_cli import run
+
+        args = SimpleNamespace(activity_action="watch", hours=24, limit=50, duration=0,
+                               interval=0.2, project=self.project, format="json",
+                               codex_home=self.home)
+        report = {"status": "unavailable", "activities": [], "issues": ["synthetic_unavailable"]}
+        output, error = StringIO(), StringIO()
+        with patch("codex_run_budget.exec_activity_cli.scan", return_value=report) as scan:
+            with patch("codex_run_budget.exec_activity_cli.time.sleep") as sleep:
+                with redirect_stdout(output), redirect_stderr(error):
+                    self.assertEqual(run(args, self.data), 1)
+        self.assertEqual(scan.call_count, 3)
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [0.4, 0.8])
+        self.assertEqual(output.getvalue().count('"status"'), 1)
+        self.assertIn("watch_stopped", error.getvalue())
 
     def test_bad_inherited_identity_does_not_block_and_ambiguous_usage_stays_unknown(self):
         fake = self.root / "synthetic-codex"
